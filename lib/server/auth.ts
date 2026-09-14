@@ -4,7 +4,7 @@ export type RequestUser = { id: string; nickname: string };
 
 const SESSION_COOKIE = "marketmate_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
-const PIN_ITERATIONS = 120_000;
+const PIN_ITERATIONS = 100_000;
 
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = "";
