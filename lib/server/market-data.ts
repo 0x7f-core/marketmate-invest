@@ -36,6 +36,11 @@ function asNumber(...values: unknown[]) {
   return 0;
 }
 
+function roundTo(value: number, digits: number) {
+  const scale = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * scale) / scale;
+}
+
 function kisConfig() {
   if (!env.KIS_APP_KEY || !env.KIS_APP_SECRET) throw new Error("KIS_NOT_CONFIGURED");
   return {
@@ -60,9 +65,97 @@ async function requestKisToken(): Promise<TokenCache> {
   return { token, expiresAt: Date.now() + expiresIn * 1_000 - 60_000 };
 }
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, character => character.charCodeAt(0));
+}
+
+async function tokenEncryptionKey() {
+  const { appSecret } = kisConfig();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(appSecret));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+async function encryptToken(token: string) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await tokenEncryptionKey(),
+    new TextEncoder().encode(token),
+  );
+  return { ciphertext: bytesToBase64(new Uint8Array(ciphertext)), iv: bytesToBase64(iv) };
+}
+
+async function decryptToken(ciphertext: string, iv: string) {
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(iv) },
+    await tokenEncryptionKey(),
+    base64ToBytes(ciphertext),
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
+async function readSharedKisToken(): Promise<TokenCache | null> {
+  if (!env.DB) return null;
+  const row = await env.DB.prepare(
+    "SELECT ciphertext,iv,expires_at AS expiresAt FROM provider_tokens WHERE provider='KIS'",
+  ).first<{ ciphertext: string; iv: string; expiresAt: number }>();
+  if (!row || row.expiresAt <= Date.now() || !row.ciphertext || !row.iv) return null;
+  try {
+    return { token: await decryptToken(row.ciphertext, row.iv), expiresAt: row.expiresAt };
+  } catch {
+    await env.DB.prepare("UPDATE provider_tokens SET expires_at=0 WHERE provider='KIS'").run();
+    return null;
+  }
+}
+
+async function waitForSharedKisToken() {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const shared = await readSharedKisToken();
+    if (shared) return shared;
+  }
+  throw new Error("KIS_AUTH_BUSY");
+}
+
+async function resolveKisToken(): Promise<TokenCache> {
+  const shared = await readSharedKisToken();
+  if (shared) return shared;
+  if (!env.DB) return requestKisToken();
+
+  const now = Date.now();
+  const lease = await env.DB.prepare(
+    `INSERT INTO provider_tokens (provider,ciphertext,iv,expires_at,refresh_started_at,updated_at)
+     VALUES ('KIS','','',0,?,?)
+     ON CONFLICT(provider) DO UPDATE SET refresh_started_at=excluded.refresh_started_at,updated_at=excluded.updated_at
+     WHERE provider_tokens.expires_at<=? AND provider_tokens.refresh_started_at<?`,
+  ).bind(now, now, now + 60_000, now - 30_000).run();
+
+  if ((lease.meta.changes ?? 0) !== 1) return waitForSharedKisToken();
+  try {
+    const fresh = await requestKisToken();
+    const encrypted = await encryptToken(fresh.token);
+    await env.DB.prepare(
+      "UPDATE provider_tokens SET ciphertext=?,iv=?,expires_at=?,refresh_started_at=0,updated_at=? WHERE provider='KIS' AND refresh_started_at=?",
+    ).bind(encrypted.ciphertext, encrypted.iv, fresh.expiresAt, Date.now(), now).run();
+    return fresh;
+  } catch (error) {
+    await env.DB.prepare(
+      "UPDATE provider_tokens SET refresh_started_at=0,updated_at=? WHERE provider='KIS' AND refresh_started_at=?",
+    ).bind(Date.now(), now).run();
+    throw error;
+  }
+}
+
 async function getKisToken() {
   if (tokenCache && tokenCache.expiresAt > Date.now()) return tokenCache.token;
-  tokenRequest ??= requestKisToken();
+  tokenRequest ??= resolveKisToken();
   try {
     tokenCache = await tokenRequest;
     return tokenCache.token;
@@ -125,11 +218,11 @@ async function kisOverseasQuote(symbol: string): Promise<LiveQuote> {
       const previousClose = asNumber(data.base);
       const exchangeRate = asNumber(data.t_rate);
       if (price <= 0 || previousClose <= 0 || exchangeRate <= 0) continue;
-      const change = price - previousClose;
+      const change = roundTo(price - previousClose, 6);
       return {
         market: "US", symbol, price,
         change,
-        changeRate: (change / previousClose) * 100,
+        changeRate: roundTo((change / previousClose) * 100, 4),
         currency: "USD",
         exchangeRate,
         timestamp: Date.now(),

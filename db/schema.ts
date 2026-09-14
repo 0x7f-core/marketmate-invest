@@ -107,6 +107,15 @@ export const quoteSnapshots = sqliteTable("quote_snapshots", {
   receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const providerTokens = sqliteTable("provider_tokens", {
+  provider: text("provider").primaryKey(),
+  ciphertext: text("ciphertext").notNull().default(""),
+  iv: text("iv").notNull().default(""),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull().default(0),
+  refreshStartedAt: integer("refresh_started_at", { mode: "timestamp_ms" }).notNull().default(0),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(0),
+});
+
 export const cashLedger = sqliteTable("cash_ledger", {
   id: text("id").primaryKey(),
   participantId: text("participant_id").notNull().references(() => participants.id),

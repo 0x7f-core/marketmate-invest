@@ -15,6 +15,13 @@
       "when": 1789364229804,
       "tag": "0001_solid_dark_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789364656616,
+      "tag": "0002_unique_dreaming_celestial",
+      "breakpoints": true
     }
   ]
 }
