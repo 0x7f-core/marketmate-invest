@@ -43,6 +43,13 @@
       "when": 1789387822268,
       "tag": "0005_opposite_madame_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789391725778,
+      "tag": "0006_absurd_psynapse",
+      "breakpoints": true
     }
   ]
 }

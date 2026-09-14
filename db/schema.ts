@@ -162,6 +162,12 @@ export const auditLogs = sqliteTable("audit_logs", {
   index("idx_audit_logs_actor_created").on(t.actorUserId, t.createdAt),
 ]);
 
+export const newsCache = sqliteTable("news_cache", {
+  key: text("key").primaryKey(),
+  items: text("items").notNull().default("[]"),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [index("idx_news_cache_updated_at").on(t.updatedAt)]);
+
 export const providerTokens = sqliteTable("provider_tokens", {
   provider: text("provider").primaryKey(),
   ciphertext: text("ciphertext").notNull().default(""),

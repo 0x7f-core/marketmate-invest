@@ -17,6 +17,18 @@ export type LiveQuote = {
   volume?: number;
 };
 
+export type MarketIndexQuote = {
+  id: string;
+  name: string;
+  market: Market;
+  price: number;
+  change: number;
+  rate: number;
+  unit: string;
+  source: "KIS" | "UPBIT";
+  timestamp: number;
+};
+
 type TokenCache = { token: string; expiresAt: number };
 type CachedQuote = { quote: LiveQuote; expiresAt: number };
 
@@ -31,6 +43,8 @@ let tokenCache: TokenCache | null = null;
 let tokenRequest: Promise<TokenCache> | null = null;
 const quoteCache = new Map<string, CachedQuote>();
 const quoteRequests = new Map<string, Promise<LiveQuote>>();
+let overviewCache: { quotes: MarketIndexQuote[]; expiresAt: number } | null = null;
+let overviewRequest: Promise<MarketIndexQuote[]> | null = null;
 
 function asNumber(...values: unknown[]) {
   for (const value of values) {
@@ -168,7 +182,7 @@ async function getKisToken() {
   }
 }
 
-async function kisGet(path: string, trId: string, params: Record<string, string>) {
+async function kisGetRoot(path: string, trId: string, params: Record<string, string>) {
   const { appKey, appSecret, baseUrl } = kisConfig();
   const url = new URL(path, baseUrl);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
@@ -184,7 +198,13 @@ async function kisGet(path: string, trId: string, params: Record<string, string>
   });
   if (!response.ok) throw new Error("KIS_QUOTE_FAILED");
   const root = await response.json() as Record<string, unknown>;
-  if (String(root.rt_cd ?? "0") !== "0" || !root.output) throw new Error("KIS_QUOTE_FAILED");
+  if (String(root.rt_cd ?? "0") !== "0") throw new Error("KIS_QUOTE_FAILED");
+  return root;
+}
+
+async function kisGet(path: string, trId: string, params: Record<string, string>) {
+  const root = await kisGetRoot(path, trId, params);
+  if (!root.output) throw new Error("KIS_QUOTE_FAILED");
   return root.output as Record<string, unknown>;
 }
 
@@ -260,6 +280,64 @@ async function upbitQuote(symbol: string): Promise<LiveQuote> {
     source: "UPBIT",
     open: asNumber(data.opening_price), high: asNumber(data.high_price), low: asNumber(data.low_price), volume: asNumber(data.acc_trade_volume_24h),
   };
+}
+
+async function kisDomesticIndex(id: "KOSPI" | "KOSDAQ", symbol: "0001" | "1001"): Promise<MarketIndexQuote> {
+  const data = await kisGet(
+    "/uapi/domestic-stock/v1/quotations/inquire-index-price",
+    "FHPUP02100000",
+    { FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: symbol },
+  );
+  const price = asNumber(data.bstp_nmix_prpr);
+  if (price <= 0) throw new Error("INVALID_QUOTE");
+  return {
+    id, name: id === "KOSPI" ? "코스피" : "코스닥", market: "KR", price,
+    change: asNumber(data.bstp_nmix_prdy_vrss), rate: asNumber(data.bstp_nmix_prdy_ctrt),
+    unit: "", source: "KIS", timestamp: Date.now(),
+  };
+}
+
+async function kisOverseasIndex(id: "SPX" | "COMP", name: string): Promise<MarketIndexQuote> {
+  const root = await kisGetRoot(
+    "/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
+    "FHKST03030200",
+    { FID_COND_MRKT_DIV_CODE: "N", FID_INPUT_ISCD: id, FID_HOUR_CLS_CODE: "0", FID_PW_DATA_INCU_YN: "Y" },
+  );
+  const primary = (Array.isArray(root.output1) ? root.output1[0] : root.output1) as Record<string, unknown> | undefined;
+  const series = (Array.isArray(root.output2) ? root.output2 : []) as Array<Record<string, unknown>>;
+  const latest = primary ?? series[series.length - 1];
+  const price = asNumber(latest?.ovrs_nmix_prpr);
+  if (price <= 0) throw new Error("INVALID_QUOTE");
+  return {
+    id, name, market: "US", price, change: asNumber(latest?.ovrs_nmix_prdy_vrss),
+    rate: asNumber(latest?.prdy_ctrt), unit: "", source: "KIS", timestamp: Date.now(),
+  };
+}
+
+async function bitcoinIndex(): Promise<MarketIndexQuote> {
+  const quote = await upbitQuote("KRW-BTC");
+  return { id: "BTC", name: "비트코인", market: "CRYPTO", price: quote.price, change: quote.change, rate: quote.changeRate, unit: "원", source: "UPBIT", timestamp: quote.timestamp };
+}
+
+async function fetchMarketOverview() {
+  const tasks = [
+    kisDomesticIndex("KOSPI", "0001"), kisDomesticIndex("KOSDAQ", "1001"),
+    kisOverseasIndex("SPX", "S&P 500"), kisOverseasIndex("COMP", "나스닥 종합"), bitcoinIndex(),
+  ];
+  const settled = await Promise.allSettled(tasks);
+  return settled.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+}
+
+export async function getMarketOverview() {
+  if (overviewCache && overviewCache.expiresAt > Date.now()) return overviewCache.quotes;
+  overviewRequest ??= fetchMarketOverview();
+  try {
+    const quotes = await overviewRequest;
+    if (quotes.length) overviewCache = { quotes, expiresAt: Date.now() + 4_000 };
+    return quotes;
+  } finally {
+    overviewRequest = null;
+  }
 }
 
 async function fetchLiveQuote(market: Market, symbol: string, exchange?: string) {

@@ -19,6 +19,24 @@ export async function POST(request: Request) {
       await auditLog(request, "admin.user_status", "user", body.userId, admin.id, { active: body.active }).catch(() => undefined);
       return Response.json({ ok: true });
     }
+    if (body.action === "delete_user" && body.userId) {
+      if (body.userId === admin.id) return Response.json({ error: "현재 관리자 계정은 삭제할 수 없습니다." }, { status: 409 });
+      const target = await env.DB!.prepare("SELECT id,nickname,role FROM users WHERE id=?").bind(body.userId).first<{id:string;nickname:string;role:string}>();
+      if (!target) throw new Error("NOT_FOUND");
+      if (target.role === "admin") return Response.json({ error: "관리자 계정은 삭제할 수 없습니다." }, { status: 409 });
+      const owned = await env.DB!.prepare("SELECT id FROM competitions WHERE owner_user_id=?").bind(target.id).all<{id:string}>();
+      for (const competition of owned.results) await deleteCompetition(competition.id);
+      const joined = await env.DB!.prepare("SELECT id FROM participants WHERE user_id=?").bind(target.id).all<{id:string}>();
+      for (const participant of joined.results) await deleteParticipant(participant.id);
+      await env.DB!.batch([
+        env.DB!.prepare("DELETE FROM watchlist_items WHERE user_id=?").bind(target.id),
+        env.DB!.prepare("DELETE FROM sessions WHERE user_id=?").bind(target.id),
+        env.DB!.prepare("UPDATE audit_logs SET actor_user_id=NULL WHERE actor_user_id=?").bind(target.id),
+        env.DB!.prepare("DELETE FROM users WHERE id=?").bind(target.id),
+      ]);
+      await auditLog(request, "admin.user_deleted", "user", target.id, admin.id, { nickname: target.nickname }).catch(() => undefined);
+      return Response.json({ ok: true });
+    }
     if (body.action === "competition_status" && body.competitionId && ["active", "ended"].includes(body.status ?? "")) {
       await env.DB!.prepare("UPDATE competitions SET status=? WHERE id=?").bind(body.status, body.competitionId).run();
       await auditLog(request, "admin.competition_status", "competition", body.competitionId, admin.id, { status: body.status }).catch(() => undefined);

@@ -5,8 +5,7 @@ import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safet
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
-    assertSameOrigin(request);
-    await enforceRateLimit(request, "competition_create", 10, 60 * 60 * 1000, user.id);
+    await enforceRateLimit(request, "competition_read", 120, 60 * 1000, user.id);
     const result = await env.DB!.prepare(
       `SELECT c.id, c.name, c.invite_code AS inviteCode, c.status,
               c.initial_cash_krw AS initialCashKrw, c.starts_at AS startsAt,
@@ -22,6 +21,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "competition_create", 10, 60 * 60 * 1000, user.id);
     const body = await request.json() as { name?: string; initialCashKrw?: number; startsAt?: number; endsAt?: number };
     const name = body.name?.trim().slice(0, 60) ?? "";
     const initialCashKrw = Math.round(Number(body.initialCashKrw));
