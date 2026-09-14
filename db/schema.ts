@@ -8,6 +8,8 @@ export const users = sqliteTable("users", {
   nicknameNormalized: text("nickname_normalized").notNull().default(""),
   pinHash: text("pin_hash").notNull().default(""),
   pinSalt: text("pin_salt").notNull().default(""),
+  role: text("role", { enum: ["member", "admin"] }).notNull().default("member"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   failedLoginCount: integer("failed_login_count").notNull().default(0),
   lockedUntil: integer("locked_until", { mode: "timestamp_ms" }).notNull().default(sql`0`),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

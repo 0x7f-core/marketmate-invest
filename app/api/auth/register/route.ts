@@ -17,8 +17,8 @@ export async function POST(request: Request) {
   const credentials = await hashPin(pin);
   try {
     await env.DB!.prepare(
-      `INSERT INTO users (id,email,nickname,nickname_normalized,pin_hash,pin_salt,failed_login_count,locked_until,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,0,0,?,?)`,
+      `INSERT INTO users (id,email,nickname,nickname_normalized,pin_hash,pin_salt,role,is_active,failed_login_count,locked_until,created_at,updated_at)
+       VALUES (?,?,?,?,?,?,'member',1,0,0,?,?)`,
     ).bind(id, `${id}@marketmate.local`, nickname, normalized, credentials.hash, credentials.salt, now, now).run();
   } catch (error) {
     if (String(error).includes("UNIQUE")) return Response.json({ error: "이미 사용 중인 닉네임입니다." }, { status: 409 });
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   return Response.json(
-    { user: { id, nickname } },
+    { user: { id, nickname, role: "member" } },
     { status: 201, headers: { "set-cookie": await createSession(id), "cache-control": "no-store" } },
   );
 }

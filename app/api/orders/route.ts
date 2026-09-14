@@ -1,12 +1,40 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { getLiveQuote, type Market } from "@/lib/server/market-data";
+import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { getMarketSession } from "@/lib/server/market-hours";
 
 type OrderBody = {
   participantId?: string; clientOrderId?: string; market?: Market; symbol?: string;
-  name?: string; exchange?: string; side?: "buy" | "sell"; orderType?: "market";
-  quantity?: number;
+  name?: string; exchange?: string; side?: "buy" | "sell"; orderType?: "market" | "limit";
+  quantity?: number; limitPrice?: number;
 };
+
+export async function GET(request: Request) {
+  try {
+    const user = await requireUser(request);
+    const participantId = new URL(request.url).searchParams.get("participantId");
+    if (!participantId) return Response.json({ error: "participantId가 필요합니다." }, { status: 400 });
+    const allowed = await env.DB!.prepare("SELECT 1 FROM participants WHERE id=? AND user_id=?").bind(participantId, user.id).first();
+    if (!allowed) throw new Error("FORBIDDEN");
+    const result = await env.DB!.prepare(`SELECT o.id,o.side,o.order_type AS orderType,o.quantity_micros AS quantityMicros,
+      o.limit_price_micros AS limitPriceMicros,o.filled_quantity_micros AS filledQuantityMicros,o.status,o.rejection_reason AS rejectionReason,
+      o.created_at AS createdAt,o.updated_at AS updatedAt,i.market,i.symbol,i.name,i.currency
+      FROM orders o JOIN instruments i ON i.id=o.instrument_id WHERE o.participant_id=? ORDER BY o.created_at DESC LIMIT 100`).bind(participantId).all();
+    return Response.json({ orders: result.results }, { headers: { "cache-control": "no-store" } });
+  } catch (error) { return apiError(error); }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const user = await requireUser(request);
+    const orderId = new URL(request.url).searchParams.get("orderId");
+    if (!orderId) return Response.json({ error: "orderId가 필요합니다." }, { status: 400 });
+    const result = await env.DB!.prepare(`UPDATE orders SET status='cancelled',updated_at=? WHERE id=? AND status='pending'
+      AND participant_id IN (SELECT id FROM participants WHERE user_id=?)`).bind(Date.now(), orderId, user.id).run();
+    if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "취소할 수 있는 대기 주문이 아닙니다." }, { status: 409 });
+    return Response.json({ ok: true });
+  } catch (error) { return apiError(error); }
+}
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +42,8 @@ export async function POST(request: Request) {
     const body = await request.json() as OrderBody;
     if (!body.participantId || !body.clientOrderId || !body.market || !body.symbol || !body.name ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
-        body.orderType !== "market" || !Number.isFinite(body.quantity) || Number(body.quantity) <= 0 || Number(body.quantity) > 1_000_000) {
+        !["market", "limit"].includes(body.orderType ?? "") || !Number.isFinite(body.quantity) || Number(body.quantity) <= 0 || Number(body.quantity) > 1_000_000 ||
+        (body.orderType === "limit" && (!Number.isFinite(body.limitPrice) || Number(body.limitPrice) <= 0))) {
       return Response.json({ error: "주문값을 확인해주세요." }, { status: 400 });
     }
     const participant = await env.DB!.prepare(
@@ -31,6 +60,8 @@ export async function POST(request: Request) {
     if (participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) {
       return Response.json({ error: "현재 주문 가능한 대회가 아닙니다." }, { status: 409 });
     }
+    const marketSession = getMarketSession(body.market);
+    if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
     const quote = await getLiveQuote(body.market, body.symbol.toUpperCase(), body.exchange);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
     if (Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
@@ -49,15 +80,33 @@ export async function POST(request: Request) {
     const fillId = crypto.randomUUID();
     const positionId = crypto.randomUUID();
     const isBuy = body.side === "buy";
-    const position = await env.DB!.prepare(
-      "SELECT quantity_micros AS quantityMicros,average_price_micros AS averagePriceMicros,realized_pnl_krw AS realizedPnlKrw FROM positions WHERE participant_id=? AND instrument_id=?"
-    ).bind(body.participantId, instrumentId).first<{quantityMicros:number;averagePriceMicros:number;realizedPnlKrw:number}>();
-    if (!isBuy && (!position || position.quantityMicros < quantityMicros)) return Response.json({ error: "보유수량이 부족합니다." }, { status: 409 });
-    if (isBuy && participant.cashKrw < tradeValueKrw) return Response.json({ error: "주문 가능 금액이 부족합니다." }, { status: 409 });
+    const limitPriceMicros = body.orderType === "limit" ? Math.round(Number(body.limitPrice) * 1_000_000) : null;
+    const marketable = body.orderType === "market" || (isBuy ? nativePriceMicros <= Number(limitPriceMicros) : nativePriceMicros >= Number(limitPriceMicros));
 
     await env.DB!.prepare(
       "INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,exchange=excluded.exchange,is_active=1"
     ).bind(instrumentId, body.market, body.symbol.toUpperCase(), body.name.slice(0, 80), quote.currency, body.exchange ?? body.market).run();
+    await persistQuoteSnapshot(quote);
+
+    const position = await env.DB!.prepare(
+      "SELECT quantity_micros AS quantityMicros,average_price_micros AS averagePriceMicros,realized_pnl_krw AS realizedPnlKrw FROM positions WHERE participant_id=? AND instrument_id=?"
+    ).bind(body.participantId, instrumentId).first<{quantityMicros:number;averagePriceMicros:number;realizedPnlKrw:number}>();
+    const reserved = await env.DB!.prepare(`SELECT
+      COALESCE(SUM(CASE WHEN side='buy' THEN (quantity_micros/1000000.0)*(limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0) ELSE 0 END),0) AS cashKrw,
+      COALESCE(SUM(CASE WHEN o.side='sell' AND o.instrument_id=? THEN o.quantity_micros ELSE 0 END),0) AS sellQuantityMicros
+      FROM orders o LEFT JOIN quote_snapshots q ON q.instrument_id=o.instrument_id WHERE o.participant_id=? AND o.status='pending'`)
+      .bind(instrumentId, body.participantId).first<{cashKrw:number;sellQuantityMicros:number}>();
+    const orderCheckValueKrw = body.orderType === "limit"
+      ? Number((BigInt(quantityMicros) * BigInt(Math.round(Number(body.limitPrice) * fxRate * 1_000_000)) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000))
+      : tradeValueKrw;
+    if (!isBuy && (!position || position.quantityMicros - Number(reserved?.sellQuantityMicros ?? 0) < quantityMicros)) return Response.json({ error: "주문 가능한 보유수량이 부족합니다." }, { status: 409 });
+    if (isBuy && participant.cashKrw - Number(reserved?.cashKrw ?? 0) < orderCheckValueKrw) return Response.json({ error: "주문 가능 금액이 부족합니다." }, { status: 409 });
+
+    if (!marketable) {
+      await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
+      return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice } }, { status: 201 });
+    }
 
     const expectedCash = participant.cashKrw;
     const nextCash = isBuy ? expectedCash - tradeValueKrw : expectedCash + tradeValueKrw;
@@ -75,7 +124,7 @@ export async function POST(request: Request) {
     const statements = [
       env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, body.participantId, expectedCash),
       env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, "market", quantityMicros, null, quantityMicros, "filled", null, now, now),
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, body.orderType, quantityMicros, limitPriceMicros, quantityMicros, "filled", null, now, now),
       env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
         SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, body.participantId, instrumentId, body.side, quantityMicros, nativePriceMicros, fxRateMicros, 0, now, orderId),
       env.DB!.prepare(`INSERT INTO positions (id,participant_id,instrument_id,quantity_micros,average_price_micros,realized_pnl_krw,updated_at)

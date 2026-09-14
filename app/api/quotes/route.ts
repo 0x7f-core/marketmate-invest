@@ -1,5 +1,6 @@
 import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { matchPendingOrders } from "@/lib/server/pending-orders";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
     const quotes = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     if (quotes.length === 0) return Response.json({ error: "실시간 시세를 불러오지 못했습니다." }, { status: 503 });
     await Promise.allSettled(quotes.map(persistQuoteSnapshot));
+    await Promise.allSettled(quotes.map(matchPendingOrders));
     return Response.json({ quotes, partial: quotes.length !== symbols.length }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }

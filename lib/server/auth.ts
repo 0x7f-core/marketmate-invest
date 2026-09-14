@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-export type RequestUser = { id: string; nickname: string };
+export type RequestUser = { id: string; nickname: string; role: "member" | "admin" };
 
 const SESSION_COOKIE = "marketmate_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -76,17 +76,17 @@ export async function getSessionUser(request: Request): Promise<RequestUser | nu
   const tokenHash = await sha256(token);
   const now = Date.now();
   const user = await env.DB!.prepare(
-    `SELECT u.id,u.nickname,s.expires_at AS expiresAt
+    `SELECT u.id,u.nickname,u.role,u.is_active AS isActive,s.expires_at AS expiresAt
      FROM sessions s JOIN users u ON u.id=s.user_id
      WHERE s.token_hash=?`,
-  ).bind(tokenHash).first<{ id: string; nickname: string; expiresAt: number }>();
-  if (!user || user.expiresAt <= now) {
+  ).bind(tokenHash).first<{ id: string; nickname: string; role: "member" | "admin"; isActive: number; expiresAt: number }>();
+  if (!user || !user.isActive || user.expiresAt <= now) {
     await env.DB!.prepare("DELETE FROM sessions WHERE token_hash=?").bind(tokenHash).run();
     return null;
   }
   await env.DB!.prepare("UPDATE sessions SET last_seen_at=? WHERE token_hash=? AND last_seen_at<?")
     .bind(now, tokenHash, now - 60 * 60 * 1000).run();
-  return { id: user.id, nickname: user.nickname };
+  return { id: user.id, nickname: user.nickname, role: user.role };
 }
 
 export async function deleteSession(request: Request) {
@@ -97,6 +97,12 @@ export async function deleteSession(request: Request) {
 export async function requireUser(request: Request): Promise<RequestUser> {
   const user = await getSessionUser(request);
   if (!user) throw new Error("AUTH_REQUIRED");
+  return user;
+}
+
+export async function requireAdmin(request: Request): Promise<RequestUser> {
+  const user = await requireUser(request);
+  if (user.role !== "admin") throw new Error("FORBIDDEN");
   return user;
 }
 

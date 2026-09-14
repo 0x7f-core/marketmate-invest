@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useState } from "react";
 import { OTPInputContext } from "input-otp";
-import { Bell, Home, LineChart, LogOut, Menu, Search, Settings, Star, Trophy, UserRound, X } from "lucide-react";
+import { Bell, DoorOpen, Home, LineChart, LogOut, Menu, Search, Settings, ShieldCheck, Star, Trophy, UserRound, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup } from "@/components/ui/input-otp";
@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 type Market = "KR" | "US" | "CRYPTO";
-type User = { id: string; nickname: string };
+type User = { id: string; nickname: string; role: "member" | "admin" };
 type Instrument = { market: Market; symbol: string; name: string; exchange: string; currency: "KRW" | "USD" };
 type Quote = Instrument & { price: number; change: number; rate: number; exchangeRate: number; volume?: string };
 type Competition = {
@@ -27,7 +27,7 @@ type LeaderboardRow = {
   fillCount: number; tradedInstrumentCount: number; recentSymbols?: string;
 };
 type Portfolio = {
-  account: { cashKrw: number; realizedPnlKrw: number; marketValueKrw: number; totalAssetKrw: number };
+  account: { cashKrw: number; reservedCashKrw: number; availableCashKrw: number; realizedPnlKrw: number; marketValueKrw: number; totalAssetKrw: number };
   positions: Array<{
     market: Market; symbol: string; name: string; currency: string; quantityMicros: number;
     averagePriceKrwMicros: number; realizedPnlKrw: number; currentPriceKrwMicros?: number;
@@ -43,6 +43,13 @@ type ParticipantActivity = {
   participant: { id: string; nickname: string };
   positions: Portfolio["positions"];
   fills: Fill[];
+};
+type Order = { id: string; side: "buy" | "sell"; orderType: "market" | "limit"; quantityMicros: number; limitPriceMicros?: number; filledQuantityMicros: number; status: string; rejectionReason?: string; createdAt: number; market: Market; symbol: string; name: string; currency: string };
+type MarketSession = { isOpen: boolean; label: string; notice: string };
+type AdminData = {
+  users: Array<{ id:string; nickname:string; role:string; isActive:number; createdAt:number; competitionCount:number; fillCount:number }>;
+  competitions: Array<{ id:string; name:string; inviteCode:string; status:string; ownerNickname:string; participantCount:number; fillCount:number }>;
+  participants: Array<{ id:string; competitionId:string; nickname:string; cashKrw:number; isOwner:number }>;
 };
 
 const DEFAULTS: Record<Market, Quote> = {
@@ -266,15 +273,67 @@ function ParticipantActivityDialog({ row, onClose }: { row: LeaderboardRow | nul
   </DialogContent></Dialog>;
 }
 
-function OrderPanel({ quote, participantId, onFilled }: { quote: Quote; participantId: string | null; onFilled: () => void }) {
-  const [quantity, setQuantity] = useState("1");
+function AdminDialog() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<AdminData | null>(null);
   const [status, setStatus] = useState("");
-  const estimatedKrw = quote.price * quote.exchangeRate * Number(quantity || 0);
+  const [pins, setPins] = useState({ currentPin: "", newPin: "" });
+  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async response => {
+    const result = await response.json() as AdminData & { error?: string };
+    if (!response.ok) throw new Error(result.error ?? "관리 데이터를 불러오지 못했습니다.");
+    setData(result);
+  }).catch(error => setStatus(error instanceof Error ? error.message : "오류가 발생했습니다.")), []);
+  useEffect(() => { if (open) void load(); }, [open, load]);
+  const action = async (payload: Record<string, unknown>, confirmText?: string) => {
+    if (confirmText && !window.confirm(confirmText)) return;
+    setStatus("처리 중...");
+    const response = await fetch("/api/admin/actions", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(payload) });
+    const result = await response.json() as { error?:string };
+    setStatus(response.ok ? "적용했습니다." : result.error ?? "처리하지 못했습니다.");
+    if (response.ok) void load();
+  };
+  const changePin = async () => {
+    const response = await fetch("/api/admin/pin", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(pins) });
+    const result = await response.json() as { error?:string };
+    setStatus(response.ok ? "관리자 PIN을 변경했습니다." : result.error ?? "변경하지 못했습니다.");
+    if (response.ok) setPins({ currentPin:"", newPin:"" });
+  };
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="admin-button"><ShieldCheck /> 관리자</Button></DialogTrigger><DialogContent className="admin-dialog sm:max-w-4xl">
+    <DialogHeader><DialogTitle>전체 관리자 센터</DialogTitle><DialogDescription>대회와 회원, 관리자 보안을 관리합니다.</DialogDescription></DialogHeader>
+    {status && <p className="admin-status">{status}</p>}
+    <Tabs defaultValue="competitions"><TabsList className="admin-tabs"><TabsTrigger value="competitions">대회</TabsTrigger><TabsTrigger value="users">회원</TabsTrigger><TabsTrigger value="security">보안</TabsTrigger></TabsList>
+      <TabsContent value="competitions" className="admin-list">{data?.competitions.map(item => <div key={item.id}><span><b>{item.name}</b><small>{item.ownerNickname} · {item.participantCount}명 · 체결 {item.fillCount}건 · {item.inviteCode}</small></span><span><button onClick={() => action({action:"competition_status",competitionId:item.id,status:item.status === "active" ? "ended" : "active"})}>{item.status === "active" ? "종료" : "재개"}</button><button className="danger" onClick={() => action({action:"delete_competition",competitionId:item.id}, `${item.name} 대회와 모든 모의투자 기록을 삭제할까요?`)}>삭제</button></span><div className="admin-members">{data.participants.filter(member => member.competitionId === item.id).map(member => <span key={member.id}>{member.nickname}{member.isOwner ? " (대회장)" : <button onClick={() => action({action:"remove_member",participantId:member.id}, `${member.nickname}님을 대회에서 내보낼까요?`)}>내보내기</button>}</span>)}</div></div>)}</TabsContent>
+      <TabsContent value="users" className="admin-list">{data?.users.map(item => <div key={item.id}><span><b>{item.nickname}{item.role === "admin" ? " · 관리자" : ""}</b><small>대회 {item.competitionCount}개 · 체결 {item.fillCount}건</small></span><button disabled={item.role === "admin"} onClick={() => action({action:"user_status",userId:item.id,active:!Boolean(item.isActive)})}>{item.isActive ? "이용 정지" : "활성화"}</button></div>)}</TabsContent>
+      <TabsContent value="security" className="admin-security"><p>초기 PIN 0011은 즉시 변경을 권장합니다.</p><Input value={pins.currentPin} onChange={event => setPins(value => ({...value,currentPin:event.target.value.replace(/\D/g, "").slice(0,4)}))} placeholder="현재 PIN" inputMode="numeric" /><Input value={pins.newPin} onChange={event => setPins(value => ({...value,newPin:event.target.value.replace(/\D/g, "").slice(0,4)}))} placeholder="새 PIN" inputMode="numeric" /><Button onClick={changePin} disabled={pins.currentPin.length !== 4 || pins.newPin.length !== 4}>PIN 변경</Button></TabsContent>
+    </Tabs>
+  </DialogContent></Dialog>;
+}
+
+function OrderPanel({ quote, participantId, availableCashKrw, heldQuantityMicros, session, onFilled }: { quote: Quote; participantId: string | null; availableCashKrw: number; heldQuantityMicros: number; session: MarketSession; onFilled: () => void }) {
+  const [quantity, setQuantity] = useState("1");
+  const [orderType, setOrderType] = useState<"market" | "limit">("market");
+  const [limitPrice, setLimitPrice] = useState("");
+  const [status, setStatus] = useState("");
+  const [orders, setOrders] = useState<Order[]>([]);
+  const effectivePrice = orderType === "limit" ? Number(limitPrice || 0) : quote.price;
+  const estimatedKrw = effectivePrice * quote.exchangeRate * Number(quantity || 0);
   const changeQuantity = (value: string) => {
     if (quote.market !== "CRYPTO") return setQuantity(value.replace(/\D/g, ""));
     const normalized = value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
     const [whole, decimal = ""] = normalized.split(".");
     setQuantity(normalized.includes(".") ? `${whole}.${decimal.slice(0, 6)}` : whole);
+  };
+  const loadOrders = useCallback(() => {
+    if (!participantId) return setOrders([]);
+    fetch(`/api/orders?participantId=${encodeURIComponent(participantId)}`, { cache:"no-store" }).then(async response => response.ok ? await response.json() as {orders:Order[]} : null).then(result => setOrders(result?.orders ?? [])).catch(() => undefined);
+  }, [participantId]);
+  useEffect(() => { const timer = setTimeout(loadOrders, 0); return () => clearTimeout(timer); }, [loadOrders, quote.price]);
+  useEffect(() => { const timer = setTimeout(() => { if (quote.price) setLimitPrice(String(quote.price)); }, 0); return () => clearTimeout(timer); }, [quote.market, quote.symbol, quote.price]);
+  const sizeByPercent = (side: "buy" | "sell", percent: number) => {
+    if (!quote.price) return;
+    const raw = side === "buy" ? availableCashKrw * percent / (effectivePrice * quote.exchangeRate) : heldQuantityMicros / 1_000_000 * percent;
+    const sized = quote.market === "CRYPTO" ? Math.floor(raw * 1_000_000) / 1_000_000 : Math.floor(raw);
+    setQuantity(String(Math.max(0, sized)));
   };
   const submit = async (side: "buy" | "sell") => {
     if (!participantId) return setStatus("먼저 대회를 만들거나 참가해주세요.");
@@ -282,22 +341,27 @@ function OrderPanel({ quote, participantId, onFilled }: { quote: Quote; particip
     setStatus("실시간 시세를 다시 확인하고 있습니다...");
     const response = await fetch("/api/orders", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ participantId, clientOrderId: crypto.randomUUID(), market: quote.market, symbol: quote.symbol, name: quote.name, exchange: quote.exchange, side, orderType: "market", quantity: Number(quantity) }),
+      body: JSON.stringify({ participantId, clientOrderId: crypto.randomUUID(), market: quote.market, symbol: quote.symbol, name: quote.name, exchange: quote.exchange, side, orderType, quantity: Number(quantity), limitPrice: orderType === "limit" ? Number(limitPrice) : undefined }),
     });
-    const result = await response.json() as { error?: string };
-    setStatus(response.ok ? "모의주문이 현재 시세로 체결되었습니다." : result.error ?? "주문을 처리하지 못했습니다.");
-    if (response.ok) onFilled();
+    const result = await response.json() as { error?: string; order?: {status?:string} };
+    setStatus(response.ok ? result.order?.status === "pending" ? "지정가 대기 주문을 접수했습니다." : "모의주문이 현재 시세로 체결되었습니다." : result.error ?? "주문을 처리하지 못했습니다.");
+    if (response.ok) { onFilled(); loadOrders(); }
   };
+  const cancel = async (id:string) => { const response = await fetch(`/api/orders?orderId=${encodeURIComponent(id)}`, {method:"DELETE"}); setStatus(response.ok ? "대기 주문을 취소했습니다." : "주문을 취소하지 못했습니다."); loadOrders(); };
   return (
     <section className="panel order-panel"><Tabs defaultValue="buy"><TabsList variant="line" className="order-tabs"><TabsTrigger value="buy" className="buy-tab">매수</TabsTrigger><TabsTrigger value="sell" className="sell-tab">매도</TabsTrigger></TabsList>
       {(["buy", "sell"] as const).map(side => <TabsContent value={side} key={side} className="order-form">
-        <div className="available"><span>선택 종목</span><strong>{quote.name}</strong></div>
-        <label>주문 유형<select aria-label="주문 유형"><option>시장가</option></select></label>
+        <div className="available"><span>{side === "buy" ? "주문 가능 현금" : "보유 수량"}</span><strong>{side === "buy" ? formatKrw(availableCashKrw) : `${formatQuantity(heldQuantityMicros)}${quote.market === "CRYPTO" ? "개" : "주"}`}</strong></div>
+        <div className={session.isOpen ? "session open" : "session closed"}>{session.isOpen ? "●" : "○"} {session.label}</div>
+        <label>주문 유형<select aria-label="주문 유형" value={orderType} onChange={event => setOrderType(event.target.value as "market" | "limit")}><option value="market">시장가</option><option value="limit">지정가</option></select></label>
+        {orderType === "limit" && <label>지정 가격<div className="number-input"><input value={limitPrice} onChange={event => setLimitPrice(event.target.value.replace(/[^\d.]/g, ""))} inputMode="decimal" /><span>{quote.currency}</span></div></label>}
         <label>수량<div className="number-input"><input value={quantity} onChange={event => changeQuantity(event.target.value)} inputMode={quote.market === "CRYPTO" ? "decimal" : "numeric"} /><span>{quote.market === "CRYPTO" ? "개" : "주"}</span></div></label>
+        <div className="size-buttons">{[[.25,"25%"],[.5,"50%"],[.75,"75%"],[1,"최대"]] .map(([percent,label]) => <button key={label} onClick={() => sizeByPercent(side, Number(percent))}>{label}</button>)}</div>
         {quote.currency === "USD" && <div className="available"><span>적용 환율</span><strong>{quote.exchangeRate > 1 ? `${quote.exchangeRate.toLocaleString("ko-KR")}원/USD` : "시세 조회 시 적용"}</strong></div>}
         <div className="order-total"><span>예상 주문금액</span><strong>{formatKrw(estimatedKrw)}</strong></div>
-        <Button onClick={() => submit(side)} className={side === "buy" ? "order-buy" : "order-sell"}>{quote.name} {side === "buy" ? "매수" : "매도"}</Button>
+        <Button disabled={!session.isOpen && quote.market !== "CRYPTO"} onClick={() => submit(side)} className={side === "buy" ? "order-buy" : "order-sell"}>{session.isOpen || quote.market === "CRYPTO" ? `${quote.name} ${side === "buy" ? "매수" : "매도"}` : "장 운영시간이 아닙니다"}</Button>
         {status && <p className="order-status" role="status">{status}</p>}<p className="simulation-note">실제 증권 주문은 전송되지 않습니다.</p>
+        {orders.some(order => order.status === "pending") && <div className="pending-orders"><b>대기 주문</b>{orders.filter(order => order.status === "pending").slice(0,5).map(order => <div key={order.id}><span>{order.name} · {order.side === "buy" ? "매수" : "매도"} {formatQuantity(order.quantityMicros)} @ {((order.limitPriceMicros ?? 0)/1_000_000).toLocaleString()}</span><button onClick={() => cancel(order.id)}>취소</button></div>)}</div>}
       </TabsContent>)}</Tabs></section>
   );
 }
@@ -316,6 +380,7 @@ export default function TradingDashboard() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [selectedParticipant, setSelectedParticipant] = useState<LeaderboardRow | null>(null);
+  const [marketSession, setMarketSession] = useState<MarketSession>({ isOpen: market === "CRYPTO", label: "확인 중", notice: "거래시간을 확인하고 있습니다." });
   const [leaderboardRevision, setLeaderboardRevision] = useState(0);
   const activeCompetition = competitions.find(item => item.id === competitionId) ?? competitions[0] ?? null;
   const participantId = activeCompetition?.participantId ?? null;
@@ -368,40 +433,56 @@ export default function TradingDashboard() {
     return () => { active = false; clearInterval(timer); };
   }, [auth, selected.market, selected.symbol, selected.exchange]);
 
+  useEffect(() => {
+    if (!auth || auth === "loading") return;
+    const load = () => fetch(`/api/market-status?market=${market}`, { cache:"no-store" }).then(async response => response.ok ? await response.json() as MarketSession : null).then(value => value && setMarketSession(value)).catch(() => undefined);
+    void load();
+    const timer = setInterval(load, 30_000);
+    return () => clearInterval(timer);
+  }, [auth, market]);
+
   const chooseInstrument = (instrument: Instrument) => { setMarket(instrument.market); setSelected({ ...instrument, price: 0, change: 0, rate: 0, exchangeRate: 1 }); };
   const changeMarket = (next: Market) => { setMarket(next); setSelected(DEFAULTS[next]); };
   const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); setAuth(null); setCompetitions([]); };
   const handleFilled = () => { loadAccount(); setLeaderboardRevision(value => value + 1); };
+  const leaveCompetition = async () => {
+    if (!activeCompetition || !window.confirm(`${activeCompetition.name} 대회에서 나갈까요? 내 모의투자 기록이 삭제됩니다.`)) return;
+    const response = await fetch(`/api/competitions/leave?competitionId=${encodeURIComponent(activeCompetition.id)}`, { method:"DELETE" });
+    const result = await response.json() as { error?:string };
+    if (!response.ok) return window.alert(result.error ?? "대회에서 나가지 못했습니다.");
+    loadCompetitions(); setPortfolio(null); setLeaderboard([]);
+  };
 
   const assets = portfolio?.account.totalAssetKrw ?? myRank?.totalAssetKrw ?? 0;
   const initial = activeCompetition?.initialCashKrw ?? 0;
   const rate = returnRate(assets, initial);
   const unrealizedPnl = portfolio?.positions.reduce((sum, position) => sum + Number(position.unrealizedPnlKrw ?? 0), 0) ?? 0;
+  const selectedHolding = portfolio?.positions.find(position => position.market === selected.market && position.symbol === selected.symbol)?.quantityMicros ?? 0;
 
   if (auth === "loading") return <main className="auth-shell"><div className="auth-loading">마켓메이트를 여는 중...</div></main>;
   if (!auth) return <AuthScreen onAuthenticated={setAuth} />;
 
   return (
     <div className="site-shell">
-      <header className="desktop-header"><div className="header-top"><a className="brand" href="#"><span>MM</span><b>마켓메이트</b></a><SearchBox onSelect={chooseInstrument} /><div className="header-actions"><button aria-label="알림"><Bell /></button><JoinDialog onChanged={loadCompetitions} /><span className="profile-name">{auth.nickname}</span><button aria-label="로그아웃" onClick={logout}><LogOut /></button></div></div>
+      <header className="desktop-header"><div className="header-top"><a className="brand" href="#"><span>MM</span><b>마켓메이트</b></a><SearchBox onSelect={chooseInstrument} /><div className="header-actions"><button aria-label="알림"><Bell /></button>{auth.role === "admin" && <AdminDialog />}<JoinDialog onChanged={loadCompetitions} /><span className="profile-name">{auth.nickname}</span><button aria-label="로그아웃" onClick={logout}><LogOut /></button></div></div>
         <nav className="primary-nav" aria-label="주 메뉴">{["홈", "국내증시", "미국증시", "코인", "뉴스", "모의투자대회"].map((item, index) => <button className={index === 0 ? "active" : ""} key={item}>{item}</button>)}</nav><MarketStrip /></header>
       <header className="mobile-header"><div><button aria-label="메뉴"><Menu /></button><a className="brand" href="#"><span>MM</span><b>마켓메이트</b></a><button aria-label="로그아웃" onClick={logout}><LogOut /></button></div><SearchBox onSelect={chooseInstrument} /><MarketStrip /></header>
 
       <main className="dashboard">
-        <aside className="left-rail"><section className="panel contest-card"><div className="panel-title"><span><Trophy />{activeCompetition?.name ?? "참가 중인 대회 없음"}</span><button aria-label="대회 설정"><Settings /></button></div>
+        <aside className="left-rail"><section className="panel contest-card"><div className="panel-title"><span><Trophy />{activeCompetition?.name ?? "참가 중인 대회 없음"}</span>{activeCompetition ? <button aria-label="대회 나가기" title="대회 나가기" onClick={leaveCompetition}><DoorOpen /></button> : <button aria-label="대회 설정"><Settings /></button>}</div>
           {competitions.length > 1 && <select className="competition-select" value={activeCompetition?.id} onChange={event => setCompetitionId(event.target.value)}>{competitions.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}
           <strong className="my-rank">{myRank ? `${myRank.rank}위` : "-"} <small>/ {leaderboard.length}명</small></strong><div className="rank-progress"><i style={{ width: leaderboard.length && myRank ? `${Math.max(8, 100 - (myRank.rank - 1) / leaderboard.length * 100)}%` : "0%" }} /></div><div className="contest-meta"><span>{activeCompetition ? `초대 ${activeCompetition.inviteCode}` : "대회를 만들어보세요"}</span><span>수익률 <b className={rate >= 0 ? "up" : "down"}>{rate >= 0 ? "+" : ""}{rate.toFixed(2)}%</b></span></div></section>
           <section className="panel watchlist"><div className="panel-title"><span><Star />빠른 종목</span><button>전 종목 검색</button></div>{Object.values(DEFAULTS).map(item => <button className="watch-row" onClick={() => chooseInstrument(item)} key={item.symbol}><span><b>{item.name}</b><small>{item.symbol}</small></span><span><strong>{item.market}</strong><em>{item.exchange}</em></span></button>)}</section></aside>
 
         <div className="main-column"><div className="market-selector" role="tablist" aria-label="시장 선택">{([["KR", "국내"], ["US", "미국"], ["CRYPTO", "코인"]] as const).map(([value, label]) => <button role="tab" aria-selected={market === value} className={market === value ? "active" : ""} onClick={() => changeMarket(value)} key={value}>{label}</button>)}</div>
-          <div className="mobile-contest-entry"><span><Trophy /><b>{activeCompetition?.name ?? "대회에 참가하세요"}</b><small>{myRank ? `현재 ${myRank.rank}위 · 수익률 ${rate.toFixed(2)}%` : "초대코드로 친구 대회 참가"}</small></span><JoinDialog onChanged={loadCompetitions} /></div>
+          <div className="mobile-contest-entry"><span><Trophy /><b>{activeCompetition?.name ?? "대회에 참가하세요"}</b><small>{myRank ? `현재 ${myRank.rank}위 · 수익률 ${rate.toFixed(2)}%` : "초대코드로 친구 대회 참가"}</small></span>{activeCompetition && <button className="leave-button" onClick={leaveCompetition}><DoorOpen /> 나가기</button>}<JoinDialog onChanged={loadCompetitions} /></div>
           <section className="panel quote-hero"><div className="quote-heading"><div><span className="market-badge">{selected.market}</span><small>{selected.symbol} · {selected.exchange}</small><h1>{selected.name}<button aria-label="관심종목 추가"><Star /></button></h1></div><span className={quoteStatus === "live" ? "live-pill" : "live-pill pending"}><i />{quoteStatus === "live" ? "실시간" : quoteStatus === "loading" ? "확인 중" : "시세 지연"}</span></div>
             <div className="quote-price"><strong>{formatPrice(selected)}</strong>{selected.price > 0 && <span className={selected.rate >= 0 ? "up" : "down"}>{selected.rate >= 0 ? "▲" : "▼"} {Math.abs(selected.change).toLocaleString()} ({selected.rate >= 0 ? "+" : ""}{selected.rate.toFixed(2)}%)</span>}</div>
             <div className="quote-stats"><span>시장 <b>{selected.exchange}</b></span><span>통화 <b>{selected.currency}</b></span><span>종목코드 <b>{selected.symbol}</b></span><span>시세원 <b>{selected.market === "CRYPTO" ? "Upbit" : "한국투자증권"}</b></span></div><div className="main-chart"><MiniChart positive={selected.rate >= 0} /></div><div className="chart-period">{["1일", "1주", "1개월", "3개월", "1년"].map((item, index) => <button className={index === 0 ? "active" : ""} key={item}>{item}</button>)}</div></section>
 
-          <div className="mobile-order"><OrderPanel quote={selected} participantId={participantId} onFilled={handleFilled} /></div>
+          <div className="mobile-order"><OrderPanel quote={selected} participantId={participantId} availableCashKrw={portfolio?.account.availableCashKrw ?? 0} heldQuantityMicros={selectedHolding} session={marketSession} onFilled={handleFilled} /></div>
 
-          <section className="panel holdings"><div className="section-heading"><h2>내 투자현황</h2><button onClick={loadAccount}>새로고침</button></div><div className="asset-summary"><span>총 자산<strong>{formatKrw(assets)}</strong></span><span>평가손익<strong className={unrealizedPnl >= 0 ? "up" : "down"}>{formatKrw(unrealizedPnl)}</strong></span><span>실현손익<strong className={(portfolio?.account.realizedPnlKrw ?? 0) >= 0 ? "up" : "down"}>{formatKrw(portfolio?.account.realizedPnlKrw ?? 0)}</strong></span><span>수익률<strong className={rate >= 0 ? "up" : "down"}>{rate >= 0 ? "+" : ""}{rate.toFixed(2)}%</strong></span></div>
+          <section className="panel holdings"><div className="section-heading"><h2>내 투자현황</h2><button onClick={loadAccount}>새로고침</button></div><div className="asset-summary"><span>총 자산<strong>{formatKrw(assets)}</strong></span><span>주문 가능 현금<strong>{formatKrw(portfolio?.account.availableCashKrw ?? 0)}</strong></span><span>평가손익<strong className={unrealizedPnl >= 0 ? "up" : "down"}>{formatKrw(unrealizedPnl)}</strong></span><span>실현손익<strong className={(portfolio?.account.realizedPnlKrw ?? 0) >= 0 ? "up" : "down"}>{formatKrw(portfolio?.account.realizedPnlKrw ?? 0)}</strong></span><span>수익률<strong className={rate >= 0 ? "up" : "down"}>{rate >= 0 ? "+" : ""}{rate.toFixed(2)}%</strong></span></div>
             <Table><TableHeader><TableRow><TableHead>종목</TableHead><TableHead>보유</TableHead><TableHead>평균단가</TableHead><TableHead>평가금액</TableHead><TableHead>평가손익</TableHead></TableRow></TableHeader><TableBody>{portfolio?.positions.length ? portfolio.positions.map(position => <TableRow key={`${position.market}:${position.symbol}`}><TableCell>{position.name}<small className="position-symbol">{position.symbol}</small></TableCell><TableCell>{formatQuantity(position.quantityMicros)}</TableCell><TableCell>{formatKrw(position.averagePriceKrwMicros / 1_000_000)}</TableCell><TableCell>{position.currentPriceKrwMicros ? formatKrw(position.marketValueKrw ?? 0) : "시세 대기"}</TableCell><TableCell className={(position.unrealizedPnlKrw ?? 0) >= 0 ? "up" : "down"}>{position.currentPriceKrwMicros ? formatKrw(position.unrealizedPnlKrw ?? 0) : "-"}</TableCell></TableRow>) : <TableRow><TableCell colSpan={5} className="empty-cell">{participantId ? "아직 보유한 종목이 없습니다." : "대회에 참가하면 투자현황이 표시됩니다."}</TableCell></TableRow>}</TableBody></Table></section>
 
           <section className="panel trade-history"><div className="section-heading"><h2>내 체결내역</h2><span>{portfolio?.fills.length ?? 0}건</span></div>{portfolio?.fills.length ? portfolio.fills.slice(0, 30).map(fill => <div className="trade-row" key={fill.id}><span><b>{fill.name}</b><small>{fill.market} · {fill.symbol} · {formatDateTime(fill.executedAt)}</small></span><span><b className={fill.side === "buy" ? "up" : "down"}>{fill.side === "buy" ? "매수" : "매도"} {formatQuantity(fill.quantityMicros)}{fill.market === "CRYPTO" ? "개" : "주"}</b><small>{formatKrw(fillValueKrw(fill))}</small></span></div>) : <p className="empty-ranking">아직 체결된 모의주문이 없습니다.</p>}</section>
@@ -409,10 +490,11 @@ export default function TradingDashboard() {
           <section className="panel mobile-ranking"><div className="section-heading"><h2>대회 순위</h2><span>{leaderboard.length}명</span></div>{leaderboard.length ? leaderboard.slice(0, 10).map(row => <button className="compact-rank" onClick={() => setSelectedParticipant(row)} key={row.participantId}><b>{row.rank}</b><span>{row.nickname}<small>{row.recentSymbols || "거래 없음"}</small></span><strong className={returnRate(row.totalAssetKrw, row.initialCashKrw) >= 0 ? "up" : "down"}>{returnRate(row.totalAssetKrw, row.initialCashKrw).toFixed(2)}%</strong></button>) : <p className="empty-ranking">대회를 만들거나 초대코드로 참가해주세요.</p>}</section>
         </div>
 
-        <aside className="right-rail"><OrderPanel quote={selected} participantId={participantId} onFilled={handleFilled} /><section className="panel leaderboard"><div className="section-heading"><h2>실시간 순위</h2><span>{leaderboard.length}명</span></div>{leaderboard.length ? leaderboard.slice(0, 20).map(row => { const rowRate = returnRate(row.totalAssetKrw, row.initialCashKrw); return <button onClick={() => setSelectedParticipant(row)} className={row.participantId === participantId ? "rank-row mine" : "rank-row"} key={row.participantId}><b>{row.rank}</b><span><strong>{row.nickname}</strong><small>{row.recentSymbols || "거래 없음"}</small></span><span><em className={rowRate >= 0 ? "up" : "down"}>{rowRate >= 0 ? "+" : ""}{rowRate.toFixed(2)}%</em><small>{formatKrw(row.totalAssetKrw)}</small></span></button>; }) : <p className="empty-ranking">참가 중인 대회가 없습니다.</p>}</section><section className="panel news-list"><div className="section-heading"><h2>주요 뉴스</h2><button>더보기</button></div>{news.map(item => <article key={item[0]}><a href="#">{item[0]}</a><span>{item[1]} · {item[2]}</span></article>)}</section></aside>
+        <aside className="right-rail"><OrderPanel quote={selected} participantId={participantId} availableCashKrw={portfolio?.account.availableCashKrw ?? 0} heldQuantityMicros={selectedHolding} session={marketSession} onFilled={handleFilled} /><section className="panel leaderboard"><div className="section-heading"><h2>실시간 순위</h2><span>{leaderboard.length}명</span></div>{leaderboard.length ? leaderboard.slice(0, 20).map(row => { const rowRate = returnRate(row.totalAssetKrw, row.initialCashKrw); return <button onClick={() => setSelectedParticipant(row)} className={row.participantId === participantId ? "rank-row mine" : "rank-row"} key={row.participantId}><b>{row.rank}</b><span><strong>{row.nickname}</strong><small>{row.recentSymbols || "거래 없음"}</small></span><span><em className={rowRate >= 0 ? "up" : "down"}>{rowRate >= 0 ? "+" : ""}{rowRate.toFixed(2)}%</em><small>{formatKrw(row.totalAssetKrw)}</small></span></button>; }) : <p className="empty-ranking">참가 중인 대회가 없습니다.</p>}</section><section className="panel news-list"><div className="section-heading"><h2>주요 뉴스</h2><button>더보기</button></div>{news.map(item => <article key={item[0]}><a href="#">{item[0]}</a><span>{item[1]} · {item[2]}</span></article>)}</section></aside>
       </main>
 
       <ParticipantActivityDialog row={selectedParticipant} onClose={() => setSelectedParticipant(null)} />
+      {auth.role === "admin" && <div className="mobile-admin"><AdminDialog /></div>}
 
       <nav className="mobile-bottom" aria-label="모바일 메뉴">{[[Home, "홈"], [Star, "관심"], [LineChart, "시세"], [Trophy, "대회"], [UserRound, "MY"]].map(([Icon, label], index) => { const Component = Icon as typeof Home; return <button className={index === 0 ? "active" : ""} key={label as string}><Component /><span>{label as string}</span></button>; })}</nav>
     </div>
