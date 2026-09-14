@@ -1,0 +1,65 @@
+# 마켓메이트
+
+친구들과 국내주식·미국주식·코인의 실제 시세를 기준으로 겨루는 모의투자 대회 웹앱입니다. 외부 API는 시세 조회에만 사용하며 실제 주문 API는 호출하지 않습니다.
+
+## 구조
+
+```
+브라우저 (PC 전용 3열 UI / 모바일 전용 탭 UI)
+  └─ ChatGPT Sites Worker
+      ├─ 참가 인증: Sites의 ChatGPT 사용자 헤더
+      ├─ 대회·주문·체결·포트폴리오·순위 API
+      ├─ Toss Securities 시세 어댑터 (서버 전용 Secrets)
+      ├─ Upbit 공개 시세 어댑터
+      └─ D1
+          ├─ users / competitions / participants
+          ├─ instruments / watchlist_items / quote_snapshots
+          └─ orders / fills / positions / cash_ledger
+```
+
+## D1 데이터 모델
+
+- `users`: Sites 인증 사용자와 닉네임
+- `competitions`: 대회 기간, 시작 자금, 초대코드, 상태
+- `participants`: 대회별 참가자와 가상 현금
+- `instruments`: 국내·미국·코인 종목 마스터
+- `orders`: 멱등키가 포함된 모의 주문 원장
+- `fills`: 실제 시세로 계산된 모의 체결
+- `positions`: 보유수량, 원화 환산 평균단가, 실현손익
+- `cash_ledger`: 모든 가상현금 변동의 감사 원장
+- `quote_snapshots`: 순위 계산용 마지막 검증 시세
+- `watchlist_items`: 사용자별 관심종목
+
+금액은 원 단위 정수, 수량과 가격은 1/1,000,000 단위 정수로 저장해 부동소수점 오차를 피합니다. 마이그레이션은 `drizzle/`에 있으며 런타임에서 테이블을 임의 생성하지 않습니다.
+
+## API
+
+- `GET /api/quotes?market=KR|US|CRYPTO&symbols=...`
+- `GET|POST /api/competitions`
+- `POST /api/competitions/join`
+- `POST /api/orders` — 시장가 모의체결
+- `GET /api/portfolio?participantId=...`
+- `GET /api/leaderboard?competitionId=...`
+
+주문 API는 현재 사용자와 참가자 소유권, 대회 기간, 보유수량/가상현금, 시세 신선도, 중복 주문키를 서버에서 검증합니다. 시세 제공자가 실패하거나 시세가 지연되면 체결하지 않습니다.
+
+## Sites 환경값
+
+다음 값은 Sites 런타임 설정에 저장합니다. Key/Secret은 반드시 secret으로 표시하고 `NEXT_PUBLIC_` 접두사를 사용하지 않습니다.
+
+- `TOSS_SECURITIES_API_KEY` (secret)
+- `TOSS_SECURITIES_API_SECRET` (secret)
+- `TOSS_SECURITIES_BASE_URL`
+- `TOSS_SECURITIES_TOKEN_URL`
+- `USD_KRW_RATE` — 미국주식 원화 평가/체결 환산값
+
+Upbit 현재가는 서버에서 공개 REST API로 조회하므로 별도 키가 필요하지 않습니다.
+
+## 개발
+
+```bash
+pnpm run db:generate
+pnpm run build
+```
+
+ChatGPT Sites가 `.openai/hosting.json`의 `DB` 바인딩을 실제 D1에 연결하고 배포 시 Drizzle 마이그레이션을 적용합니다.
