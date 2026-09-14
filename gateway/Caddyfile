@@ -1,8 +1,0 @@
-{$GATEWAY_DOMAIN} {
-  encode zstd gzip
-  reverse_proxy gateway:8788
-  header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains"
-    -Server
-  }
-}
