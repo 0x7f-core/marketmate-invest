@@ -7,7 +7,7 @@
 ```
 브라우저 (PC 전용 3열 UI / 모바일 전용 탭 UI)
   └─ ChatGPT Sites Worker
-      ├─ 참가 인증: Sites의 ChatGPT 사용자 헤더
+      ├─ 참가 인증: 고유 닉네임 + 숫자 PIN 4자리
       ├─ 대회·주문·체결·포트폴리오·순위 API
       ├─ 한국투자증권 Open API 시세 어댑터 (서버 전용 Secrets)
       ├─ Upbit 공개 시세 어댑터
@@ -19,7 +19,8 @@
 
 ## D1 데이터 모델
 
-- `users`: Sites 인증 사용자와 닉네임
+- `users`: 고유 닉네임, 암호화된 PIN 검증값, 로그인 잠금 상태
+- `sessions`: 30일 만료 로그인 세션
 - `competitions`: 대회 기간, 시작 자금, 초대코드, 상태
 - `participants`: 대회별 참가자와 가상 현금
 - `instruments`: 국내·미국·코인 종목 마스터
@@ -34,6 +35,11 @@
 
 ## API
 
+- `POST /api/auth/register` — 닉네임과 PIN으로 가입
+- `POST /api/auth/login` — 닉네임과 PIN으로 로그인
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
+- `GET /api/instruments/search?q=...&market=KR|US|CRYPTO`
 - `GET /api/quotes?market=KR|US|CRYPTO&symbols=...`
 - `GET|POST /api/competitions`
 - `POST /api/competitions/join`
@@ -42,6 +48,16 @@
 - `GET /api/leaderboard?competitionId=...`
 
 주문 API는 현재 사용자와 참가자 소유권, 대회 기간, 보유수량/가상현금, 시세 신선도, 중복 주문키를 서버에서 검증합니다. 시세 제공자가 실패하거나 시세가 지연되면 체결하지 않습니다.
+
+닉네임은 공백과 대소문자를 정규화한 값에 고유 제약을 적용합니다. PIN 원문은 저장하지 않고 PBKDF2-SHA256으로 검증값만 저장하며, 로그인 5회 실패 시 10분간 잠급니다. 세션 토큰도 해시만 D1에 저장합니다.
+
+## 종목 마스터
+
+`data/instruments.json`에는 한국투자증권 공식 국내·미국 종목 마스터와 Upbit 원화·BTC·USDT 마켓을 합친 검색 카탈로그가 들어 있습니다. 현재 17,013종목(국내 3,936, 미국 12,789, 코인 288)이며, 갱신은 아래 명령으로 수행합니다.
+
+```bash
+pnpm run catalog:update
+```
 
 ## Sites 환경값
 
@@ -58,7 +74,9 @@ Upbit 현재가는 서버에서 공개 REST API로 조회하므로 별도 키가
 ## 개발
 
 ```bash
+pnpm install
 pnpm run db:generate
+pnpm exec tsc --noEmit
 pnpm run build
 ```
 

@@ -3,7 +3,7 @@ import { apiError, requireUser } from "@/lib/server/auth";
 
 export async function GET(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request);
     const competitionId = new URL(request.url).searchParams.get("competitionId");
     if (!competitionId) return Response.json({ error: "competitionId가 필요합니다." }, { status: 400 });
     const member = await env.DB!.prepare("SELECT 1 FROM participants WHERE competition_id=? AND user_id=?").bind(competitionId, user.id).first();

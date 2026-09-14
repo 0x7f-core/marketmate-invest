@@ -1,12 +1,32 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull(),
   nickname: text("nickname").notNull(),
+  nicknameNormalized: text("nickname_normalized").notNull().default(""),
+  pinHash: text("pin_hash").notNull().default(""),
+  pinSalt: text("pin_salt").notNull().default(""),
+  failedLoginCount: integer("failed_login_count").notNull().default(0),
+  lockedUntil: integer("locked_until", { mode: "timestamp_ms" }).notNull().default(sql`0`),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-}, (t) => [uniqueIndex("idx_users_email").on(t.email)]);
+}, (t) => [
+  uniqueIndex("idx_users_email").on(t.email),
+  uniqueIndex("idx_users_nickname_normalized").on(t.nicknameNormalized),
+]);
+
+export const sessions = sqliteTable("sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [
+  index("idx_sessions_user_id").on(t.userId),
+  index("idx_sessions_expires_at").on(t.expiresAt),
+]);
 
 export const competitions = sqliteTable("competitions", {
   id: text("id").primaryKey(),
@@ -111,9 +131,9 @@ export const providerTokens = sqliteTable("provider_tokens", {
   provider: text("provider").primaryKey(),
   ciphertext: text("ciphertext").notNull().default(""),
   iv: text("iv").notNull().default(""),
-  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull().default(0),
-  refreshStartedAt: integer("refresh_started_at", { mode: "timestamp_ms" }).notNull().default(0),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(0),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull().default(sql`0`),
+  refreshStartedAt: integer("refresh_started_at", { mode: "timestamp_ms" }).notNull().default(sql`0`),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(sql`0`),
 });
 
 export const cashLedger = sqliteTable("cash_ledger", {

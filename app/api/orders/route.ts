@@ -10,7 +10,7 @@ type OrderBody = {
 
 export async function POST(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request);
     const body = await request.json() as OrderBody;
     if (!body.participantId || !body.clientOrderId || !body.market || !body.symbol || !body.name ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     if (participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) {
       return Response.json({ error: "현재 주문 가능한 대회가 아닙니다." }, { status: 409 });
     }
-    const quote = await getLiveQuote(body.market, body.symbol.toUpperCase());
+    const quote = await getLiveQuote(body.market, body.symbol.toUpperCase(), body.exchange);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
     if (Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const nativePriceMicros = Math.round(quote.price * 1_000_000);
     const fxRateMicros = Math.round(fxRate * 1_000_000);
     const priceKrwMicros = Math.round(quote.price * fxRate * 1_000_000);
-    const tradeValueKrw = Number((BigInt(quantityMicros) * BigInt(priceKrwMicros) + 500_000_000_000n) / 1_000_000_000_000n);
+    const tradeValueKrw = Number((BigInt(quantityMicros) * BigInt(priceKrwMicros) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000));
     if (tradeValueKrw <= 0 || quantityMicros <= 0) return Response.json({ error: "최소 주문금액을 확인해주세요." }, { status: 400 });
 
     const instrumentId = `${body.market}:${body.symbol.toUpperCase()}`;
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       ? Number((BigInt(oldQty) * BigInt(oldAvg) + BigInt(quantityMicros) * BigInt(priceKrwMicros)) / BigInt(oldQty + quantityMicros))
       : (nextQty === 0 ? 0 : oldAvg);
     const realized = !isBuy
-      ? Number((BigInt(quantityMicros) * BigInt(priceKrwMicros - oldAvg)) / 1_000_000_000_000n)
+      ? Number((BigInt(quantityMicros) * BigInt(priceKrwMicros - oldAvg)) / BigInt(1_000_000_000_000))
       : 0;
     const ledgerAmount = isBuy ? -tradeValueKrw : tradeValueKrw;
 

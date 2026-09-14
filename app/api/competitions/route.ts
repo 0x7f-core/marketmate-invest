@@ -3,7 +3,7 @@ import { apiError, requireUser } from "@/lib/server/auth";
 
 export async function GET(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request);
     const result = await env.DB!.prepare(
       `SELECT c.id, c.name, c.invite_code AS inviteCode, c.status,
               c.initial_cash_krw AS initialCashKrw, c.starts_at AS startsAt,
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const user = requireUser(request);
+    const user = await requireUser(request);
     const body = await request.json() as { name?: string; initialCashKrw?: number; startsAt?: number; endsAt?: number };
     const name = body.name?.trim().slice(0, 60) ?? "";
     const initialCashKrw = Math.round(Number(body.initialCashKrw));
@@ -32,7 +32,6 @@ export async function POST(request: Request) {
     const participantId = crypto.randomUUID();
     const inviteCode = `MATE-${crypto.randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`;
     await env.DB!.batch([
-      env.DB!.prepare("INSERT INTO users (id,email,nickname,created_at,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email, updated_at=excluded.updated_at").bind(user.id, user.email, user.name, now, now),
       env.DB!.prepare("INSERT INTO competitions (id,owner_user_id,name,invite_code,status,initial_cash_krw,starts_at,ends_at,created_at) VALUES (?,?,?,?,?,?,?,?,?)").bind(competitionId, user.id, name, inviteCode, "active", initialCashKrw, startsAt, endsAt, now),
       env.DB!.prepare("INSERT INTO participants (id,competition_id,user_id,cash_krw,realized_pnl_krw,joined_at) VALUES (?,?,?,?,?,?)").bind(participantId, competitionId, user.id, initialCashKrw, 0, now),
       env.DB!.prepare("INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), participantId, "initial", initialCashKrw, competitionId, initialCashKrw, now),

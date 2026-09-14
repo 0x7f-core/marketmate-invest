@@ -203,9 +203,9 @@ async function kisDomesticQuote(symbol: string): Promise<LiveQuote> {
   };
 }
 
-async function kisOverseasQuote(symbol: string): Promise<LiveQuote> {
+async function kisOverseasQuote(symbol: string, requestedExchange?: string): Promise<LiveQuote> {
   const normalized = symbol.replace(".", "_");
-  const preferred = usExchangeBySymbol[normalized];
+  const preferred = (["NAS", "NYS", "AMS"].includes(requestedExchange ?? "") ? requestedExchange : usExchangeBySymbol[normalized]) as "NAS" | "NYS" | "AMS" | undefined;
   const exchanges = preferred ? [preferred] : ["NAS", "NYS", "AMS"] as const;
   for (const exchange of exchanges) {
     try {
@@ -255,19 +255,19 @@ async function upbitQuote(symbol: string): Promise<LiveQuote> {
   };
 }
 
-async function fetchLiveQuote(market: Market, symbol: string) {
+async function fetchLiveQuote(market: Market, symbol: string, exchange?: string) {
   if (market === "CRYPTO") return upbitQuote(symbol);
-  return market === "KR" ? kisDomesticQuote(symbol) : kisOverseasQuote(symbol);
+  return market === "KR" ? kisDomesticQuote(symbol) : kisOverseasQuote(symbol, exchange);
 }
 
-export async function getLiveQuote(market: Market, symbol: string) {
+export async function getLiveQuote(market: Market, symbol: string, exchange?: string) {
   if (!/^[A-Z0-9._-]{1,20}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
-  const key = `${market}:${symbol}`;
+  const key = `${market}:${exchange ?? ""}:${symbol}`;
   const cached = quoteCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.quote;
   const existing = quoteRequests.get(key);
   if (existing) return existing;
-  const request = fetchLiveQuote(market, symbol).then(quote => {
+  const request = fetchLiveQuote(market, symbol, exchange).then(quote => {
     quoteCache.set(key, { quote, expiresAt: Date.now() + QUOTE_CACHE_MS });
     return quote;
   }).finally(() => quoteRequests.delete(key));
