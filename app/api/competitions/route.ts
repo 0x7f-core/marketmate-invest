@@ -1,9 +1,12 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "competition_create", 10, 60 * 60 * 1000, user.id);
     const result = await env.DB!.prepare(
       `SELECT c.id, c.name, c.invite_code AS inviteCode, c.status,
               c.initial_cash_krw AS initialCashKrw, c.starts_at AS startsAt,
@@ -36,6 +39,7 @@ export async function POST(request: Request) {
       env.DB!.prepare("INSERT INTO participants (id,competition_id,user_id,cash_krw,realized_pnl_krw,joined_at) VALUES (?,?,?,?,?,?)").bind(participantId, competitionId, user.id, initialCashKrw, 0, now),
       env.DB!.prepare("INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), participantId, "initial", initialCashKrw, competitionId, initialCashKrw, now),
     ]);
+    await auditLog(request, "competition.created", "competition", competitionId, user.id, { name }).catch(() => undefined);
     return Response.json({ competition: { id: competitionId, participantId, name, inviteCode, initialCashKrw, startsAt, endsAt } }, { status: 201 });
   } catch (error) { return apiError(error); }
 }

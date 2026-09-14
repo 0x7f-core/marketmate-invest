@@ -11,6 +11,10 @@ export type LiveQuote = {
   exchangeRate: number;
   timestamp: number;
   source: "KIS" | "UPBIT";
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
 };
 
 type TokenCache = { token: string; expiresAt: number };
@@ -200,6 +204,7 @@ async function kisDomesticQuote(symbol: string): Promise<LiveQuote> {
     exchangeRate: 1,
     timestamp: Date.now(),
     source: "KIS",
+    open: asNumber(data.stck_oprc), high: asNumber(data.stck_hgpr), low: asNumber(data.stck_lwpr), volume: asNumber(data.acml_vol),
   };
 }
 
@@ -227,6 +232,7 @@ async function kisOverseasQuote(symbol: string, requestedExchange?: string): Pro
         exchangeRate,
         timestamp: Date.now(),
         source: "KIS",
+        open: asNumber(data.open), high: asNumber(data.high), low: asNumber(data.low), volume: asNumber(data.tvol),
       };
     } catch (error) {
       if (preferred || exchange === "AMS") throw error;
@@ -252,6 +258,7 @@ async function upbitQuote(symbol: string): Promise<LiveQuote> {
     exchangeRate: 1,
     timestamp: asNumber(data.timestamp, Date.now()),
     source: "UPBIT",
+    open: asNumber(data.opening_price), high: asNumber(data.high_price), low: asNumber(data.low_price), volume: asNumber(data.acc_trade_volume_24h),
   };
 }
 
@@ -279,7 +286,10 @@ export async function persistQuoteSnapshot(quote: LiveQuote) {
   if (!env.DB) return;
   const instrumentId = `${quote.market}:${quote.symbol}`;
   const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
-  await env.DB.prepare(
+  const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
+  const fxRateMicros = Math.round(quote.exchangeRate * 1_000_000);
+  const recordedAt = Math.floor(sourceTimestamp / 60_000) * 60_000;
+  await env.DB.batch([env.DB.prepare(
     `INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
      SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
      ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,
@@ -287,13 +297,19 @@ export async function persistQuoteSnapshot(quote: LiveQuote) {
        source_timestamp=excluded.source_timestamp,received_at=excluded.received_at`,
   ).bind(
     instrumentId,
-    Math.round(quote.price * quote.exchangeRate * 1_000_000),
+    priceKrwMicros,
     Math.round(quote.change * quote.exchangeRate * 1_000_000),
     Math.round(quote.changeRate * 10_000),
-    Math.round(quote.exchangeRate * 1_000_000),
+    fxRateMicros,
     quote.source,
     sourceTimestamp,
     Date.now(),
     instrumentId,
-  ).run();
+  ), env.DB.prepare(`INSERT INTO price_history (id,instrument_id,price_micros,change_rate_ppm,fx_rate_micros,recorded_at)
+    SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
+    ON CONFLICT(instrument_id,recorded_at) DO UPDATE SET price_micros=excluded.price_micros,change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros`)
+    .bind(`${instrumentId}:${recordedAt}`, instrumentId, priceKrwMicros, Math.round(quote.changeRate * 10_000), fxRateMicros, recordedAt, instrumentId)]);
+  if (crypto.getRandomValues(new Uint8Array(1))[0] === 0) {
+    await env.DB.prepare("DELETE FROM price_history WHERE recorded_at<?").bind(Date.now() - 400 * 86_400_000).run().catch(() => undefined);
+  }
 }

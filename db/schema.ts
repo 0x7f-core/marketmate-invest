@@ -129,6 +129,39 @@ export const quoteSnapshots = sqliteTable("quote_snapshots", {
   receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const priceHistory = sqliteTable("price_history", {
+  id: text("id").primaryKey(),
+  instrumentId: text("instrument_id").notNull().references(() => instruments.id),
+  priceMicros: integer("price_micros").notNull(),
+  changeRatePpm: integer("change_rate_ppm").notNull(),
+  fxRateMicros: integer("fx_rate_micros").notNull().default(1_000_000),
+  recordedAt: integer("recorded_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [
+  uniqueIndex("idx_price_history_instrument_time").on(t.instrumentId, t.recordedAt),
+  index("idx_price_history_recorded_at").on(t.recordedAt),
+]);
+
+export const rateLimits = sqliteTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  windowStartedAt: integer("window_started_at", { mode: "timestamp_ms" }).notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [index("idx_rate_limits_expires_at").on(t.expiresAt)]);
+
+export const auditLogs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  actorUserId: text("actor_user_id").references(() => users.id),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id"),
+  details: text("details").notNull().default("{}"),
+  ipHash: text("ip_hash"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [
+  index("idx_audit_logs_created_at").on(t.createdAt),
+  index("idx_audit_logs_actor_created").on(t.actorUserId, t.createdAt),
+]);
+
 export const providerTokens = sqliteTable("provider_tokens", {
   provider: text("provider").primaryKey(),
   ciphertext: text("ciphertext").notNull().default(""),

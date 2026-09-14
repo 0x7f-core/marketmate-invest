@@ -1,9 +1,12 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 export async function POST(request: Request) {
   try {
     const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "competition_join", 20, 60 * 60 * 1000, user.id);
     const body = await request.json() as { inviteCode?: string };
     const code = body.inviteCode?.trim().toUpperCase() ?? "";
     const competition = await env.DB!.prepare("SELECT id,initial_cash_krw AS initialCashKrw,status,ends_at AS endsAt FROM competitions WHERE invite_code=?").bind(code).first<{id:string;initialCashKrw:number;status:string;endsAt:number}>();
@@ -15,6 +18,7 @@ export async function POST(request: Request) {
       env.DB!.prepare("INSERT INTO participants (id,competition_id,user_id,cash_krw,realized_pnl_krw,joined_at) VALUES (?,?,?,?,?,?) ON CONFLICT(competition_id,user_id) DO NOTHING").bind(participantId, competition.id, user.id, competition.initialCashKrw, 0, now),
       env.DB!.prepare("INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at) SELECT ?,?,?,?,?,?,? WHERE changes() > 0").bind(crypto.randomUUID(), participantId, "initial", competition.initialCashKrw, competition.id, competition.initialCashKrw, now),
     ]);
+    await auditLog(request, "competition.joined", "competition", competition.id, user.id).catch(() => undefined);
     const joined = await env.DB!.prepare("SELECT id FROM participants WHERE competition_id=? AND user_id=?").bind(competition.id, user.id).first<{id:string}>();
     return Response.json({ joined: true, competitionId: competition.id, participantId: joined?.id }, { status: 201 });
   } catch (error) { return apiError(error); }

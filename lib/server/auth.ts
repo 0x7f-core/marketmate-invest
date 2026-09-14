@@ -111,5 +111,7 @@ export function apiError(error: unknown) {
   if (message === "AUTH_REQUIRED") return Response.json({ error: "로그인이 필요합니다." }, { status: 401 });
   if (message === "NOT_FOUND") return Response.json({ error: "요청한 정보를 찾을 수 없습니다." }, { status: 404 });
   if (message === "FORBIDDEN") return Response.json({ error: "권한이 없습니다." }, { status: 403 });
+  if (message === "INVALID_ORIGIN") return Response.json({ error: "허용되지 않은 요청입니다." }, { status: 403 });
+  if (message === "RATE_LIMITED") return Response.json({ error: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." }, { status: 429 });
   return Response.json({ error: "요청을 처리하지 못했습니다." }, { status: 500 });
 }

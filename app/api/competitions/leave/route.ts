@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { assertSameOrigin, auditLog } from "@/lib/server/safety";
 
 export async function DELETE(request: Request) {
   try {
     const user = await requireUser(request);
+    assertSameOrigin(request);
     const competitionId = new URL(request.url).searchParams.get("competitionId");
     if (!competitionId) return Response.json({ error: "competitionId가 필요합니다." }, { status: 400 });
     const membership = await env.DB!.prepare(`SELECT p.id AS participantId,c.owner_user_id AS ownerUserId,
@@ -24,6 +26,7 @@ export async function DELETE(request: Request) {
     ];
     if (membership.ownerUserId === user.id) statements.push(env.DB!.prepare("DELETE FROM competitions WHERE id=? AND owner_user_id=?").bind(competitionId, user.id));
     await env.DB!.batch(statements);
+    await auditLog(request, "competition.left", "competition", competitionId, user.id, { deletedCompetition: membership.ownerUserId === user.id }).catch(() => undefined);
     return Response.json({ ok: true });
   } catch (error) { return apiError(error); }
 }

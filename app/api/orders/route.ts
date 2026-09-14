@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getMarketSession } from "@/lib/server/market-hours";
+import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 type OrderBody = {
   participantId?: string; clientOrderId?: string; market?: Market; symbol?: string;
@@ -27,11 +28,14 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "order_cancel", 30, 60_000, user.id);
     const orderId = new URL(request.url).searchParams.get("orderId");
     if (!orderId) return Response.json({ error: "orderId가 필요합니다." }, { status: 400 });
     const result = await env.DB!.prepare(`UPDATE orders SET status='cancelled',updated_at=? WHERE id=? AND status='pending'
       AND participant_id IN (SELECT id FROM participants WHERE user_id=?)`).bind(Date.now(), orderId, user.id).run();
     if ((result.meta.changes ?? 0) !== 1) return Response.json({ error: "취소할 수 있는 대기 주문이 아닙니다." }, { status: 409 });
+    await auditLog(request, "order.cancelled", "order", orderId, user.id).catch(() => undefined);
     return Response.json({ ok: true });
   } catch (error) { return apiError(error); }
 }
@@ -39,6 +43,8 @@ export async function DELETE(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "order_create", 30, 60_000, user.id);
     const body = await request.json() as OrderBody;
     if (!body.participantId || !body.clientOrderId || !body.market || !body.symbol || !body.name ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
@@ -105,6 +111,7 @@ export async function POST(request: Request) {
     if (!marketable) {
       await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
+      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice }).catch(() => undefined);
       return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice } }, { status: 201 });
     }
 
@@ -139,6 +146,7 @@ export async function POST(request: Request) {
     ];
     const result = await env.DB!.batch(statements);
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
+    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, orderType: body.orderType, quantity: body.quantity }).catch(() => undefined);
     return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
   } catch (error) {
     if (error instanceof Error && ["KIS_NOT_CONFIGURED", "KIS_AUTH_FAILED", "KIS_AUTH_BUSY", "KIS_QUOTE_FAILED", "UPBIT_QUOTE_FAILED"].includes(error.message)) {

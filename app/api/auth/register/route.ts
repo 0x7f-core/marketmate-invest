@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 import { createSession, hashPin, normalizeNickname, validateCredentials } from "@/lib/server/auth";
+import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 export async function POST(request: Request) {
+  try { assertSameOrigin(request); await enforceRateLimit(request, "register", 5, 60 * 60 * 1000); }
+  catch { return Response.json({ error: "가입 요청이 너무 많습니다. 잠시 후 다시 시도해주세요." }, { status: 429 }); }
   const body = await request.json().catch(() => ({})) as { nickname?: string; pin?: string };
   const nickname = String(body.nickname ?? "").normalize("NFKC").trim();
   const pin = String(body.pin ?? "");
@@ -25,6 +28,7 @@ export async function POST(request: Request) {
     throw error;
   }
 
+  await auditLog(request, "auth.registered", "user", id, id, { nickname }).catch(() => undefined);
   return Response.json(
     { user: { id, nickname, role: "member" } },
     { status: 201, headers: { "set-cookie": await createSession(id), "cache-control": "no-store" } },
