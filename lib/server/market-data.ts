@@ -274,3 +274,26 @@ export async function getLiveQuote(market: Market, symbol: string, exchange?: st
   quoteRequests.set(key, request);
   return request;
 }
+
+export async function persistQuoteSnapshot(quote: LiveQuote) {
+  if (!env.DB) return;
+  const instrumentId = `${quote.market}:${quote.symbol}`;
+  const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
+  await env.DB.prepare(
+    `INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
+     SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
+     ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,
+       change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros,source=excluded.source,
+       source_timestamp=excluded.source_timestamp,received_at=excluded.received_at`,
+  ).bind(
+    instrumentId,
+    Math.round(quote.price * quote.exchangeRate * 1_000_000),
+    Math.round(quote.change * quote.exchangeRate * 1_000_000),
+    Math.round(quote.changeRate * 10_000),
+    Math.round(quote.exchangeRate * 1_000_000),
+    quote.source,
+    sourceTimestamp,
+    Date.now(),
+    instrumentId,
+  ).run();
+}
