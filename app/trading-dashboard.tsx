@@ -16,7 +16,7 @@ import {
 type Market = "KR" | "US" | "CRYPTO";
 type Quote = {
   market: Market; symbol: string; name: string; price: number; change: number;
-  rate: number; currency: "KRW" | "USD"; volume: string;
+  rate: number; currency: "KRW" | "USD"; volume: string; exchangeRate?: number;
 };
 
 const quotes: Quote[] = [
@@ -158,6 +158,7 @@ function SearchBox() {
 function OrderPanel({ quote, participantId }: { quote: Quote; participantId: string | null }) {
   const [quantity, setQuantity] = useState("1");
   const [status, setStatus] = useState("");
+  const estimatedKrw = quote.price * (quote.exchangeRate ?? 1) * Number(quantity || 0);
   const submitOrder = async (side: "buy" | "sell") => {
     if (!participantId) return setStatus("먼저 대회에 참가해주세요.");
     setStatus("실시간 시세를 확인하고 있습니다...");
@@ -180,7 +181,8 @@ function OrderPanel({ quote, participantId }: { quote: Quote; participantId: str
             <div className="available"><span>주문 가능</span><strong>₩46,728,300</strong></div>
             <label>주문 유형<select aria-label="주문 유형"><option>시장가</option><option>지정가</option></select></label>
             <label>수량<div className="number-input"><input value={quantity} onChange={e => setQuantity(e.target.value.replace(/\D/g, ""))} inputMode="numeric" /><span>주</span></div></label>
-            <div className="order-total"><span>예상 주문금액</span><strong>₩{(quote.price * Number(quantity || 0)).toLocaleString()}</strong></div>
+            {quote.currency === "USD" && <div className="available"><span>적용 환율</span><strong>{quote.exchangeRate ? `${quote.exchangeRate.toLocaleString("ko-KR")}원/USD` : "KIS 조회 시 적용"}</strong></div>}
+            <div className="order-total"><span>예상 주문금액</span><strong>₩{Math.round(estimatedKrw).toLocaleString("ko-KR")}</strong></div>
             <Button onClick={() => submitOrder(side as "buy" | "sell")} className={side === "buy" ? "order-buy" : "order-sell"}>
               {quote.name} {side === "buy" ? "매수" : "매도"}
             </Button>
@@ -206,10 +208,10 @@ export default function TradingDashboard({ userName }: { userName: string }) {
     let active = true;
     fetch(`/api/quotes?market=${market}&symbols=${encodeURIComponent(baseQuote.symbol)}`, { cache: "no-store" })
       .then(async response => {
-        const result = await response.json() as { quotes?: Array<{ price: number; change: number; changeRate: number; currency: "KRW" | "USD" }> };
+        const result = await response.json() as { quotes?: Array<{ price: number; change: number; changeRate: number; currency: "KRW" | "USD"; exchangeRate: number }> };
         if (!active || !response.ok || !result.quotes?.[0]) throw new Error("QUOTE_UNAVAILABLE");
         const value = result.quotes[0];
-        setQuoteResult({ key: quoteKey, status: "live", quote: { ...baseQuote, price: value.price, change: value.change, rate: value.changeRate, currency: value.currency } });
+        setQuoteResult({ key: quoteKey, status: "live", quote: { ...baseQuote, price: value.price, change: value.change, rate: value.changeRate, currency: value.currency, exchangeRate: value.exchangeRate } });
       })
       .catch(() => active && setQuoteResult({ key: quoteKey, status: "unavailable" }));
     return () => { active = false; };

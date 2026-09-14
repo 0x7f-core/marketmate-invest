@@ -8,6 +8,7 @@ export type LiveQuote = {
   change: number;
   changeRate: number;
   currency: "KRW" | "USD";
+  exchangeRate: number;
   timestamp: number;
   source: "KIS" | "UPBIT";
 };
@@ -103,6 +104,7 @@ async function kisDomesticQuote(symbol: string): Promise<LiveQuote> {
     change: asNumber(data.prdy_vrss),
     changeRate: asNumber(data.prdy_ctrt),
     currency: "KRW",
+    exchangeRate: 1,
     timestamp: Date.now(),
     source: "KIS",
   };
@@ -115,17 +117,21 @@ async function kisOverseasQuote(symbol: string): Promise<LiveQuote> {
   for (const exchange of exchanges) {
     try {
       const data = await kisGet(
-        "/uapi/overseas-price/v1/quotations/price",
-        "HHDFS00000300",
+        "/uapi/overseas-price/v1/quotations/price-detail",
+        "HHDFS76200200",
         { AUTH: "", EXCD: exchange, SYMB: symbol.replace("_", ".") },
       );
       const price = asNumber(data.last);
-      if (price <= 0) continue;
+      const previousClose = asNumber(data.base);
+      const exchangeRate = asNumber(data.t_rate);
+      if (price <= 0 || previousClose <= 0 || exchangeRate <= 0) continue;
+      const change = price - previousClose;
       return {
         market: "US", symbol, price,
-        change: asNumber(data.diff),
-        changeRate: asNumber(data.rate),
+        change,
+        changeRate: (change / previousClose) * 100,
         currency: "USD",
+        exchangeRate,
         timestamp: Date.now(),
         source: "KIS",
       };
@@ -150,6 +156,7 @@ async function upbitQuote(symbol: string): Promise<LiveQuote> {
     change: asNumber(data.signed_change_price),
     changeRate: asNumber(data.signed_change_rate) * 100,
     currency: "KRW",
+    exchangeRate: 1,
     timestamp: asNumber(data.timestamp, Date.now()),
     source: "UPBIT",
   };

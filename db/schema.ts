@@ -73,6 +73,7 @@ export const fills = sqliteTable("fills", {
   side: text("side", { enum: ["buy", "sell"] }).notNull(),
   quantityMicros: integer("quantity_micros").notNull(),
   priceMicros: integer("price_micros").notNull(),
+  fxRateMicros: integer("fx_rate_micros").notNull().default(1_000_000),
   feeKrw: integer("fee_krw").notNull().default(0),
   executedAt: integer("executed_at", { mode: "timestamp_ms" }).notNull(),
 }, (t) => [index("idx_fills_participant_executed").on(t.participantId, t.executedAt)]);
@@ -100,6 +101,7 @@ export const quoteSnapshots = sqliteTable("quote_snapshots", {
   priceMicros: integer("price_micros").notNull(),
   changeMicros: integer("change_micros").notNull(),
   changeRatePpm: integer("change_rate_ppm").notNull(),
+  fxRateMicros: integer("fx_rate_micros").notNull().default(1_000_000),
   source: text("source").notNull(),
   sourceTimestamp: integer("source_timestamp", { mode: "timestamp_ms" }).notNull(),
   receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),

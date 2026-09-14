@@ -50,11 +50,10 @@
 - `KIS_APP_KEY` (secret)
 - `KIS_APP_SECRET` (secret)
 - `KIS_BASE_URL` — 선택값, 기본값은 `https://openapi.koreainvestment.com:9443`
-- `USD_KRW_RATE` — 미국주식 원화 평가/체결 환산값
 
 Upbit 현재가는 서버에서 공개 REST API로 조회하므로 별도 키가 필요하지 않습니다.
 
-한국투자증권 연동은 OAuth 토큰과 국내·해외 현재가 조회 API만 사용합니다. 실제 계좌 조회나 주문 API는 호출하지 않으며, 발급한 App Key와 App Secret은 브라우저 번들에 포함되지 않습니다. 토큰은 Worker 인스턴스에서 만료 전까지 재사용하고 같은 종목의 짧은 중복 조회를 합쳐 API 호출량을 줄입니다.
+한국투자증권 연동은 OAuth 토큰과 국내 현재가·해외 현재가상세 조회 API만 사용합니다. 미국주식은 현재가상세의 당일 환율을 원화 평가와 모의체결에 자동 적용하고 체결 당시 환율을 D1에 보존합니다. 실제 계좌 조회나 주문 API는 호출하지 않으며, 발급한 App Key와 App Secret은 브라우저 번들에 포함되지 않습니다. 토큰은 Worker 인스턴스에서 만료 전까지 재사용하고 같은 종목의 짧은 중복 조회를 합쳐 API 호출량을 줄입니다.
 
 ## 개발
 

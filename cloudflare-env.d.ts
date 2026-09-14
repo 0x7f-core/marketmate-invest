@@ -5,6 +5,5 @@ declare namespace Cloudflare {
     KIS_APP_KEY?: string;
     KIS_APP_SECRET?: string;
     KIS_BASE_URL?: string;
-    USD_KRW_RATE?: string;
   }
 }

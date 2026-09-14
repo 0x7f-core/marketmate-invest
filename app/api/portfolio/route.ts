@@ -18,6 +18,7 @@ export async function GET(request: Request) {
     ).bind(participantId).all();
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
+              f.fx_rate_micros AS fxRateMicros,
               f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
        WHERE f.participant_id=? ORDER BY f.executed_at DESC LIMIT 100`
