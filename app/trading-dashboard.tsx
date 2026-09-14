@@ -163,7 +163,7 @@ function OrderPanel({ quote, participantId }: { quote: Quote; participantId: str
     setStatus("실시간 시세를 확인하고 있습니다...");
     const response = await fetch("/api/orders", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ participantId, clientOrderId: crypto.randomUUID(), market: quote.market, symbol: quote.symbol, name: quote.name, exchange: quote.market === "CRYPTO" ? "UPBIT" : "TOSS", side, orderType: "market", quantity: Number(quantity) }),
+      body: JSON.stringify({ participantId, clientOrderId: crypto.randomUUID(), market: quote.market, symbol: quote.symbol, name: quote.name, exchange: quote.market === "CRYPTO" ? "UPBIT" : "KIS", side, orderType: "market", quantity: Number(quantity) }),
     });
     const result = await response.json() as { error?: string };
     setStatus(response.ok ? "모의주문이 현재 시세로 체결되었습니다." : (result.error ?? "주문을 처리하지 못했습니다."));
@@ -197,24 +197,23 @@ export default function TradingDashboard({ userName }: { userName: string }) {
   const [market, setMarket] = useState<Market>("KR");
   const [participantId, setParticipantId] = useState<string | null>(null);
   const baseQuote = quotes.find(q => q.market === market) ?? quotes[0];
-  const [liveQuote, setLiveQuote] = useState<Quote | null>(null);
-  const [quoteStatus, setQuoteStatus] = useState<"loading" | "live" | "unavailable">("loading");
-  const quote = liveQuote ?? baseQuote;
+  const quoteKey = `${market}:${baseQuote.symbol}`;
+  const [quoteResult, setQuoteResult] = useState<{ key: string; status: "live" | "unavailable"; quote?: Quote } | null>(null);
+  const currentResult = quoteResult?.key === quoteKey ? quoteResult : null;
+  const quoteStatus = currentResult?.status ?? "loading";
+  const quote = currentResult?.quote ?? baseQuote;
   useEffect(() => {
     let active = true;
-    setLiveQuote(null);
-    setQuoteStatus("loading");
     fetch(`/api/quotes?market=${market}&symbols=${encodeURIComponent(baseQuote.symbol)}`, { cache: "no-store" })
       .then(async response => {
         const result = await response.json() as { quotes?: Array<{ price: number; change: number; changeRate: number; currency: "KRW" | "USD" }> };
         if (!active || !response.ok || !result.quotes?.[0]) throw new Error("QUOTE_UNAVAILABLE");
         const value = result.quotes[0];
-        setLiveQuote({ ...baseQuote, price: value.price, change: value.change, rate: value.changeRate, currency: value.currency });
-        setQuoteStatus("live");
+        setQuoteResult({ key: quoteKey, status: "live", quote: { ...baseQuote, price: value.price, change: value.change, rate: value.changeRate, currency: value.currency } });
       })
-      .catch(() => active && setQuoteStatus("unavailable"));
+      .catch(() => active && setQuoteResult({ key: quoteKey, status: "unavailable" }));
     return () => { active = false; };
-  }, [market, baseQuote.symbol]);
+  }, [baseQuote, market, quoteKey]);
   useEffect(() => {
     fetch("/api/competitions").then(r => r.ok ? r.json() : null).then((data: { competitions?: Array<{ participantId: string }> } | null) => {
       if (data?.competitions?.[0]?.participantId) setParticipantId(data.competitions[0].participantId);
@@ -288,7 +287,7 @@ export default function TradingDashboard({ userName }: { userName: string }) {
             <JoinDialog onJoined={setParticipantId} />
           </div>
           <section className="panel quote-hero">
-            <div className="quote-heading"><div><span className="market-badge">{quote.market}</span><small>{quote.symbol} · {quote.market === "CRYPTO" ? "Upbit" : "Toss Securities"}</small><h1>{quote.name}<button aria-label="관심종목 추가"><Star /></button></h1></div><span className={quoteStatus === "live" ? "live-pill" : "live-pill pending"}><i /> {quoteStatus === "live" ? "실시간" : quoteStatus === "loading" ? "확인 중" : "샘플 시세"}</span></div>
+            <div className="quote-heading"><div><span className="market-badge">{quote.market}</span><small>{quote.symbol} · {quote.market === "CRYPTO" ? "Upbit" : "한국투자증권"}</small><h1>{quote.name}<button aria-label="관심종목 추가"><Star /></button></h1></div><span className={quoteStatus === "live" ? "live-pill" : "live-pill pending"}><i /> {quoteStatus === "live" ? "현재가" : quoteStatus === "loading" ? "확인 중" : "샘플 시세"}</span></div>
             <div className="quote-price">
               <strong>{formatPrice(quote)}</strong>
               <span className={quote.rate >= 0 ? "up" : "down"}>{quote.rate >= 0 ? "▲" : "▼"} {Math.abs(quote.change).toLocaleString()} ({quote.rate >= 0 ? "+" : ""}{quote.rate}%)</span>

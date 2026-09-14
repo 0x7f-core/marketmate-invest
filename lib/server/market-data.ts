@@ -9,8 +9,23 @@ export type LiveQuote = {
   changeRate: number;
   currency: "KRW" | "USD";
   timestamp: number;
-  source: "TOSS" | "UPBIT";
+  source: "KIS" | "UPBIT";
 };
+
+type TokenCache = { token: string; expiresAt: number };
+type CachedQuote = { quote: LiveQuote; expiresAt: number };
+
+const KIS_DEFAULT_BASE_URL = "https://openapi.koreainvestment.com:9443";
+const QUOTE_CACHE_MS = 2_000;
+const usExchangeBySymbol: Record<string, "NAS" | "NYS" | "AMS"> = {
+  AAPL: "NAS", AMZN: "NAS", GOOGL: "NAS", META: "NAS", MSFT: "NAS", NVDA: "NAS", TSLA: "NAS",
+  BRK_B: "NYS", DIS: "NYS", JPM: "NYS", KO: "NYS", NKE: "NYS", V: "NYS", WMT: "NYS",
+};
+
+let tokenCache: TokenCache | null = null;
+let tokenRequest: Promise<TokenCache> | null = null;
+const quoteCache = new Map<string, CachedQuote>();
+const quoteRequests = new Map<string, Promise<LiveQuote>>();
 
 function asNumber(...values: unknown[]) {
   for (const value of values) {
@@ -20,50 +35,105 @@ function asNumber(...values: unknown[]) {
   return 0;
 }
 
-async function getTossToken() {
-  if (!env.TOSS_SECURITIES_API_KEY || !env.TOSS_SECURITIES_API_SECRET || !env.TOSS_SECURITIES_TOKEN_URL) {
-    throw new Error("TOSS_NOT_CONFIGURED");
-  }
-  const response = await fetch(env.TOSS_SECURITIES_TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      appKey: env.TOSS_SECURITIES_API_KEY,
-      appSecret: env.TOSS_SECURITIES_API_SECRET,
-      grantType: "client_credentials",
-    }),
-  });
-  if (!response.ok) throw new Error("TOSS_AUTH_FAILED");
-  const data = await response.json() as Record<string, unknown>;
-  const token = String(data.accessToken ?? data.access_token ?? "");
-  if (!token) throw new Error("TOSS_AUTH_FAILED");
-  return token;
+function kisConfig() {
+  if (!env.KIS_APP_KEY || !env.KIS_APP_SECRET) throw new Error("KIS_NOT_CONFIGURED");
+  return {
+    appKey: env.KIS_APP_KEY,
+    appSecret: env.KIS_APP_SECRET,
+    baseUrl: env.KIS_BASE_URL || KIS_DEFAULT_BASE_URL,
+  };
 }
 
-async function tossQuote(market: "KR" | "US", symbol: string): Promise<LiveQuote> {
-  if (!env.TOSS_SECURITIES_BASE_URL) throw new Error("TOSS_NOT_CONFIGURED");
-  const token = await getTossToken();
-  const path = market === "KR" ? "/v1/market/kr/quotes/" : "/v1/market/us/quotes/";
-  const response = await fetch(new URL(path + encodeURIComponent(symbol), env.TOSS_SECURITIES_BASE_URL), {
+async function requestKisToken(): Promise<TokenCache> {
+  const { appKey, appSecret, baseUrl } = kisConfig();
+  const response = await fetch(new URL("/oauth2/tokenP", baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/plain" },
+    body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
+  });
+  if (!response.ok) throw new Error("KIS_AUTH_FAILED");
+  const data = await response.json() as Record<string, unknown>;
+  const token = String(data.access_token ?? "");
+  const expiresIn = Math.max(60, asNumber(data.expires_in, 86_400));
+  if (!token) throw new Error("KIS_AUTH_FAILED");
+  return { token, expiresAt: Date.now() + expiresIn * 1_000 - 60_000 };
+}
+
+async function getKisToken() {
+  if (tokenCache && tokenCache.expiresAt > Date.now()) return tokenCache.token;
+  tokenRequest ??= requestKisToken();
+  try {
+    tokenCache = await tokenRequest;
+    return tokenCache.token;
+  } finally {
+    tokenRequest = null;
+  }
+}
+
+async function kisGet(path: string, trId: string, params: Record<string, string>) {
+  const { appKey, appSecret, baseUrl } = kisConfig();
+  const url = new URL(path, baseUrl);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  const response = await fetch(url, {
     headers: {
-      authorization: `Bearer ${token}`,
-      "x-api-key": env.TOSS_SECURITIES_API_KEY ?? "",
+      authorization: `Bearer ${await getKisToken()}`,
+      appkey: appKey,
+      appsecret: appSecret,
+      tr_id: trId,
+      custtype: "P",
       accept: "application/json",
     },
   });
-  if (!response.ok) throw new Error("TOSS_QUOTE_FAILED");
+  if (!response.ok) throw new Error("KIS_QUOTE_FAILED");
   const root = await response.json() as Record<string, unknown>;
-  const data = (root.data ?? root.result ?? root) as Record<string, unknown>;
-  const price = asNumber(data.price, data.currentPrice, data.close, data.last);
+  if (String(root.rt_cd ?? "0") !== "0" || !root.output) throw new Error("KIS_QUOTE_FAILED");
+  return root.output as Record<string, unknown>;
+}
+
+async function kisDomesticQuote(symbol: string): Promise<LiveQuote> {
+  const data = await kisGet(
+    "/uapi/domestic-stock/v1/quotations/inquire-price",
+    "FHKST01010100",
+    { FID_COND_MRKT_DIV_CODE: "UN", FID_INPUT_ISCD: symbol },
+  );
+  const price = asNumber(data.stck_prpr);
   if (price <= 0) throw new Error("INVALID_QUOTE");
   return {
-    market, symbol, price,
-    change: asNumber(data.change, data.priceChange, data.netChange),
-    changeRate: asNumber(data.changeRate, data.changePercent, data.rate),
-    currency: market === "US" ? "USD" : "KRW",
-    timestamp: asNumber(data.timestamp, data.tradeTimestamp, Date.now()),
-    source: "TOSS",
+    market: "KR", symbol, price,
+    change: asNumber(data.prdy_vrss),
+    changeRate: asNumber(data.prdy_ctrt),
+    currency: "KRW",
+    timestamp: Date.now(),
+    source: "KIS",
   };
+}
+
+async function kisOverseasQuote(symbol: string): Promise<LiveQuote> {
+  const normalized = symbol.replace(".", "_");
+  const preferred = usExchangeBySymbol[normalized];
+  const exchanges = preferred ? [preferred] : ["NAS", "NYS", "AMS"] as const;
+  for (const exchange of exchanges) {
+    try {
+      const data = await kisGet(
+        "/uapi/overseas-price/v1/quotations/price",
+        "HHDFS00000300",
+        { AUTH: "", EXCD: exchange, SYMB: symbol.replace("_", ".") },
+      );
+      const price = asNumber(data.last);
+      if (price <= 0) continue;
+      return {
+        market: "US", symbol, price,
+        change: asNumber(data.diff),
+        changeRate: asNumber(data.rate),
+        currency: "USD",
+        timestamp: Date.now(),
+        source: "KIS",
+      };
+    } catch (error) {
+      if (preferred || exchange === "AMS") throw error;
+    }
+  }
+  throw new Error("KIS_QUOTE_FAILED");
 }
 
 async function upbitQuote(symbol: string): Promise<LiveQuote> {
@@ -85,7 +155,22 @@ async function upbitQuote(symbol: string): Promise<LiveQuote> {
   };
 }
 
+async function fetchLiveQuote(market: Market, symbol: string) {
+  if (market === "CRYPTO") return upbitQuote(symbol);
+  return market === "KR" ? kisDomesticQuote(symbol) : kisOverseasQuote(symbol);
+}
+
 export async function getLiveQuote(market: Market, symbol: string) {
-  if (!/^[A-Z0-9.-]{1,20}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
-  return market === "CRYPTO" ? upbitQuote(symbol) : tossQuote(market, symbol);
+  if (!/^[A-Z0-9._-]{1,20}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
+  const key = `${market}:${symbol}`;
+  const cached = quoteCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.quote;
+  const existing = quoteRequests.get(key);
+  if (existing) return existing;
+  const request = fetchLiveQuote(market, symbol).then(quote => {
+    quoteCache.set(key, { quote, expiresAt: Date.now() + QUOTE_CACHE_MS });
+    return quote;
+  }).finally(() => quoteRequests.delete(key));
+  quoteRequests.set(key, request);
+  return request;
 }

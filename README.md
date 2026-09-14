@@ -9,7 +9,7 @@
   └─ ChatGPT Sites Worker
       ├─ 참가 인증: Sites의 ChatGPT 사용자 헤더
       ├─ 대회·주문·체결·포트폴리오·순위 API
-      ├─ Toss Securities 시세 어댑터 (서버 전용 Secrets)
+      ├─ 한국투자증권 Open API 시세 어댑터 (서버 전용 Secrets)
       ├─ Upbit 공개 시세 어댑터
       └─ D1
           ├─ users / competitions / participants
@@ -47,13 +47,14 @@
 
 다음 값은 Sites 런타임 설정에 저장합니다. Key/Secret은 반드시 secret으로 표시하고 `NEXT_PUBLIC_` 접두사를 사용하지 않습니다.
 
-- `TOSS_SECURITIES_API_KEY` (secret)
-- `TOSS_SECURITIES_API_SECRET` (secret)
-- `TOSS_SECURITIES_BASE_URL`
-- `TOSS_SECURITIES_TOKEN_URL`
+- `KIS_APP_KEY` (secret)
+- `KIS_APP_SECRET` (secret)
+- `KIS_BASE_URL` — 선택값, 기본값은 `https://openapi.koreainvestment.com:9443`
 - `USD_KRW_RATE` — 미국주식 원화 평가/체결 환산값
 
 Upbit 현재가는 서버에서 공개 REST API로 조회하므로 별도 키가 필요하지 않습니다.
+
+한국투자증권 연동은 OAuth 토큰과 국내·해외 현재가 조회 API만 사용합니다. 실제 계좌 조회나 주문 API는 호출하지 않으며, 발급한 App Key와 App Secret은 브라우저 번들에 포함되지 않습니다. 토큰은 Worker 인스턴스에서 만료 전까지 재사용하고 같은 종목의 짧은 중복 조회를 합쳐 API 호출량을 줄입니다.
 
 ## 개발
 

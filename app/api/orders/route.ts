@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
     return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && ["TOSS_NOT_CONFIGURED", "TOSS_AUTH_FAILED", "TOSS_QUOTE_FAILED", "UPBIT_QUOTE_FAILED"].includes(error.message)) {
+    if (error instanceof Error && ["KIS_NOT_CONFIGURED", "KIS_AUTH_FAILED", "KIS_QUOTE_FAILED", "UPBIT_QUOTE_FAILED"].includes(error.message)) {
       return Response.json({ error: "실시간 시세 제공자에 연결할 수 없어 주문을 중단했습니다." }, { status: 503 });
     }
     return apiError(error);
