@@ -168,6 +168,15 @@ export const newsCache = sqliteTable("news_cache", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 }, (t) => [index("idx_news_cache_updated_at").on(t.updatedAt)]);
 
+export const marketCalendar = sqliteTable("market_calendar", {
+  id: text("id").primaryKey(),
+  market: text("market", { enum: ["KR", "US"] }).notNull(),
+  date: text("date").notNull(),
+  isOpen: integer("is_open", { mode: "boolean" }).notNull(),
+  source: text("source").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (t) => [uniqueIndex("idx_market_calendar_market_date").on(t.market, t.date)]);
+
 export const providerTokens = sqliteTable("provider_tokens", {
   provider: text("provider").primaryKey(),
   ciphertext: text("ciphertext").notNull().default(""),

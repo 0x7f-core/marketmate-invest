@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
-import { getMarketSession } from "@/lib/server/market-hours";
+import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 type OrderBody = {
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     if (participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) {
       return Response.json({ error: "현재 주문 가능한 대회가 아닙니다." }, { status: 409 });
     }
-    const marketSession = getMarketSession(body.market);
+    const marketSession = await getCheckedMarketSession(body.market);
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
     const quote = await getLiveQuote(body.market, body.symbol.toUpperCase(), body.exchange);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;

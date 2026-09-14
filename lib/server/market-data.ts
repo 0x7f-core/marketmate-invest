@@ -182,7 +182,7 @@ async function getKisToken() {
   }
 }
 
-async function kisGetRoot(path: string, trId: string, params: Record<string, string>) {
+export async function kisGetRoot(path: string, trId: string, params: Record<string, string>) {
   const { appKey, appSecret, baseUrl } = kisConfig();
   const url = new URL(path, baseUrl);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
