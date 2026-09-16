@@ -13,7 +13,14 @@ export function normalizeNaverReutersCode(code: string) {
 
 export function normalizeNaverMarketSymbol(market: "KR" | "US" | "CRYPTO", symbol: string) {
   const clean = symbol.trim();
-  return market === "US" ? normalizeNaverReutersCode(clean) : clean.toUpperCase();
+  if (market === "US") return normalizeNaverReutersCode(clean);
+  if (market === "CRYPTO") {
+    const ticker = clean.toUpperCase()
+      .replace(/^KRW-/, "")
+      .replace(/_KRW_(?:UPBIT|BITHUMB)$/, "");
+    return ticker ? `KRW-${ticker}` : "";
+  }
+  return clean.toUpperCase();
 }
 
 export function naverAutocompleteQueryForForeignCode(code: string) {
