@@ -1,9 +1,9 @@
-import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import type { Market } from "@/lib/server/market-data";
+import { getChartSeries, type Market } from "@/lib/server/market-data";
+import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { enforceRateLimit } from "@/lib/server/safety";
 
-const RANGE_MS: Record<string, number> = { "1D": 86_400_000, "1W": 7 * 86_400_000, "1M": 31 * 86_400_000, "3M": 93 * 86_400_000, "1Y": 366 * 86_400_000 };
+const RANGES = new Set(["1D", "1W", "1M", "3M", "1Y"]);
 
 export async function GET(request: Request) {
   try {
@@ -12,12 +12,20 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const market = url.searchParams.get("market") as Market | null;
     const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase();
-    const range = url.searchParams.get("range") ?? "1D";
-    if (!market || !["KR","US","CRYPTO"].includes(market) || !/^[A-Z0-9._-]{1,20}$/.test(symbol) || !RANGE_MS[range]) return Response.json({ error:"차트 요청값을 확인해주세요." }, { status:400 });
-    const since = Date.now() - RANGE_MS[range];
-    const result = await env.DB!.prepare(`SELECT price_micros AS priceMicros,change_rate_ppm AS changeRatePpm,recorded_at AS recordedAt
-      FROM price_history WHERE instrument_id=? AND recorded_at>=? ORDER BY recorded_at ASC LIMIT 720`)
-      .bind(`${market}:${symbol}`, since).all();
-    return Response.json({ points:result.results, range }, { headers:{"cache-control":"no-store"} });
-  } catch (error) { return apiError(error); }
+    const exchange = url.searchParams.get("exchange") ?? undefined;
+    const range = url.searchParams.get("range") ?? "3M";
+    if (!market || !["KR", "US", "CRYPTO"].includes(market) || !/^[A-Z0-9._-]{1,32}$/.test(symbol) || !RANGES.has(range)) {
+      return Response.json({ error: "차트 요청값을 확인해주세요." }, { status: 400 });
+    }
+    const result = await getChartSeries(market, symbol, exchange, range);
+    if (!result.points.length) {
+      return Response.json({ ...result, error: "네이버증권에서 차트 데이터를 받지 못했습니다." }, { status: 503, headers: { "retry-after": "30" } });
+    }
+    return Response.json(result, { headers: { "cache-control": "private, max-age=30" } });
+  } catch (error) {
+    if (isNaverStockUnavailable(error)) {
+      return Response.json({ points: [], source: "NAVER", error: "네이버증권 차트 API를 불러오지 못했습니다." }, { status: 503, headers: { "retry-after": "30" } });
+    }
+    return apiError(error);
+  }
 }
