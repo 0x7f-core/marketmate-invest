@@ -26,6 +26,7 @@ function quickFallback(market: Market) {
       isOpen: true,
       label: "24시간",
       notice: "가상자산은 24시간 주문할 수 있습니다.",
+      currentSession: "always",
       source: "NAVER" as const,
       stale: false,
     };
@@ -39,16 +40,22 @@ function quickFallback(market: Market) {
     const after = weekday && now.minutes >= 16 * 60 && now.minutes < 20 * 60;
     const isOpen = pre || regular || after;
     const session = pre ? "프리마켓" : regular ? "정규장" : after ? "애프터마켓" : "장 마감";
+    const currentSession = pre ? "preMarket" : regular ? "regularMarket" : after ? "afterMarket" : "closed";
     const isDst = now.zone.toUpperCase().includes("EDT");
+    const hours = isDst
+      ? pre ? ["17:00", "22:30"] : regular ? ["22:30", "05:00"] : after ? ["05:00", "09:00"] : ["22:30", "05:00"]
+      : pre ? ["18:00", "23:30"] : regular ? ["23:30", "06:00"] : after ? ["06:00", "10:00"] : ["23:30", "06:00"];
     return {
       isOpen,
       label: `${session} · NASDAQ`,
       notice: isOpen
-        ? `${session} 빠른 시간 판정입니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`
-        : `미국 현지 거래시간 밖입니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`,
+        ? `${session} 빠른 시간 판정입니다 · ${hours[0]}~${hours[1]} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`
+        : `미국 현지 거래시간 밖입니다 · 정규장 ${hours[0]}~${hours[1]} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`,
       exchange: "NASDAQ",
-      currentSession: pre ? "preMarket" : regular ? "regularMarket" : after ? "afterMarket" : "closed",
+      currentSession,
       isDaylightSavingTime: isDst,
+      openTimeKst: hours[0],
+      closeTimeKst: hours[1],
       source: "NAVER" as const,
       stale: true,
     };
@@ -59,14 +66,19 @@ function quickFallback(market: Market) {
   const krx = weekday && now.minutes >= 9 * 60 && now.minutes < 15 * 60 + 30;
   const nxt = weekday && now.minutes >= 8 * 60 && now.minutes < 20 * 60;
   const isOpen = krx || nxt;
+  const exchange = krx ? "KRX" : nxt ? "NXT" : "KRX";
+  const openTimeKst = krx ? "09:00" : nxt ? "08:00" : "09:00";
+  const closeTimeKst = krx ? "15:30" : nxt ? "20:00" : "15:30";
   return {
     isOpen,
-    label: isOpen ? `${krx ? "정규장 · KRX" : "NXT 거래시간"}` : "장 마감",
+    label: isOpen ? `${krx ? "정규장 · KRX" : "NXT 거래시간"}` : "장 마감 · KRX",
     notice: isOpen
-      ? `${krx ? "KRX 정규장" : "NXT 거래시간"} 빠른 시간 판정입니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-      : "국내주식 거래시간 밖입니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다.",
-    exchange: krx ? "KRX" : nxt ? "NXT" : undefined,
+      ? `${krx ? "KRX 정규장" : "NXT 거래시간"} 빠른 시간 판정입니다 · ${openTimeKst}~${closeTimeKst} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+      : `국내주식 거래시간 밖입니다 · KRX 09:00~15:30 KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`,
+    exchange,
     currentSession: krx ? "regularMarket" : nxt ? "nxt" : "closed",
+    openTimeKst,
+    closeTimeKst,
     source: "NAVER" as const,
     stale: true,
   };
