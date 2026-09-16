@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
     const clientOrderId = typeof body.clientOrderId === "string" ? body.clientOrderId.trim() : "";
     const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    const exchange = typeof body.exchange === "string" ? body.exchange.trim() : body.exchange === undefined ? undefined : "";
+    let exchange = typeof body.exchange === "string" ? body.exchange.trim() : body.exchange === undefined ? undefined : "";
     if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !name || name.length > 80 ||
         (exchange !== undefined && (!exchange || exchange.length > 40 || /[\u0000-\u001F\u007F]/.test(exchange))) ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
@@ -67,8 +68,14 @@ export async function POST(request: Request) {
         (body.orderType === "limit" && (!Number.isFinite(body.limitPrice) || Number(body.limitPrice) <= 0))) {
       return Response.json({ error: "주문값을 확인해주세요." }, { status: 400 });
     }
+    if (exchange !== undefined) {
+      exchange = normalizeSupportedExchange(body.market, exchange);
+      if (!exchange) return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
+    }
     const symbol = normalizeNaverMarketSymbol(body.market, rawSymbol);
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (body.market === "US" && hasUnsupportedForeignReutersSuffix(symbol))) {
+      return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
+    }
 
     const participant = await env.DB!.prepare(
       `SELECT p.id,p.cash_krw AS cashKrw,c.status,c.starts_at AS startsAt,c.ends_at AS endsAt
