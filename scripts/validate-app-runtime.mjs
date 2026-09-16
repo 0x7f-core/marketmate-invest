@@ -34,6 +34,14 @@ async function waitForWorker() {
 await waitForWorker();
 console.log(`PASS worker ready at ${BASE}`);
 
+const homeResponse = await fetch(`${BASE}/`, { cache: "no-store", redirect: "manual" });
+const homeHtml = await homeResponse.text();
+assert(homeResponse.status === 200, `home page expected 200, got ${homeResponse.status}`);
+assert((homeResponse.headers.get("content-type") || "").toLowerCase().includes("text/html"), "home page is not HTML");
+assert(homeHtml.includes("마켓메이트"), "home page is missing MarketMate brand text");
+assert(homeHtml.includes("친구들과 투자대회 시작하기"), "home page is missing unauthenticated login heading");
+console.log(`PASS home HTML render (${homeHtml.length} chars)`);
+
 const unauth = await jsonRequest("/api/auth/me", { cache: "no-store" });
 assert(unauth.response.status === 401, `unauthenticated /api/auth/me expected 401, got ${unauth.response.status}`);
 console.log("PASS unauthenticated auth guard");
