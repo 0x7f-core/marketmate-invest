@@ -6,10 +6,6 @@ CREATE TABLE `__unsupported_orders_0008` (
   `id` text PRIMARY KEY NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `__unsupported_fills_0008` (
-  `id` text PRIMARY KEY NOT NULL
-);
---> statement-breakpoint
 INSERT INTO `__unsupported_instruments_0008` (`id`)
 SELECT `id`
 FROM `instruments`
@@ -65,15 +61,12 @@ WHERE
       OR UPPER(`symbol`) LIKE '%.J'
       OR UPPER(`symbol`) LIKE '%.SA'
       OR UPPER(`symbol`) LIKE '%.MX'
+      OR UPPER(`symbol`) GLOB '[0-9]*'
     )
   );
 --> statement-breakpoint
 INSERT INTO `__unsupported_orders_0008` (`id`)
 SELECT `id` FROM `orders`
-WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
---> statement-breakpoint
-INSERT INTO `__unsupported_fills_0008` (`id`)
-SELECT `id` FROM `fills`
 WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
 --> statement-breakpoint
 DELETE FROM `watchlist_items`
@@ -84,9 +77,6 @@ WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
 --> statement-breakpoint
 DELETE FROM `price_history`
 WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
---> statement-breakpoint
-DELETE FROM `cash_ledger`
-WHERE `reference_id` IN (SELECT `id` FROM `__unsupported_fills_0008`);
 --> statement-breakpoint
 DELETE FROM `positions`
 WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
@@ -103,8 +93,6 @@ WHERE (`target_type`='instrument' AND `target_id` IN (SELECT `id` FROM `__unsupp
 --> statement-breakpoint
 DELETE FROM `instruments`
 WHERE `id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
---> statement-breakpoint
-DROP TABLE `__unsupported_fills_0008`;
 --> statement-breakpoint
 DROP TABLE `__unsupported_orders_0008`;
 --> statement-breakpoint
