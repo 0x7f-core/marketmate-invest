@@ -1,3 +1,4 @@
+import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
@@ -26,8 +27,9 @@ function collect(value: unknown, depth = 0, output: Array<Record<string, unknown
 
 function marketOf(record: Record<string, unknown>): Market | null {
   const reuters = text(record, ["reutersCode", "reuterscode"]);
-  const exchange = text(record, ["exchangeType", "exchange", "marketType", "typeCode", "typeName"]);
+  const exchange = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "typeCode", "typeName"]);
   const nation = text(record, ["nationCode", "nationName", "nationType", "nation", "country"]);
+  const nationKind = classifySupportedNation(nation);
   const fqnf = text(record, ["fqnfTicker", "fqnf_ticker"]);
   const type = text(record, ["type", "category", "targetType", "assetType", "typeCode", "typeName"]);
   const url = text(record, ["url", "link", "href"]);
@@ -35,27 +37,24 @@ function marketOf(record: Record<string, unknown>): Market | null {
 
   if (fqnf || /UPBIT|BITHUMB|COIN|CRYPTO|가상자산/i.test(`${exchange} ${type}`)) return "CRYPTO";
 
+  // Explicit country metadata wins. This prevents Japanese, Chinese, Hong Kong,
+  // European and other world-stock rows from being relabeled as US stocks.
+  if (nationKind === "FOREIGN") return null;
+  if (nationKind === "KR") return "KR";
+  if (nationKind === "US") return "US";
+
   // Naver domestic autocomplete rows also expose reutersCode (e.g. 005930), so
   // a non-empty reutersCode alone must never classify a row as a US instrument.
-  if (/KOR|KOREA|대한민국/i.test(nation)
-      || /KOSPI|KOSDAQ|KRX|NXT|국내|코스피|코스닥/i.test(`${exchange} ${type}`)
+  if (/KOSPI|KOSDAQ|KRX|NXT|국내|코스피|코스닥/i.test(`${exchange} ${type}`)
       || /^\/domestic\//i.test(url)) return "KR";
 
-  if (/USA|US|UNITED STATES|미국/i.test(nation)
-      || /NASDAQ|NYSE|AMEX|NAS|NYS|AMS|미국/i.test(exchange)
-      || (reuters.includes(".") && !/^\d{6}(?:\.|$)/.test(reuters))) return "US";
+  if (normalizeSupportedExchange("US", exchange)) return "US";
+  if (hasUnsupportedForeignReutersSuffix(reuters)) return null;
+  if (reuters.includes(".") && !/^\d{6}(?:\.|$)/.test(reuters)) return "US";
 
   if (/^[A-Za-z0-9]{6}$/.test(code)) return "KR";
-  if (reuters && looksLikeCaseSensitiveReutersCode(reuters)) return "US";
+  if (reuters && looksLikeCaseSensitiveReutersCode(reuters) && !hasUnsupportedForeignReutersSuffix(reuters)) return "US";
   return null;
-}
-
-function normalizeUsExchange(value: string) {
-  const upper = value.toUpperCase();
-  if (upper.includes("NYSE AMERICAN") || upper.includes("AMEX") || upper === "AMS" || upper === "ASE") return "AMS";
-  if (upper.includes("NYSE") || upper === "NYS" || upper === "NYQ") return "NYS";
-  if (upper.includes("NASDAQ") || upper === "NAS" || upper === "NSQ" || upper === "NMS") return "NAS";
-  return value || "USA";
 }
 
 function normalize(record: Record<string, unknown>): SearchInstrument | null {
@@ -67,17 +66,25 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   let symbol = text(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
 
   if (market === "US" && reuters && looksLikeCaseSensitiveReutersCode(reuters)) symbol = reuters;
-  else if (market === "US" && !symbol && reuters) symbol = reuters.split(".")[0];
+  else if (market === "US" && !symbol && reuters) symbol = reuters;
   if (market === "CRYPTO") symbol = normalizeNaverMarketSymbol("CRYPTO", symbol || fqnf);
   if (!name || !symbol) return null;
 
+  if (market === "US" && hasUnsupportedForeignReutersSuffix(symbol)) return null;
   const normalizedSymbol = market === "US"
     ? normalizeNaverReutersCode(symbol)
     : market === "CRYPTO"
       ? normalizeNaverMarketSymbol("CRYPTO", symbol)
       : symbol.toUpperCase();
   const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "typeCode", "typeName", "nationType"]);
-  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? normalizeUsExchange(exchangeRaw) : "NAVER";
+  const nation = text(record, ["nationCode", "nationName", "nationType", "nation", "country"]);
+  const nationKind = classifySupportedNation(nation);
+  const exchange = market === "CRYPTO"
+    ? "NAVER"
+    : normalizeSupportedExchange(market, exchangeRaw)
+      || (market === "KR" && nationKind === "KR" ? "KRX" : "")
+      || (market === "US" && nationKind === "US" ? "USA" : "");
+  if (!exchange) return null;
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
 
