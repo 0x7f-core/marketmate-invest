@@ -13,7 +13,7 @@ function text(record: Record<string, unknown>, keys: string[]) {
 }
 
 function collect(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
-  if (depth > 5 || output.length >= 200 || value === null || value === undefined) return output;
+  if (depth > 5 || output.length >= 400 || value === null || value === undefined) return output;
   if (Array.isArray(value)) {
     for (const item of value) collect(item, depth + 1, output);
     return output;
@@ -91,19 +91,51 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
 
+function searchableSymbol(item: SearchInstrument) {
+  return item.market === "US" ? item.symbol.replace(/\.(?:O|K|N|P|A)$/i, "") : item.symbol;
+}
+
+function searchRank(item: SearchInstrument, query: string) {
+  const needle = query.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+  const symbol = searchableSymbol(item).normalize("NFKC").toLocaleLowerCase("en-US");
+  const name = item.name.normalize("NFKC").toLocaleLowerCase("en-US");
+  if (symbol === needle) return 0;
+  if (name === needle) return 1;
+  if (symbol.startsWith(needle)) return 2;
+  if (name.startsWith(needle)) return 3;
+  if (symbol.includes(needle)) return 4;
+  if (name.includes(needle)) return 5;
+  return 6;
+}
+
 export async function searchNaverMarket(query: string, market?: Market) {
   const target = market === "CRYPTO" ? "coin" : market === "KR" || market === "US" ? "stock" : "stock,coin";
-  const result = await naverJson<unknown>(
-    buildNaverPath("/api/autocomplete/search/autoComplete", { query, target }),
-    { ttlMs: 30_000, staleMs: 10 * 60_000 },
-  );
+  const requests = await Promise.allSettled([
+    naverJson<unknown>(
+      buildNaverPath("/api/autocomplete/search/autoComplete", { query, target }),
+      { ttlMs: 30_000, staleMs: 10 * 60_000 },
+    ),
+    naverJson<unknown>(
+      buildNaverPath("/api/autocomplete/search", { q: query, target, size: 100, page: 1 }),
+      { ttlMs: 30_000, staleMs: 10 * 60_000 },
+    ),
+  ]);
+
+  const successful = requests.filter((entry): entry is PromiseFulfilledResult<Awaited<ReturnType<typeof naverJson<unknown>>>> => entry.status === "fulfilled");
+  if (!successful.length) throw requests[0].status === "rejected" ? requests[0].reason : new Error("NAVER_SEARCH_UNAVAILABLE");
 
   const unique = new Map<string, SearchInstrument>();
-  for (const record of collect(result.data)) {
-    const item = normalize(record);
-    if (!item || (market && item.market !== market)) continue;
-    unique.set(`${item.market}:${item.symbol}`, item);
-    if (unique.size >= 20) break;
+  for (const response of successful) {
+    for (const record of collect(response.value.data)) {
+      const item = normalize(record);
+      if (!item || (market && item.market !== market)) continue;
+      unique.set(`${item.market}:${item.symbol}`, item);
+    }
   }
-  return { instruments: [...unique.values()], stale: result.stale };
+
+  const instruments = [...unique.values()]
+    .sort((a, b) => searchRank(a, query) - searchRank(b, query) || a.name.localeCompare(b.name, "ko"))
+    .slice(0, 40);
+
+  return { instruments, stale: successful.some(response => response.value.stale) };
 }
