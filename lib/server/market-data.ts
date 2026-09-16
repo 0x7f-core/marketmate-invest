@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
 import { buildNaverPath, naverJson, naverPolling } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
@@ -219,16 +220,6 @@ async function resolveReutersCode(symbol: string, exchange?: string) {
   return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
-async function usdKrwRate() {
-  const path = buildNaverPath("/api/securityService/integration/indicators", { indicatorCodes: "FX_USDKRW" });
-  const result = await naverJson<unknown>(path, { ttlMs: 30_000, staleMs: 10 * 60_000 });
-  const rows = collectRecords(result.data);
-  const exact = rows.find(row => stringValue(row, ["itemCode", "code", "symbol"]) === "FX_USDKRW") ?? rows[0];
-  const rate = exact ? asNumber(exact.currentPrice, exact.closePrice, exact.price, exact.value, exact.nowPrice) : 0;
-  if (rate <= 0) throw new Error("NAVER_FX_UNAVAILABLE");
-  return rate;
-}
-
 async function domesticQuote(symbol: string): Promise<LiveQuote> {
   const result = await naverPolling<unknown>(buildNaverPath("/api/polling/domestic/stock", { itemCodes: symbol }), { staleMs: 60_000 });
   const row = pollingRow(result.data);
@@ -239,7 +230,7 @@ async function domesticQuote(symbol: string): Promise<LiveQuote> {
   return { market: "KR", symbol, ...values, currency: "KRW", exchangeRate: 1, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
-async function foreignQuote(symbol: string, exchange?: string): Promise<LiveQuote> {
+async function foreignQuote(symbol: string, exchange?: string, exchangeRateOverride?: number): Promise<LiveQuote> {
   const code = await resolveReutersCode(symbol, exchange);
   const result = await naverPolling<unknown>(buildNaverPath("/api/polling/worldstock/stock", { reutersCodes: code }), { staleMs: 60_000 });
   const row = pollingRow(result.data);
@@ -247,7 +238,8 @@ async function foreignQuote(symbol: string, exchange?: string): Promise<LiveQuot
   const values = quoteValues(row);
   if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
   const sourceTimestamp = verifiedQuoteTimestamp(row);
-  return { market: "US", symbol, ...values, currency: "USD", exchangeRate: await usdKrwRate(), timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
+  const exchangeRate = exchangeRateOverride ?? (await getNaverUsdKrwRate()).rate;
+  return { market: "US", symbol, ...values, currency: "USD", exchangeRate, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
 function cryptoTicker(symbol: string) {
@@ -266,10 +258,10 @@ async function cryptoQuote(symbol: string): Promise<LiveQuote> {
   return { market: "CRYPTO", symbol: `KRW-${ticker}`, ...values, currency: "KRW", exchangeRate: 1, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
-export async function getLiveQuote(market: Market, symbol: string, exchange?: string) {
+export async function getLiveQuote(market: Market, symbol: string, exchange?: string, exchangeRateOverride?: number) {
   if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
   if (market === "KR") return domesticQuote(symbol.toUpperCase());
-  if (market === "US") return foreignQuote(symbol, exchange);
+  if (market === "US") return foreignQuote(symbol, exchange, exchangeRateOverride);
   return cryptoQuote(symbol);
 }
 
