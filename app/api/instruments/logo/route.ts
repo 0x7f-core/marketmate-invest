@@ -120,9 +120,8 @@ export async function GET(request: Request) {
       }
     }
 
-    // US ETFs expose Naver's issuer/leverage artwork through itemLogoUrl
-    // (SPDR/Invesco/Vanguard, 2x/3x, etc.). Common stocks often use the normal
-    // Stock{ReutersCode}.svg asset instead, so only use this after metadata.
+    // Metadata-first resolution preserves Naver's three US visual schemes:
+    // company CI, ETF issuer branding, and dedicated leverage/inverse icons.
     if (logo) return redirectLogo(logo);
 
     const fallback = directStockLogo(cleanSymbol(basic?.reutersCode ?? "") || resolvedSymbol);
