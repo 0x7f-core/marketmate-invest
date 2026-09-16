@@ -74,7 +74,7 @@ const DEFAULTS: Record<Market, Quote> = {
 function formatPrice(quote: Quote) {
   if (!quote.price) return "시세 확인 중";
   return quote.currency === "USD"
-    ? `$${quote.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+    ? `$${quote.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `${quote.price.toLocaleString("ko-KR")}원`;
 }
 
