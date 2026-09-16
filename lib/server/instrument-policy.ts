@@ -3,8 +3,8 @@ type SupportedMarket = "KR" | "US" | "CRYPTO";
 export type SupportedNation = "KR" | "US" | "FOREIGN" | null;
 
 const FOREIGN_REUTERS_SUFFIXES = new Set([
-  "T", "HK", "SS", "SZ", "L", "DE", "PA", "TO", "V", "AX", "NS", "BO", "SI", "KS", "KQ",
-  "TW", "TWO", "MI", "AS", "BR", "SW", "ST", "HE", "CO", "OL", "VI", "MC", "WA", "PR", "BD",
+  "T", "HK", "SS", "SZ", "L", "DE", "F", "PA", "TO", "V", "AX", "NS", "BO", "SI", "KS", "KQ",
+  "TW", "TWO", "MI", "AS", "BR", "S", "SW", "ST", "HE", "CO", "OL", "VI", "MC", "WA", "PR", "BU",
   "AT", "IR", "JO", "KL", "BK", "JK", "J", "SA", "MX",
 ]);
 
@@ -16,7 +16,7 @@ export function classifySupportedNation(value: string): SupportedNation {
   const nation = canonical(value);
   if (!nation) return null;
 
-  if (["KR", "KOR", "KOREA", "SOUTH KOREA", "REPUBLIC OF KOREA", "대한민국", "한국"].includes(nation)) return "KR";
+  if (["KR", "KOR", "KOREA", "SOUTH KOREA", "REPUBLIC OF KOREA", "KOREA REPUBLIC OF", "대한민국", "한국"].includes(nation)) return "KR";
   if (["US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA", "AMERICA", "미국", "미합중국"].includes(nation)) return "US";
   return "FOREIGN";
 }
@@ -39,6 +39,7 @@ export function normalizeSupportedExchange(market: SupportedMarket, value: strin
 
   if (compact.includes("NYSEAMERICAN") || compact.includes("AMEX") || ["AMS", "ASE"].includes(compact)) return "AMS";
   if (compact.includes("NYSEARCA") || compact === "ARCA" || compact.includes("CBOE") || compact.includes("BATS") || compact.includes("BZX")) return "USA";
+  if (compact.includes("OTCQX") || compact.includes("OTCQB") || compact === "OTC") return "USA";
   if (compact.includes("NYSE") || ["NYS", "NYQ"].includes(compact)) return "NYS";
   if (compact.includes("NASDAQ") || ["NAS", "NSQ", "NMS"].includes(compact)) return "NAS";
   if (["USA", "US"].includes(compact)) return compact;
