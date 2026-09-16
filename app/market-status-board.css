@@ -1,0 +1,29 @@
+/* Compact live trading-session board modeled on the Npay Securities home status row. */
+.np-market-status{
+  display:flex;
+  align-items:center;
+  gap:0;
+  min-height:38px;
+  padding:0 2px 10px;
+  color:#626a72;
+  font-size:12px;
+  white-space:nowrap;
+  overflow-x:auto;
+  scrollbar-width:none;
+}
+.np-market-status::-webkit-scrollbar{display:none}
+.np-market-status .market-status-item{display:inline-flex;align-items:center;gap:5px;flex:none}
+.np-market-status .market-status-item:not(:last-child)::after{content:"·";margin:0 9px 0 5px;color:#b5bbc1;font-weight:700}
+.np-market-status .market-status-dot{width:6px;height:6px;border-radius:50%;background:#00c73c;flex:none}
+.np-market-status .market-status-dot.closed{background:#aeb5bb}
+.np-market-status .market-status-name{color:#555d64;font-weight:700}
+.np-market-status .market-status-session{color:#596169;font-weight:600}
+.np-market-status .market-status-session.open{color:#00a832}
+.np-market-status .market-status-time{color:#7f8891;font-variant-numeric:tabular-nums}
+.np-market-status .market-status-badge{padding:2px 4px;border-radius:3px;background:#eaf8ee;color:#00a832;font-size:10px;font-weight:800;line-height:1.35}
+.np-market-status .market-status-badge.closed{background:#f1f3f4;color:#7a828a}
+.np-market-status .market-status-loading{color:#8d949b}
+@media(max-width:760px){
+  .np-market-status{min-height:38px;padding:9px 15px;background:#fff;border-bottom:1px solid #eef0f2;gap:0}
+  .np-market-status .market-status-item:not(:last-child)::after{margin-inline:7px 4px}
+}
