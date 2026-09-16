@@ -1,5 +1,6 @@
 import { apiError, requireUser } from "@/lib/server/auth";
-import { searchNaverInstruments, type Market } from "@/lib/server/market-data";
+import { searchNaverMarket } from "@/lib/server/market-search";
+import type { Market } from "@/lib/server/market-data";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { enforceRateLimit } from "@/lib/server/safety";
 
@@ -13,20 +14,9 @@ export async function GET(request: Request) {
     if (query.length < 1 || query.length > 40) return Response.json({ instruments: [] });
     if (market && !["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "지원하지 않는 시장입니다." }, { status: 400 });
 
-    if (market) {
-      const result = await searchNaverInstruments(query, market);
-      return Response.json({ instruments: result.instruments, source: "NAVER", stale: result.stale }, { headers: { "cache-control": "private, max-age=15" } });
-    }
-
-    const results = await Promise.all([
-      searchNaverInstruments(query, "KR"),
-      searchNaverInstruments(query, "US"),
-      searchNaverInstruments(query, "CRYPTO"),
-    ]);
-    const unique = new Map<string, (typeof results)[number]["instruments"][number]>();
-    for (const result of results) for (const item of result.instruments) unique.set(`${item.market}:${item.symbol}`, item);
+    const result = await searchNaverMarket(query, market ?? undefined);
     return Response.json(
-      { instruments: [...unique.values()].slice(0, 20), source: "NAVER", stale: results.some(result => result.stale) },
+      { instruments: result.instruments, source: "NAVER", stale: result.stale },
       { headers: { "cache-control": "private, max-age=15" } },
     );
   } catch (error) {
