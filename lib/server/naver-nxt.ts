@@ -34,7 +34,7 @@ function parseTimestamp(value: unknown) {
 }
 
 function rowTimestamp(row: Row) {
-  for (const key of ["localTradedAt", "tradeDateTime", "tradeBaseAt", "dateTime", "timestamp", "datetime", "businessDate", "baseDate", "xymd"]) {
+  for (const key of ["localTradedAt", "tradeDateTime", "tradedAt", "tradeBaseAt", "dateTime", "timestamp", "datetime", "tradeTimestamp", "candleDateTimeKst", "candleDateTimeUtc", "businessDate", "baseDate", "xymd"]) {
     const parsed = parseTimestamp(row[key]);
     if (parsed > 0) return parsed;
   }
@@ -66,6 +66,7 @@ export async function getNxtLiveQuote(symbolInput: string): Promise<LiveQuote> {
     currency: "KRW",
     exchangeRate: 1,
     timestamp,
+    timestampVerified: true,
     source: "NAVER",
     stale: result.stale,
     pollingInterval: result.pollingInterval,
