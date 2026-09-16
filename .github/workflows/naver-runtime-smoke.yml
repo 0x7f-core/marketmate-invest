@@ -12,7 +12,7 @@ on:
     - cron: "20 0 * * 1-5"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: naver-runtime-smoke
@@ -27,6 +27,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Patch malformed Naver logo URL builder
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('app/trading-dashboard.tsx')
+          source = path.read_text()
+          old = '''function instrumentLogoUrl(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="KR")return `https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock${instrument.symbol}.svg`;if(instrument.market==="CRYPTO")return "/favicon.svg";const suffix=instrument.exchange==="NYS"?"K":instrument.exchange==="AMS"?"A":"O";return `https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock${instrument.symbol.replace("_", ".")}.${suffix}.svg`;}
+          function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[failed,setFailed]=useState(false);return <span className={`instrument-logo ${size}`}>{failed?instrument.name.slice(0,1):<img src={instrumentLogoUrl(instrument)} alt={`${instrument.name} 로고`} onError={()=>setFailed(true)}/>}</span>;}'''
+          new = '''const NAVER_STOCK_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
+          function normalizeNaverLogoCode(symbol:string){let clean=String(symbol??"").trim().replaceAll("\\\\","/");const tail=clean.split("/").filter(Boolean).pop()??"";clean=tail.replace(/\\.svg$/i,"").replace(/^(?:Stock)+/i,"");return clean.replace(/[^A-Za-z0-9._-]/g,"");}
+          function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];const urls=[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];if(instrument.market==="US"){const ticker=code.replace(/\\.[A-Za-z]$/,"");if(ticker&&ticker!==code)urls.push(`${NAVER_STOCK_LOGO_BASE}Stock${ticker}.svg`);}return[...new Set(urls)];}
+          function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}`}>{failed?instrument.name.slice(0,1):<img src={src} alt={`${instrument.name} 로고`} onError={()=>setAttempt(value=>value+1)}/>}</span>;}'''
+          if old not in source:
+              raise SystemExit('Expected logo builder block was not found; refusing an unsafe patch.')
+          path.write_text(source.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff -- app/trading-dashboard.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/trading-dashboard.tsx
+          git commit -m "Fix recursive Naver stock logo paths"
+          git push origin HEAD:main
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -34,51 +59,3 @@ jobs:
 
       - name: Validate live Naver Stock endpoints
         run: node scripts/validate-naver-runtime.mjs
-
-      - name: Diagnose live US logo assets
-        run: |
-          node <<'NODE'
-          const urls = [
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQ.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQ.O.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQD.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQD.K.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSOXL.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSOXL.O.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSPY.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSPY.P.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockGEV.svg',
-            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockGEV.N.svg',
-          ];
-          for (const url of urls) {
-            try {
-              const response = await fetch(url, { headers: { 'user-agent':'Mozilla/5.0', referer:'https://stock.naver.com/' }, redirect:'manual' });
-              const body = await response.text();
-              console.log('LOGO_ASSET', response.status, response.headers.get('content-type'), body.length, url, body.slice(0, 260).replace(/\s+/g,' '));
-            } catch (error) {
-              console.log('LOGO_ASSET_ERROR', url, String(error));
-            }
-          }
-
-          const page = await fetch('https://stock.naver.com/market/stock/usa/stocklist/priceTop', { headers: { 'user-agent':'Mozilla/5.0' } });
-          const html = await page.text();
-          const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(match => new URL(match[1], 'https://stock.naver.com').href);
-          console.log('PAGE_SCRIPTS', scripts.length);
-          for (const script of scripts) {
-            try {
-              const js = await (await fetch(script, { headers: { 'user-agent':'Mozilla/5.0', referer:'https://stock.naver.com/' } })).text();
-              const hits = [];
-              for (const token of ['thumbnailItemCode', 'imgstock/fn/real/logo', '/logo/stock/', 'Stock.svg', 'stock/Stock']) {
-                let from = 0;
-                while (true) {
-                  const i = js.indexOf(token, from);
-                  if (i < 0) break;
-                  hits.push(js.slice(Math.max(0,i-600), i+1000));
-                  from = i + token.length;
-                  if (hits.length >= 8) break;
-                }
-              }
-              if (hits.length) console.log('JS_LOGO_MATCH', script, hits.join('\n---\n').slice(0,16000));
-            } catch {}
-          }
-          NODE
