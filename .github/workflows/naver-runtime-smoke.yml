@@ -8,11 +8,16 @@ on:
     paths:
       - scripts/validate-naver-runtime.mjs
       - .github/workflows/naver-runtime-smoke.yml
+  # Scheduled runs become active from the default branch after this PR is merged.
   schedule:
     - cron: "20 0 * * 1-5"
 
 permissions:
   contents: read
+
+concurrency:
+  group: naver-runtime-smoke
+  cancel-in-progress: true
 
 jobs:
   smoke:
