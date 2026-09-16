@@ -40,7 +40,7 @@ jobs:
         run: pnpm run validate:migration
 
       - name: validate:search-contract
-        run: pnpm run validate:search-contract
+        run: node scripts/validate-naver-search-contract.mjs
 
       - name: validate:legacy-config
         run: pnpm run validate:legacy-config
