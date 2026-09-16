@@ -13,13 +13,14 @@ const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency
 function normalizeExchange(market: Market, value: string) {
   if (market === "CRYPTO") return "NAVER";
   const exchange = value.trim().toUpperCase();
-  if (!/^[A-Z0-9._-]{1,16}$/.test(exchange)) return "";
   if (market === "US") {
-    if (exchange.includes("AMEX") || exchange.includes("NYSEAMERICAN") || ["AMS", "ASE"].includes(exchange)) return "AMS";
-    if (exchange.includes("NYSE") || ["NYS", "NYQ"].includes(exchange)) return "NYS";
-    if (exchange.includes("NASDAQ") || ["NAS", "NSQ", "NMS"].includes(exchange)) return "NAS";
-    return ["USA", "US"].includes(exchange) ? exchange : "";
+    const compact = exchange.replace(/[\s._-]+/g, "");
+    if (compact.includes("AMEX") || compact.includes("NYSEAMERICAN") || ["AMS", "ASE"].includes(compact)) return "AMS";
+    if (compact.includes("NYSE") || ["NYS", "NYQ"].includes(compact)) return "NYS";
+    if (compact.includes("NASDAQ") || ["NAS", "NSQ", "NMS"].includes(compact)) return "NAS";
+    return ["USA", "US"].includes(compact) ? compact : "";
   }
+  if (!/^[A-Z0-9._-]{1,16}$/.test(exchange)) return "";
   return ["KRX", "NXT", "KOSPI", "KOSDAQ", "KONEX"].includes(exchange) ? exchange : "";
 }
 
