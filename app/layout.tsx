@@ -214,6 +214,7 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
   const render = () => {
     document.querySelectorAll(".np-market-status").forEach((board) => {
       if (!(board instanceof HTMLElement)) return;
+      board.dataset.marketStatusLive = "1";
       board.setAttribute("aria-label", "실시간 거래 가능 시간");
       board.setAttribute("aria-live", "polite");
       board.replaceChildren(...markets.map((market) => makeItem(market, cache.get(market))));
@@ -248,7 +249,8 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
     void load();
     window.setInterval(load, 20_000);
     const observer = new MutationObserver(() => {
-      if (document.querySelector(".np-market-status")) {
+      const board = document.querySelector(".np-market-status");
+      if (board instanceof HTMLElement && board.dataset.marketStatusLive !== "1") {
         render();
         void load();
       }
