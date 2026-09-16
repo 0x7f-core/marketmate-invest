@@ -1,0 +1,51 @@
+name: One-shot fix US logos
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/one-shot-fix-us-logos.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch US logo candidates
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('app/trading-dashboard.tsx')
+          text = path.read_text()
+
+          old_default = 'US: { market: "US", symbol: "AAPL", name: "애플", exchange: "NAS", currency: "USD", price: 0, change: 0, rate: 0, exchangeRate: 1 },'
+          new_default = 'US: { market: "US", symbol: "AAPL.O", name: "애플", exchange: "NAS", currency: "USD", price: 0, change: 0, rate: 0, exchangeRate: 1 },'
+          if old_default not in text:
+              raise SystemExit('US default snippet not found')
+          text = text.replace(old_default, new_default, 1)
+
+          old_logo = 'function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];const urls=[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];if(instrument.market==="US"){const ticker=code.replace(/\\.[A-Za-z]$/,"");if(ticker&&ticker!==code)urls.push(`${NAVER_STOCK_LOGO_BASE}Stock${ticker}.svg`);}return[...new Set(urls)];}'
+          new_logo = 'function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`,resolver])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}'
+          if old_logo not in text:
+              raise SystemExit('instrumentLogoCandidates snippet not found')
+          text = text.replace(old_logo, new_logo, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/trading-dashboard.tsx
+          git diff --cached --check
+          git commit -m "Fix Naver US stock and ETF logos"
+          git push origin HEAD:main
