@@ -26,6 +26,9 @@ export async function GET(request: Request) {
       try {
         const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
         if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
+        if (instrument.market === "KR" && quote.venue) {
+          await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, instrument.id).run();
+        }
         await persistQuoteSnapshot(quote);
       } catch {
         await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
