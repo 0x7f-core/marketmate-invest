@@ -1,5 +1,6 @@
 .mobile-contest-entry{display:none}
 .live-pill.pending{color:#7d858d;border-color:#e1e5e8}.live-pill.pending i{background:#9aa1a8}
+.np-home-main > .live-market-strip{display:none!important}
 @media(max-width:760px){
   .live-market-strip{display:none!important}
   .mobile-contest-entry{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:9px solid #f1f3f4}
