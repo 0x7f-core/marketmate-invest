@@ -9,6 +9,12 @@ type FxQuote = {
   unit: string;
 };
 
+type CompetitionInvite = {
+  id: string;
+  name: string;
+  inviteCode: string;
+};
+
 function replaceTextNode(element: Element | null, from: string, to: string) {
   if (!element) return;
   for (const node of Array.from(element.childNodes)) {
@@ -35,6 +41,33 @@ function patchHorizontalFx(fx: FxQuote | null) {
       rate.textContent = `${fx.rate >= 0 ? "+" : ""}${fx.rate.toFixed(2)}%`;
     }
   });
+}
+
+function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
+  const overview = document.querySelector<HTMLElement>(".contest-overview");
+  if (!overview) return;
+
+  const host = overview.firstElementChild as HTMLElement | null;
+  if (!host) return;
+
+  const selectedId = overview.querySelector<HTMLSelectElement>("select")?.value ?? "";
+  const title = overview.querySelector("h1")?.textContent?.trim() ?? "";
+  const competition = (selectedId ? competitions.find(item => item.id === selectedId) : undefined)
+    ?? competitions.find(item => item.name === title);
+
+  let row = host.querySelector<HTMLElement>(".competition-invite-code");
+  if (!competition?.inviteCode) {
+    row?.remove();
+    return;
+  }
+
+  if (!row) {
+    row = document.createElement("p");
+    row.className = "competition-invite-code";
+    host.appendChild(row);
+  }
+
+  row.textContent = `참가 코드 ${competition.inviteCode}`;
 }
 
 function patchCryptoSourceLabels(fx: FxQuote | null) {
@@ -110,7 +143,9 @@ export default function CryptoSourceLabels() {
   useEffect(() => {
     let active = true;
     let latestFx: FxQuote | null = null;
+    let competitions: CompetitionInvite[] = [];
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let competitionTimer: ReturnType<typeof setTimeout> | undefined;
     let scheduled = false;
 
     const schedulePatch = () => {
@@ -119,6 +154,7 @@ export default function CryptoSourceLabels() {
       requestAnimationFrame(() => {
         scheduled = false;
         patchCryptoSourceLabels(latestFx);
+        patchCompetitionInviteCode(competitions);
       });
     };
 
@@ -135,14 +171,30 @@ export default function CryptoSourceLabels() {
       }
     };
 
+    const loadCompetitionInvites = async () => {
+      try {
+        const response = await fetch("/api/competitions", { cache: "no-store" });
+        const data = response.ok ? await response.json() as { competitions?: CompetitionInvite[] } : null;
+        if (!active) return;
+        competitions = data?.competitions ?? [];
+        schedulePatch();
+      } catch {
+        // Keep the last known invite codes if the request temporarily fails.
+      } finally {
+        if (active) competitionTimer = setTimeout(loadCompetitionInvites, 20_000);
+      }
+    };
+
     schedulePatch();
     void loadFx();
+    void loadCompetitionInvites();
     const observer = new MutationObserver(schedulePatch);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     return () => {
       active = false;
       observer.disconnect();
       if (pollTimer) clearTimeout(pollTimer);
+      if (competitionTimer) clearTimeout(competitionTimer);
     };
   }, []);
 
