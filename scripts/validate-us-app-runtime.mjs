@@ -25,33 +25,6 @@ async function waitForWorker() {
   throw new Error("local Worker did not become ready");
 }
 
-async function probeNaver(path, label) {
-  const startedAt = Date.now();
-  try {
-    const response = await fetch(`https://stock.naver.com${path}`, {
-      headers: {
-        accept: "application/json, text/plain, */*",
-        "accept-language": "ko-KR,ko;q=0.9,en;q=0.8",
-        referer: "https://stock.naver.com/",
-        "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/153 Safari/537.36",
-      },
-      redirect: "manual",
-    });
-    const text = await response.text();
-    let data = null;
-    try { data = JSON.parse(text); } catch {}
-    const root = data && typeof data === "object" ? data : null;
-    const sample = Array.isArray(root)
-      ? root.slice(0, 2)
-      : root && typeof root === "object"
-        ? Object.fromEntries(Object.entries(root).slice(0, 12))
-        : text.slice(0, 800);
-    console.log(`PROBE ${label}: status=${response.status}, ms=${Date.now() - startedAt}, body=${JSON.stringify(sample).slice(0, 5000)}`);
-  } catch (error) {
-    console.log(`PROBE ${label}: ERROR ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 await waitForWorker();
 
 const registered = await jsonRequest("/api/auth/register", {
@@ -64,27 +37,12 @@ const cookie = (registered.response.headers.get("set-cookie") || "").split(";")[
 assert(cookie.startsWith("marketmate_session="), "US smoke session cookie missing");
 const headers = { cookie };
 
-const search = await jsonRequest("/api/instruments/search?q=SOXS&market=US", { headers, cache: "no-store" });
-assert(search.response.status === 200, `SOXS search expected 200, got ${search.response.status}: ${JSON.stringify(search.data)}`);
-const instrument = search.data?.instruments?.find(item => item?.market === "US" && item?.symbol === "SOXS") ?? search.data?.instruments?.find(item => item?.market === "US");
-assert(instrument, `SOXS missing from Naver-backed search: ${JSON.stringify(search.data?.instruments)}`);
-console.log(`PASS SOXS search (${instrument.name}, ${instrument.symbol}, ${instrument.exchange}, ${search.elapsedMs}ms)`);
-
 const aaplSearch = await jsonRequest("/api/instruments/search?q=AAPL&market=US", { headers, cache: "no-store" });
-const aapl = aaplSearch.data?.instruments?.find(item => item?.market === "US") ?? { symbol: "AAPL", exchange: "NAS" };
-console.log(`INFO AAPL search (${aapl.name ?? "Apple"}, ${aapl.symbol}, ${aapl.exchange})`);
-
-await probeNaver("/api/autocomplete/search/autoComplete?query=AAPL&target=stock", "AAPL autocomplete");
-await probeNaver("/api/autocomplete/search/autoComplete?query=SOXS&target=stock", "SOXS autocomplete");
-await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=3", "AAPL stock price size3");
-await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=20", "AAPL stock price size20");
-await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=100", "AAPL stock price size100");
-await probeNaver("/api/securityService/stock/AAPL/price?page=1&pageSize=3", "AAPL plain stock price");
-await probeNaver("/api/securityService/etf/SOXS/price?page=1&pageSize=3", "SOXS ETF ticker price");
-await probeNaver("/api/securityService/etf/SOXS.O/price?page=1&pageSize=3", "SOXS ETF Reuters O price");
-await probeNaver("/api/securityService/etf/SOXS.A/price?page=1&pageSize=3", "SOXS ETF Reuters A price");
-await probeNaver("/api/securityService/stock/SOXS.O/price?page=1&pageSize=3", "SOXS stock Reuters O price");
-await probeNaver("/api/securityService/stock/SOXS.A/price?page=1&pageSize=3", "SOXS stock Reuters A price");
+assert(aaplSearch.response.status === 200, `AAPL search expected 200, got ${aaplSearch.response.status}`);
+const aapl = aaplSearch.data?.instruments?.find(item => item?.market === "US" && item?.symbol === "AAPL")
+  ?? aaplSearch.data?.instruments?.find(item => item?.market === "US");
+assert(aapl, `AAPL missing from Naver-backed search: ${JSON.stringify(aaplSearch.data?.instruments)}`);
+console.log(`PASS AAPL search (${aapl.name}, ${aapl.symbol}, ${aapl.exchange}, ${aaplSearch.elapsedMs}ms)`);
 
 const status = await jsonRequest("/api/market-status?market=US", { headers, cache: "no-store" });
 assert(status.response.status === 200, `US market status expected 200, got ${status.response.status}: ${JSON.stringify(status.data)}`);
@@ -94,18 +52,27 @@ console.log(`PASS US market-status (${status.data.label}, ${status.elapsedMs}ms)
 
 const aaplChartParams = new URLSearchParams({ market: "US", symbol: aapl.symbol, exchange: aapl.exchange || "NAS", range: "1M" });
 const aaplChart = await jsonRequest(`/api/chart?${aaplChartParams.toString()}`, { headers, cache: "no-store" });
-console.log(`INFO AAPL chart status=${aaplChart.response.status}, ms=${aaplChart.elapsedMs}, data=${JSON.stringify(aaplChart.data).slice(0, 1200)}`);
+assert(aaplChart.response.status === 200, `AAPL chart expected 200, got ${aaplChart.response.status}: ${JSON.stringify(aaplChart.data)}`);
+assert(aaplChart.data?.source === "NAVER" && Array.isArray(aaplChart.data?.points) && aaplChart.data.points.length > 0, `AAPL chart missing points: ${JSON.stringify(aaplChart.data)}`);
+console.log(`PASS AAPL 1M chart (${aaplChart.data.points.length} points, ${aaplChart.elapsedMs}ms)`);
 
-const chartParams = new URLSearchParams({ market: "US", symbol: instrument.symbol, exchange: instrument.exchange || "AMS", range: "3M" });
-const chart = await jsonRequest(`/api/chart?${chartParams.toString()}`, { headers, cache: "no-store" });
-assert(chart.response.status === 200, `SOXS 3M chart expected 200, got ${chart.response.status}: ${JSON.stringify(chart.data)}`);
-assert(chart.data?.source === "NAVER" && Array.isArray(chart.data?.points) && chart.data.points.length > 0, `SOXS chart missing points: ${JSON.stringify(chart.data)}`);
-console.log(`PASS SOXS 3M chart (${chart.data.points.length} points, ${chart.elapsedMs}ms)`);
+const soxsSearch = await jsonRequest("/api/instruments/search?q=SOXS&market=US", { headers, cache: "no-store" });
+assert(soxsSearch.response.status === 200, `SOXS search expected 200, got ${soxsSearch.response.status}: ${JSON.stringify(soxsSearch.data)}`);
+const soxs = soxsSearch.data?.instruments?.find(item => item?.market === "US" && item?.symbol === "SOXS")
+  ?? soxsSearch.data?.instruments?.find(item => item?.market === "US");
+assert(soxs, `SOXS missing from Naver-backed search: ${JSON.stringify(soxsSearch.data?.instruments)}`);
+console.log(`PASS SOXS search (${soxs.name}, ${soxs.symbol}, ${soxs.exchange}, ${soxsSearch.elapsedMs}ms)`);
 
-const newsParams = new URLSearchParams({ market: "US", symbol: instrument.symbol, name: instrument.name || "SOXS", exchange: instrument.exchange || "AMS" });
+const soxsChartParams = new URLSearchParams({ market: "US", symbol: soxs.symbol, exchange: soxs.exchange || "AMS", range: "3M" });
+const soxsChart = await jsonRequest(`/api/chart?${soxsChartParams.toString()}`, { headers, cache: "no-store" });
+assert(soxsChart.response.status === 200, `SOXS 3M chart expected 200, got ${soxsChart.response.status}: ${JSON.stringify(soxsChart.data)}`);
+assert(soxsChart.data?.source === "NAVER" && Array.isArray(soxsChart.data?.points) && soxsChart.data.points.length > 0, `SOXS chart missing points: ${JSON.stringify(soxsChart.data)}`);
+console.log(`PASS SOXS 3M chart (${soxsChart.data.points.length} points, ${soxsChart.elapsedMs}ms)`);
+
+const newsParams = new URLSearchParams({ market: "US", symbol: soxs.symbol, name: soxs.name || "SOXS", exchange: soxs.exchange || "AMS" });
 const news = await jsonRequest(`/api/news?${newsParams.toString()}`, { headers, cache: "no-store" });
 assert(news.response.status === 200, `SOXS news expected 200, got ${news.response.status}: ${JSON.stringify(news.data)}`);
 assert(news.data?.source === "NAVER" && Array.isArray(news.data?.items), `SOXS news response contract mismatch: ${JSON.stringify(news.data)}`);
 console.log(`PASS SOXS news contract (${news.data.items.length} items, ${news.elapsedMs}ms)`);
 
-console.log("All US ETF app runtime smoke checks passed.");
+console.log("All US stock/ETF app runtime smoke checks passed.");
