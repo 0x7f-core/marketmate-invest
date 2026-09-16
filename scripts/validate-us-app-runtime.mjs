@@ -25,6 +25,10 @@ async function waitForWorker() {
   throw new Error("local Worker did not become ready");
 }
 
+function tickerOf(symbol) {
+  return String(symbol || "").toUpperCase().replace(/\.[A-Z]$/, "");
+}
+
 await waitForWorker();
 
 const registered = await jsonRequest("/api/auth/register", {
@@ -37,9 +41,51 @@ const cookie = (registered.response.headers.get("set-cookie") || "").split(";")[
 assert(cookie.startsWith("marketmate_session="), "US smoke session cookie missing");
 const headers = { cookie };
 
+// Naver uses three different US visual schemes: company Stock{ReutersCode}
+// artwork, ETF issuer brands, and dedicated leverage/inverse ETF icons. Keep a
+// representative matrix here so a ticker-only regression cannot silently make
+// most US logos disappear again.
+const logoCases = [
+  ["AAPL", "/logo/stock/StockAAPL.O.svg"],
+  ["NVDA", "/logo/stock/StockNVDA.O.svg"],
+  ["GEV", "/logo/stock/StockGEV.svg"],
+  ["SPY", "/logo/brand/foreign/StockBRANDSPDR.svg"],
+  ["QQQ", "/logo/brand/foreign/StockBRANDInvesco.svg"],
+  ["SOXL", "/logo/etf/StockUSETFLeverage3x.svg"],
+  ["IWM", "/logo/brand/foreign/StockBRANDIshares.svg"],
+  ["SOXX", "/logo/brand/foreign/StockBRANDIshares.svg"],
+  ["VOO", "/logo/brand/foreign/StockBRANDVanguard.svg"],
+  ["SOXS", "/logo/etf/StockUSETFInverse3x.svg"],
+  ["TQQQ", "/logo/etf/StockUSETFLeverage3x.svg"],
+  ["SCHD", "/logo/brand/foreign/StockBRANDCharlesSchwab.svg"],
+  ["SMH", "/logo/brand/foreign/StockBRANDVanEck.svg"],
+];
+
+for (const [ticker, expectedPath] of logoCases) {
+  const search = await jsonRequest(`/api/instruments/search?q=${encodeURIComponent(ticker)}&market=US`, { headers, cache: "no-store" });
+  assert(search.response.status === 200, `${ticker} search expected 200, got ${search.response.status}`);
+  const instrument = search.data?.instruments?.find(item => item?.market === "US" && tickerOf(item?.symbol) === ticker)
+    ?? search.data?.instruments?.find(item => item?.market === "US");
+  assert(instrument, `${ticker} missing from Naver-backed search: ${JSON.stringify(search.data?.instruments)}`);
+
+  const logoResponse = await fetch(`${BASE}/api/instruments/logo?symbol=${encodeURIComponent(instrument.symbol)}`, {
+    headers,
+    cache: "no-store",
+    redirect: "manual",
+  });
+  assert(logoResponse.status === 302, `${ticker} logo resolver expected 302, got ${logoResponse.status} (${instrument.symbol})`);
+  const location = logoResponse.headers.get("location") || "";
+  assert(location.startsWith("https://ssl.pstatic.net/imgstock/fn/"), `${ticker} logo points outside Naver assets: ${location}`);
+  assert(location.includes(expectedPath), `${ticker} logo mismatch: expected ${expectedPath}, got ${location}`);
+
+  const imageResponse = await fetch(location, { signal: AbortSignal.timeout(5_000) });
+  assert(imageResponse.ok, `${ticker} Naver logo asset failed: ${imageResponse.status} ${location}`);
+  console.log(`PASS ${ticker} logo (${instrument.symbol} -> ${location})`);
+}
+
 const aaplSearch = await jsonRequest("/api/instruments/search?q=AAPL&market=US", { headers, cache: "no-store" });
 assert(aaplSearch.response.status === 200, `AAPL search expected 200, got ${aaplSearch.response.status}`);
-const aapl = aaplSearch.data?.instruments?.find(item => item?.market === "US" && item?.symbol === "AAPL")
+const aapl = aaplSearch.data?.instruments?.find(item => item?.market === "US" && tickerOf(item?.symbol) === "AAPL")
   ?? aaplSearch.data?.instruments?.find(item => item?.market === "US");
 assert(aapl, `AAPL missing from Naver-backed search: ${JSON.stringify(aaplSearch.data?.instruments)}`);
 console.log(`PASS AAPL search (${aapl.name}, ${aapl.symbol}, ${aapl.exchange}, ${aaplSearch.elapsedMs}ms)`);
@@ -58,7 +104,7 @@ console.log(`PASS AAPL 1M chart (${aaplChart.data.points.length} points, ${aaplC
 
 const soxsSearch = await jsonRequest("/api/instruments/search?q=SOXS&market=US", { headers, cache: "no-store" });
 assert(soxsSearch.response.status === 200, `SOXS search expected 200, got ${soxsSearch.response.status}: ${JSON.stringify(soxsSearch.data)}`);
-const soxs = soxsSearch.data?.instruments?.find(item => item?.market === "US" && item?.symbol === "SOXS")
+const soxs = soxsSearch.data?.instruments?.find(item => item?.market === "US" && tickerOf(item?.symbol) === "SOXS")
   ?? soxsSearch.data?.instruments?.find(item => item?.market === "US");
 assert(soxs, `SOXS missing from Naver-backed search: ${JSON.stringify(soxsSearch.data?.instruments)}`);
 console.log(`PASS SOXS search (${soxs.name}, ${soxs.symbol}, ${soxs.exchange}, ${soxsSearch.elapsedMs}ms)`);
