@@ -157,6 +157,12 @@ if (!dashboard.includes('venue?:"KRX"|"NXT"') || !dashboard.includes("exchange:q
 if (!dashboard.includes('exchange: "NAVER"')) {
   failures.push("dashboard crypto fallback provider label must remain NAVER");
 }
+if (!dashboard.includes("exchange: string; currency: string; quantityMicros") || !dashboard.includes("exchange:p.exchange||")) {
+  failures.push("portfolio positions must reuse persisted instrument exchange metadata in the dashboard");
+}
+if (!dashboard.includes("fill.exchange")) {
+  failures.push("portfolio/activity fill displays must expose persisted instrument exchange metadata");
+}
 
 const pendingOrders = await source("lib/server/pending-orders.ts");
 if (!pendingOrders.includes("isExecutableTradingQuote")) {
