@@ -38,9 +38,11 @@ const NAVER_US_LOGO_FALLBACK = String.raw`(() => {
     let base = match[1];
     const currentSuffix = match[2].toUpperCase();
 
-    // If a Reuters suffix was already included in symbol and the existing
-    // renderer appended another suffix (e.g. GEV.N.K), recover the original
-    // Reuters code first instead of producing another duplicated code.
+    // Search/autocomplete can already return a Reuters-coded symbol such as
+    // GEV.N or SOXL.O. The older renderer then appended another exchange
+    // suffix and requested StockGEV.N.K.svg / StockSOXL.O.O.svg. When that
+    // happens, the embedded Reuters suffix is the first candidate we should
+    // request and the appended suffix must not mark it as already attempted.
     const embeddedSuffix = base.match(/^(.*)\.([ONKA])$/i);
     const preferredSuffix = embeddedSuffix?.[2]?.toUpperCase();
     if (embeddedSuffix) base = embeddedSuffix[1];
@@ -51,7 +53,7 @@ const NAVER_US_LOGO_FALLBACK = String.raw`(() => {
         .map((value) => value.trim().toUpperCase())
         .filter(Boolean),
     );
-    tried.add(currentSuffix);
+    if (!embeddedSuffix) tried.add(currentSuffix);
 
     const candidates = [preferredSuffix, ...suffixes].filter(
       (value, index, values) => Boolean(value) && values.indexOf(value) === index,
