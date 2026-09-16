@@ -1,0 +1,104 @@
+name: Deploy Cloudflare Workers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - app/**
+      - components/**
+      - lib/**
+      - db/**
+      - drizzle/**
+      - vendor/**
+      - build/**
+      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
+      - vite.config.ts
+      - .github/workflows/deploy-cloudflare.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Cloudflare deployment credentials
+        id: credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_D1_DATABASE_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare deployment is prepared but skipped. Add CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_D1_DATABASE_ID as repository Actions secrets, then run this workflow again."
+          fi
+
+      - name: Setup pnpm
+        if: steps.credentials.outputs.ready == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - name: Setup Node.js
+        if: steps.credentials.outputs.ready == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install
+        if: steps.credentials.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate
+        if: steps.credentials.outputs.ready == 'true'
+        run: |
+          pnpm run validate:migration
+          node scripts/validate-naver-search-contract.mjs
+          pnpm run validate:legacy-config
+          pnpm run typecheck
+          pnpm run lint
+
+      - name: Build production Worker
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CLOUDFLARE_D1_DATABASE_NAME: marketmate-invest
+          CLOUDFLARE_WORKER_NAME: marketmate-invest
+        run: pnpm run build
+
+      - name: Apply D1 migrations
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          rm -rf dist/server/migrations
+          mkdir -p dist/server/migrations
+          cp drizzle/*.sql dist/server/migrations/
+          cd dist/server
+          ../../node_modules/.bin/wrangler d1 migrations apply DB --remote --config wrangler.json
+
+      - name: Deploy Worker
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --config dist/server/wrangler.json
