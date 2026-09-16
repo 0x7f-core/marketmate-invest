@@ -74,14 +74,29 @@ function patchCryptoSourceLabels(fx: FxQuote | null) {
   const cryptoActive = Array.from(document.querySelectorAll(".np-market-tabs button")).some(button =>
     button.classList.contains("active") && button.textContent?.trim() === "가상자산",
   );
-  if (!cryptoActive) return;
 
   const quoteMeta = document.querySelector(".np-quote .stock-title small");
+  const livePill = document.querySelector(".np-quote .live-pill");
+
+  if (!cryptoActive) {
+    if (quoteMeta?.textContent?.includes(" · UPBIT")) {
+      quoteMeta.textContent = quoteMeta.textContent.replace(/\s·\sUPBIT\b/, " · NAVER");
+    }
+    replaceTextNode(livePill, "UPBIT 실시간", "네이버 실시간");
+    document.querySelectorAll(".order-status").forEach(element => {
+      const value = element.textContent ?? "";
+      if (value.includes("UPBIT 최신 시세")) {
+        element.textContent = value.replaceAll("UPBIT 최신 시세", "네이버증권 최신 시세");
+      }
+    });
+    return;
+  }
+
   if (quoteMeta?.textContent?.includes(" · NAVER")) {
     quoteMeta.textContent = quoteMeta.textContent.replace(/\s·\sNAVER\b/, " · UPBIT");
   }
 
-  replaceTextNode(document.querySelector(".np-quote .live-pill"), "네이버 실시간", "UPBIT 실시간");
+  replaceTextNode(livePill, "네이버 실시간", "UPBIT 실시간");
 
   document.querySelectorAll(".order-status").forEach(element => {
     const value = element.textContent ?? "";
