@@ -34,6 +34,10 @@ async function walk(path) {
   return files;
 }
 
+async function source(path) {
+  return readFile(join(ROOT, path), "utf8");
+}
+
 const failures = [];
 
 for (const required of REQUIRED_FILES) {
@@ -61,7 +65,7 @@ for (const file of files) {
   }
 }
 
-const marketHours = await readFile(join(ROOT, "lib/server/market-hours.ts"), "utf8");
+const marketHours = await source("lib/server/market-hours.ts");
 const krxPriority = marketHours.indexOf('item.exchange === "krx" && item.tradable');
 const nxtPriority = marketHours.indexOf('item.exchange === "nxt" && item.tradable');
 if (krxPriority < 0 || nxtPriority < 0 || krxPriority > nxtPriority) {
@@ -70,16 +74,42 @@ if (krxPriority < 0 || nxtPriority < 0 || krxPriority > nxtPriority) {
 if (!marketHours.includes('if (type.includes("closing")) return false;')) {
   failures.push("closing sessions must remain non-tradable");
 }
+if (!marketHours.includes('if (market === "US") return true;')) {
+  failures.push("US open sessions, including after-market, must remain tradable");
+}
 if (!marketHours.includes('"marketStatusDetailType"')) {
   failures.push("market session parsing must support marketStatusDetailType fallback");
 }
 
-const tradingQuote = await readFile(join(ROOT, "lib/server/trading-quote.ts"), "utf8");
+const tradingQuote = await source("lib/server/trading-quote.ts");
 if (!tradingQuote.includes('session.exchange === "NXT"')) {
   failures.push("NXT quote selection guard is missing");
 }
 if (!tradingQuote.includes("isExecutableTradingQuote")) {
   failures.push("executable quote freshness guard is missing");
+}
+
+for (const path of [
+  "app/api/orders/route.ts",
+  "app/api/quotes/route.ts",
+  "app/api/watchlist/route.ts",
+  "app/api/leaderboard/route.ts",
+]) {
+  const text = await source(path);
+  if (!text.includes("getTradingQuote")) failures.push(`getTradingQuote wiring is missing: ${path}`);
+}
+
+const orders = await source("app/api/orders/route.ts");
+if (!orders.includes("isExecutableTradingQuote")) {
+  failures.push("new orders must validate executable Naver quote freshness");
+}
+
+const pendingOrders = await source("lib/server/pending-orders.ts");
+if (!pendingOrders.includes("isExecutableTradingQuote")) {
+  failures.push("pending orders must validate executable Naver quote freshness");
+}
+if (!pendingOrders.includes("quote.venue !== session.exchange")) {
+  failures.push("pending KR orders must reject a quote from the wrong active venue");
 }
 
 if (failures.length) {
