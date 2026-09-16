@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
+import { getTradingQuote } from "@/lib/server/trading-quote";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 type OrderBody = {
@@ -12,7 +13,7 @@ type OrderBody = {
 };
 
 function isQuoteUnavailable(error: unknown) {
-  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE"].includes(error.message));
+  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
 }
 
 export async function GET(request: Request) {
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
     }
     const marketSession = await getCheckedMarketSession(body.market);
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
-    const quote = await getLiveQuote(body.market, body.symbol.toUpperCase(), body.exchange);
+    const quote = await getTradingQuote(body.market, body.symbol.toUpperCase(), body.exchange, marketSession);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
     if (quote.stale || Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
