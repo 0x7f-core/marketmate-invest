@@ -79,6 +79,9 @@ if (!naverStock.includes("Array.isArray(raw) ? raw : [raw]") || !naverStock.incl
 if (!naverStock.includes("redirect: \"manual\"") || !naverStock.includes("url.origin !== NAVER_STOCK_BASE_URL")) {
   failures.push("Naver requests must remain same-origin and reject redirects");
 }
+if (!naverStock.includes("assertCompleteBody") || !naverStock.includes("receivedBytes < declaredLength") || !naverStock.includes('response.headers.get("content-encoding")')) {
+  failures.push("Naver response reader must reject truncated identity responses without mischecking compressed bodies");
+}
 
 const marketData = await source("lib/server/market-data.ts");
 if (!marketData.includes("getNaverUsdKrwRate") || marketData.includes("async function usdKrwRate(")) {
@@ -89,6 +92,16 @@ if (!marketData.includes("exchangeRateOverride ?? (await getNaverUsdKrwRate()).r
 }
 if (!marketData.includes("pollingInterval?: number") || !marketData.includes("domestic.value.pollingInterval") || !marketData.includes("foreign.value.pollingInterval") || !marketData.includes("crypto.value.pollingInterval")) {
   failures.push("market overview quotes must retain Naver pollingInterval metadata");
+}
+
+const naverSymbol = await source("lib/server/naver-symbol.ts");
+if (!naverSymbol.includes('if (market === "CRYPTO")') || !naverSymbol.includes('_KRW_(?:UPBIT|BITHUMB)') || !naverSymbol.includes('`KRW-${ticker}`')) {
+  failures.push("crypto symbols must be canonicalized to KRW-{ticker} across Naver routes");
+}
+
+const marketSearch = await source("lib/server/market-search.ts");
+if (!marketSearch.includes('normalizeNaverMarketSymbol("CRYPTO", symbol || fqnf)')) {
+  failures.push("Naver autocomplete crypto results must use the shared canonical symbol normalizer");
 }
 
 const marketOverview = await source("app/api/market-overview/route.ts");
@@ -161,6 +174,14 @@ if (!quotesRoute.includes("const resolvedExchange = quote.venue") || !quotesRout
 if (!quotesRoute.includes("new Set(symbols.map")) {
   failures.push("quote refreshes must deduplicate normalized symbols");
 }
+if (!quotesRoute.includes("symbolsRaw.length > 700") || !quotesRoute.includes("!EXCHANGE.test(exchange)")) {
+  failures.push("quote query identifiers must stay bounded before Naver resolution");
+}
+
+const chartRoute = await source("app/api/chart/route.ts");
+if (!chartRoute.includes("const EXCHANGE") || !chartRoute.includes("!EXCHANGE.test(exchange)")) {
+  failures.push("chart exchange identifiers must remain bounded and validated");
+}
 
 for (const path of ["app/api/portfolio/route.ts", "app/api/participants/activity/route.ts"]) {
   const text = await source(path);
@@ -206,15 +227,30 @@ if (!marketChart.includes("attributionLogo: true") || !marketChart.includes("Tra
   failures.push("Lightweight Charts attribution notice and link must remain visible");
 }
 
+const marketInsights = await source("lib/server/naver-market-insights.ts");
+if (!marketInsights.includes('buildNaverPath("/api/stockSecurity/etfs/v2/foreign"') || !marketInsights.includes('sortType: "tradingValue"') || !marketInsights.includes('sortDirection: "desc"')) {
+  failures.push("foreign ETF list must use the verified Naver v2 ETF contract");
+}
+const marketInsightsRoute = await source("app/api/market-insights/route.ts");
+if (!marketInsightsRoute.includes("const EXCHANGE") || !marketInsightsRoute.includes("!EXCHANGE.test(exchange)")) {
+  failures.push("market insight exchange identifiers must remain bounded and validated");
+}
+
 const pendingOrders = await source("lib/server/pending-orders.ts");
-if (!pendingOrders.includes("isExecutableTradingQuote")) {
-  failures.push("pending orders must validate executable Naver quote freshness");
+const executableChecks = pendingOrders.match(/isExecutableTradingQuote\(quote\)/g)?.length ?? 0;
+if (executableChecks < 2) {
+  failures.push("pending orders must recheck executable quote freshness after market-status resolution");
 }
 if (!pendingOrders.includes("quote.venue !== session.exchange")) {
   failures.push("pending KR orders must reject a quote from the wrong active venue");
 }
 if (!pendingOrders.includes("UPDATE instruments SET exchange=?") || !pendingOrders.includes('quote.market === "KR" && quote.venue')) {
   failures.push("successful pending KR fills must persist the active instrument venue");
+}
+
+const leaderboard = await source("app/api/leaderboard/route.ts");
+if (!leaderboard.includes("Promise.allSettled(stale.results.map") || !leaderboard.includes("refreshLeaderboardQuote")) {
+  failures.push("leaderboard stale quote refreshes should stay parallel while preserving per-instrument claims");
 }
 
 if (failures.length) {
