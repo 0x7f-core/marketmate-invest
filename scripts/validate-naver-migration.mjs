@@ -75,7 +75,7 @@ if (!naverStock.includes("setTimeout(() => controller.abort(), timeoutMs)") || !
 }
 
 const marketData = await source("lib/server/market-data.ts");
-if (!marketData.includes('getNaverUsdKrwRate') || marketData.includes("async function usdKrwRate(")) {
+if (!marketData.includes("getNaverUsdKrwRate") || marketData.includes("async function usdKrwRate(")) {
   failures.push("US quotes must use the shared Naver FX parser instead of a duplicate local parser");
 }
 if (!marketData.includes("exchangeRateOverride ?? (await getNaverUsdKrwRate()).rate")) {
@@ -138,8 +138,11 @@ const orders = await source("app/api/orders/route.ts");
 if (!orders.includes("isExecutableTradingQuote")) {
   failures.push("new orders must validate executable Naver quote freshness");
 }
-if (!orders.includes("quote.venue ?? body.exchange ?? body.market")) {
+if (!orders.includes("quote.venue ?? exchange ?? body.market")) {
   failures.push("orders must persist the actual active KR venue when available");
+}
+if (!orders.includes("const SAFE_ID") || !orders.includes("name.length > 80") || !orders.includes("exchange.length > 40")) {
+  failures.push("order metadata must remain runtime-validated before it reaches D1");
 }
 
 const quotesRoute = await source("app/api/quotes/route.ts");
@@ -152,7 +155,7 @@ if (!quotesRoute.includes("new Set(symbols.map")) {
 
 for (const path of ["app/api/portfolio/route.ts", "app/api/participants/activity/route.ts"]) {
   const text = await source(path);
-  if (!text.includes("i.exchange")) failures.push(`instrument exchange must be exposed to portfolio/activity clients: ${path}`);
+  if (!text.includes("i.exchange")) failures.push(`instrument exchange must be exposed to position clients: ${path}`);
 }
 
 const dashboard = await source("app/trading-dashboard.tsx");
@@ -165,17 +168,30 @@ if (!dashboard.includes('venue?:"KRX"|"NXT"') || !dashboard.includes("exchange:q
 if (!dashboard.includes('exchange: "NAVER"')) {
   failures.push("dashboard crypto fallback provider label must remain NAVER");
 }
-if (!dashboard.includes("exchange: string; currency: string; quantityMicros") || !dashboard.includes("exchange:p.exchange||")) {
+if (!/exchange:\s*string;\s*currency:\s*string;\s*quantityMicros/.test(dashboard) || !dashboard.includes("exchange:p.exchange||")) {
   failures.push("portfolio positions must reuse persisted instrument exchange metadata in the dashboard");
 }
-if (!dashboard.includes("fill.exchange")) {
-  failures.push("portfolio/activity fill displays must expose persisted instrument exchange metadata");
+if (dashboard.includes("fill.exchange")) {
+  failures.push("historical fills must not present the mutable instrument exchange as the execution venue");
+}
+if (!dashboard.includes('return "날짜 미상"')) {
+  failures.push("undated Naver news must not be presented with a fabricated relative timestamp");
 }
 if (dashboard.includes("setInterval(load,10_000)") || !dashboard.includes("pollingInterval?:number") || !dashboard.includes("Math.max(2_000,Math.min(120_000,delay))")) {
   failures.push("market overview client polling must follow the Naver polling interval instead of a fixed 10-second interval");
 }
 if (!dashboard.includes("setMarketSession(LOADING_MARKET_SESSION)")) {
   failures.push("market switches must fail closed in the UI until the new Naver market status arrives");
+}
+
+const newsRoute = await source("app/api/news/route.ts");
+if (!newsRoute.includes("return 0;") || /Date\.now\(\)\s*-\s*index/.test(newsRoute)) {
+  failures.push("undated Naver news must sort behind dated articles instead of being fabricated as newest");
+}
+
+const marketChart = await source("app/market-chart.tsx");
+if (!marketChart.includes("attributionLogo: true") || !marketChart.includes("TradingView Lightweight Charts™") || !marketChart.includes('href="https://www.tradingview.com/"')) {
+  failures.push("Lightweight Charts attribution notice and link must remain visible");
 }
 
 const pendingOrders = await source("lib/server/pending-orders.ts");
@@ -186,7 +202,7 @@ if (!pendingOrders.includes("quote.venue !== session.exchange")) {
   failures.push("pending KR orders must reject a quote from the wrong active venue");
 }
 if (!pendingOrders.includes("UPDATE instruments SET exchange=?") || !pendingOrders.includes('quote.market === "KR" && quote.venue')) {
-  failures.push("successful pending KR fills must persist the actual execution venue");
+  failures.push("successful pending KR fills must persist the active instrument venue");
 }
 
 if (failures.length) {
