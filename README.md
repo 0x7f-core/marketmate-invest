@@ -149,9 +149,12 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 ```bash
 pnpm install
 pnpm run db:generate
+pnpm run validate:migration
 pnpm run typecheck
 pnpm run lint
 pnpm run build
 ```
+
+`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위·체결 freshness guard 같은 핵심 전환 조건을 빠르게 점검합니다.
 
 ChatGPT Sites가 `.openai/hosting.json`의 `DB` 바인딩을 실제 D1에 연결하고 배포 시 Drizzle 마이그레이션을 적용합니다.
