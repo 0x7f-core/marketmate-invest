@@ -79,7 +79,7 @@ const tests = [
   ["foreign consensus AAPL", "/api/securityService/stock/AAPL.O/consensus", false],
   ["foreign finance summary", "/api/securityService/stock/finance/summary?reutersCode=AAPL.O", true],
   ["foreign ETF list", "/api/stockSecurity/etfs/v2/foreign?sortType=tradingValue&sortDirection=desc&index=0&size=5", true],
-  ["foreign ETF components QQQ", "/api/stockSecurity/etfs/v2/foreign/QQQ/composition", true],
+  ["foreign ETF components QQQ.O", "/api/stockSecurity/etfs/v2/foreign/QQQ.O/composition", true],
   ["foreign sector ranking", "/api/stockSecurity/rankings/v2/foreign/USA/sectors?sortType=changeRate&size=5&period=daily", true],
   ["crypto ranking", "/api/coin/rank/UPBIT?sortType=marketValue&page=1&pageSize=5", true],
   ["domestic stock news", "/api/domestic/detail/news?itemCode=005930&page=1&pageSize=5", true],
