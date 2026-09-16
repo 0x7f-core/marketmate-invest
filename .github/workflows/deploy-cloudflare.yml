@@ -134,3 +134,57 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy --config dist/server/wrangler.json
+
+      - name: Record production smoke window
+        if: steps.credentials.outputs.ready == 'true'
+        run: echo "PRODUCTION_SMOKE_STARTED_AT=$(date +%s%3N)" >> "$GITHUB_ENV"
+
+      - name: Smoke live production API and Naver routes
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          APP_SMOKE_BASE_URL: https://marketmate-invest.0x7f-core.workers.dev
+          APP_SMOKE_USER_FILE: artifacts/production-smoke/api-user-id.txt
+        run: node scripts/validate-production-runtime.mjs
+
+      - name: Show Chrome version
+        if: steps.credentials.outputs.ready == 'true'
+        run: |
+          (google-chrome --version || google-chrome-stable --version || chromium --version || chromium-browser --version)
+
+      - name: Smoke live production desktop/mobile browser
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          APP_BASE_URL: https://marketmate-invest.0x7f-core.workers.dev
+          BROWSER_ARTIFACT_DIR: artifacts/production-browser-smoke
+        run: node scripts/validate-browser-runtime.mjs
+
+      - name: Cleanup production smoke data
+        if: always() && steps.credentials.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API_USER_ID="$(cat artifacts/production-smoke/api-user-id.txt 2>/dev/null || true)"
+          STARTED_AT="${PRODUCTION_SMOKE_STARTED_AT:-0}"
+          cd dist/server
+
+          if [ -n "$API_USER_ID" ]; then
+            SQL="DELETE FROM rate_limits WHERE key IN (SELECT 'register:' || ip_hash FROM audit_logs WHERE actor_user_id='$API_USER_ID' AND ip_hash IS NOT NULL); DELETE FROM sessions WHERE user_id='$API_USER_ID'; DELETE FROM audit_logs WHERE actor_user_id='$API_USER_ID'; DELETE FROM users WHERE id='$API_USER_ID';"
+            ../../node_modules/.bin/wrangler d1 execute DB --remote --config wrangler.json --command "$SQL"
+          fi
+
+          if [ "$STARTED_AT" -gt 0 ]; then
+            FILTER="id IN (SELECT id FROM users WHERE nickname LIKE '브라우저%' AND created_at >= $STARTED_AT)"
+            SQL="DELETE FROM rate_limits WHERE key IN (SELECT 'register:' || ip_hash FROM audit_logs WHERE actor_user_id IN (SELECT id FROM users WHERE nickname LIKE '브라우저%' AND created_at >= $STARTED_AT) AND ip_hash IS NOT NULL); DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE nickname LIKE '브라우저%' AND created_at >= $STARTED_AT); DELETE FROM audit_logs WHERE actor_user_id IN (SELECT id FROM users WHERE nickname LIKE '브라우저%' AND created_at >= $STARTED_AT); DELETE FROM users WHERE nickname LIKE '브라우저%' AND created_at >= $STARTED_AT;"
+            ../../node_modules/.bin/wrangler d1 execute DB --remote --config wrangler.json --command "$SQL"
+          fi
+
+      - name: Upload production browser screenshots
+        if: always() && steps.credentials.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-browser-screenshots
+          path: artifacts/production-browser-smoke/*.png
+          if-no-files-found: ignore
+          retention-days: 7
