@@ -81,6 +81,14 @@ if (!marketData.includes('getNaverUsdKrwRate') || marketData.includes("async fun
 if (!marketData.includes("exchangeRateOverride ?? (await getNaverUsdKrwRate()).rate")) {
   failures.push("US live quotes must support reusing a prevalidated Naver FX rate");
 }
+if (!marketData.includes("pollingInterval?: number") || !marketData.includes("domestic.value.pollingInterval") || !marketData.includes("foreign.value.pollingInterval") || !marketData.includes("crypto.value.pollingInterval")) {
+  failures.push("market overview quotes must retain Naver pollingInterval metadata");
+}
+
+const marketOverview = await source("app/api/market-overview/route.ts");
+if (!marketOverview.includes("Math.max(2_000") || !marketOverview.includes("Math.min(...intervals)") || !marketOverview.includes("pollingInterval")) {
+  failures.push("market overview API must return a bounded Naver-driven polling interval");
+}
 
 const marketHours = await source("lib/server/market-hours.ts");
 const krxPriority = marketHours.indexOf('item.exchange === "krx" && item.tradable');
@@ -162,6 +170,12 @@ if (!dashboard.includes("exchange: string; currency: string; quantityMicros") ||
 }
 if (!dashboard.includes("fill.exchange")) {
   failures.push("portfolio/activity fill displays must expose persisted instrument exchange metadata");
+}
+if (dashboard.includes("setInterval(load,10_000)") || !dashboard.includes("pollingInterval?:number") || !dashboard.includes("Math.max(2_000,Math.min(120_000,delay))")) {
+  failures.push("market overview client polling must follow the Naver polling interval instead of a fixed 10-second interval");
+}
+if (!dashboard.includes("setMarketSession(LOADING_MARKET_SESSION)")) {
+  failures.push("market switches must fail closed in the UI until the new Naver market status arrives");
 }
 
 const pendingOrders = await source("lib/server/pending-orders.ts");
