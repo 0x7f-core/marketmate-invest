@@ -70,23 +70,30 @@ function stringValue(record: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
+function compactKstTimestamp(raw: string) {
+  if (!/^(?:19|20)\d{12}$/.test(raw)) return 0;
+  const parsed = Date.parse(`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}T${raw.slice(8,10)}:${raw.slice(10,12)}:${raw.slice(12,14)}+09:00`);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function normalizeTimestamp(value: unknown, fallback: number) {
-  if (typeof value === "number" && Number.isFinite(value)) return value < 1_000_000_000_000 ? value * 1_000 : value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const compact = compactKstTimestamp(String(Math.trunc(value)));
+    if (compact > 0) return compact;
+    return value < 1_000_000_000_000 ? value * 1_000 : value;
+  }
   if (typeof value !== "string" || !value.trim()) return fallback;
   const clean = value.trim();
-  const numeric = Number(clean);
-  if (Number.isFinite(numeric) && clean.length >= 10) return numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric;
-  const parsed = Date.parse(clean);
-  if (Number.isFinite(parsed)) return parsed;
+  const compact = compactKstTimestamp(clean);
+  if (compact > 0) return compact;
   if (/^\d{8}$/.test(clean)) {
     const date = Date.parse(`${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}T00:00:00+09:00`);
     if (Number.isFinite(date)) return date;
   }
-  if (/^\d{14}$/.test(clean)) {
-    const date = Date.parse(`${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}T${clean.slice(8,10)}:${clean.slice(10,12)}:${clean.slice(12,14)}+09:00`);
-    if (Number.isFinite(date)) return date;
-  }
-  return fallback;
+  const numeric = Number(clean);
+  if (Number.isFinite(numeric) && clean.length >= 10) return numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric;
+  const parsed = Date.parse(clean);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function verifiedQuoteTimestamp(record: Record<string, unknown>) {
@@ -95,12 +102,7 @@ function verifiedQuoteTimestamp(record: Record<string, unknown>) {
     "tradeDateTime",
     "tradedAt",
     "tradeBaseAt",
-    "dateTime",
-    "datetime",
-    "timestamp",
     "tradeTimestamp",
-    "candleDateTimeKst",
-    "candleDateTimeUtc",
   ]) {
     const parsed = normalizeTimestamp(record[key], 0);
     if (parsed > 0) return parsed;
@@ -111,7 +113,20 @@ function verifiedQuoteTimestamp(record: Record<string, unknown>) {
 function recordTimestamp(record: Record<string, unknown>, fallback: number) {
   const verified = verifiedQuoteTimestamp(record);
   if (verified > 0) return verified;
-  for (const key of ["date", "localDate", "tradeDate", "bizDate", "businessDate", "baseDate", "xymd"]) {
+  for (const key of [
+    "dateTime",
+    "datetime",
+    "timestamp",
+    "candleDateTimeKst",
+    "candleDateTimeUtc",
+    "date",
+    "localDate",
+    "tradeDate",
+    "bizDate",
+    "businessDate",
+    "baseDate",
+    "xymd",
+  ]) {
     const parsed = normalizeTimestamp(record[key], 0);
     if (parsed > 0) return parsed;
   }
