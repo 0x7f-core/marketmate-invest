@@ -53,7 +53,7 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
 
   const normalizedSymbol = market === "US" ? normalizeNaverReutersCode(symbol) : symbol.toUpperCase();
   const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "nationType"]);
-  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER·UPBIT";
+  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER";
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
 
