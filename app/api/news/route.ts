@@ -1,5 +1,6 @@
 import { apiError, requireUser } from "@/lib/server/auth";
 import { buildNaverPath, isNaverStockUnavailable, naverJson } from "@/lib/server/naver-stock";
+import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import { enforceRateLimit } from "@/lib/server/safety";
 
 type NewsItem = { title: string; link: string; publishedAt: number; source: string };
@@ -86,9 +87,9 @@ function codeKey(value: string) {
 }
 
 async function resolveReutersCode(symbol: string, exchange: string) {
-  if (/^[A-Za-z0-9._-]+\.[A-Za-z]{1,4}$/.test(symbol)) return symbol;
+  if (symbol.includes(".") || looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
   try {
-    const query = symbol.replaceAll("_", ".");
+    const query = naverAutocompleteQueryForForeignCode(symbol);
     const result = await naverJson<unknown>(
       buildNaverPath("/api/autocomplete/search/autoComplete", { query, target: "stock" }),
       { ttlMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 },
@@ -98,17 +99,17 @@ async function resolveReutersCode(symbol: string, exchange: string) {
       reuters: stringValue(record, ["reutersCode", "reuterscode"]),
       ticker: stringValue(record, ["ticker", "symbol", "itemCode", "stockCode", "code"]),
       nation: stringValue(record, ["nationType", "nation", "country", "marketType"]),
-    })).filter(item => item.reuters.includes("."));
+    })).filter(item => item.reuters.length > 0);
     const found = matches.find(item => codeKey(item.ticker) === wanted || codeKey(item.reuters.split(".")[0]) === wanted)
       ?? matches.find(item => /USA|US|미국/i.test(item.nation))
       ?? matches[0];
-    if (found?.reuters) return found.reuters;
+    if (found?.reuters) return normalizeNaverReutersCode(found.reuters);
   } catch {
-    // Use the known exchange suffix only as an identifier fallback; no provider fallback is used.
+    // Use the known exchange suffix only as a Naver Reuters identifier fallback.
   }
   const venue = exchange.toUpperCase();
   const suffix = venue.includes("NYS") || venue.includes("NYSE") ? ".N" : venue.includes("AMS") || venue.includes("AMEX") ? ".A" : ".O";
-  return `${symbol.replaceAll("_", ".")}${suffix}`;
+  return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
 async function fetchNaverNews(market: string, symbol: string, name: string, exchange: string) {
@@ -138,11 +139,12 @@ export async function GET(request: Request) {
     await enforceRateLimit(request, "news", 40, 5 * 60_000, user.id);
     const url = new URL(request.url);
     const market = url.searchParams.get("market") ?? "KR";
-    const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase().slice(0, 32);
+    const rawSymbol = (url.searchParams.get("symbol") ?? "").slice(0, 32);
     const name = (url.searchParams.get("name") ?? "").slice(0, 80);
     const exchange = (url.searchParams.get("exchange") ?? "").slice(0, 20);
     if (!["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "시장을 확인해주세요." }, { status: 400 });
-    if (symbol && !/^[A-Z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+    const symbol = rawSymbol ? normalizeNaverMarketSymbol(market as "KR" | "US" | "CRYPTO", rawSymbol) : "";
+    if (symbol && !/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     const result = await fetchNaverNews(market, symbol, name, exchange);
     const items = normalizeNews(result.data);
     return Response.json({ items, source: "NAVER", stale: result.stale }, { headers: { "cache-control": "private, max-age=60" } });
