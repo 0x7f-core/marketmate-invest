@@ -72,8 +72,8 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
       if (cancelled || !containerRef.current) return;
       const chart = library.createChart(containerRef.current, {
         autoSize: true,
-        attributionLogo: true,
         layout: {
+          attributionLogo: true,
           background: { type: "solid", color: "#ffffff" },
           textColor: "#6b7280",
           fontFamily: "Arial, 'Noto Sans KR', sans-serif",
