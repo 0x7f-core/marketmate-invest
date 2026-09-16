@@ -13,13 +13,6 @@ export const metadata: Metadata = {
   },
 };
 
-// Naver's US stock/ETF logo key is the Reuters venue suffix, not just the
-// simplified exchange label exposed by every list/search response. In
-// particular NYSE common stocks (.N) and NYSE Arca ETFs (.K) can both arrive
-// through a NYS-style exchange label. The dashboard's normal URL remains the
-// first request; only a missing Naver logo is retried with the other official
-// Naver/Reuters suffixes. This also preserves Naver's ETF artwork, including
-// issuer CI and 2x/3x leverage marks embedded in the SVG itself.
 const NAVER_US_LOGO_FALLBACK = String.raw`(() => {
   const prefix = "https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock";
   const logoPattern = /\/Stock(.+)\.([ONKA])\.svg(?:\?.*)?$/i;
@@ -37,12 +30,6 @@ const NAVER_US_LOGO_FALLBACK = String.raw`(() => {
 
     let base = match[1];
     const currentSuffix = match[2].toUpperCase();
-
-    // Search/autocomplete can already return a Reuters-coded symbol such as
-    // GEV.N or SOXL.O. The older renderer then appended another exchange
-    // suffix and requested StockGEV.N.K.svg / StockSOXL.O.O.svg. When that
-    // happens, the embedded Reuters suffix is the first candidate we should
-    // request and the appended suffix must not mark it as already attempted.
     const embeddedSuffix = base.match(/^(.*)\.([ONKA])$/i);
     const preferredSuffix = embeddedSuffix?.[2]?.toUpperCase();
     if (embeddedSuffix) base = embeddedSuffix[1];
@@ -61,21 +48,13 @@ const NAVER_US_LOGO_FALLBACK = String.raw`(() => {
     const nextSuffix = candidates.find((value) => value && !tried.has(value));
     if (!nextSuffix) return;
 
-    // React's existing onError handler would immediately replace the image
-    // with a letter fallback. Stop that one failed request and retry the next
-    // Naver logo key; if all candidates fail, the final error is allowed
-    // through and the normal letter fallback is shown.
     event.stopImmediatePropagation();
     tried.add(nextSuffix);
     image.dataset.naverLogoTried = Array.from(tried).join(",");
-    image.src = `${prefix}${base}.${nextSuffix}.svg`;
+    image.src = prefix + base + "." + nextSuffix + ".svg";
   }, true);
 })();`;
 
-// US ETF names can be much longer than the order-card width. Naver search
-// supplies Reuters-style symbols (e.g. SOXL.O), while the user-facing ticker
-// should be SOXL. For ETF/ETN products we keep the full name everywhere else
-// and shorten only the buy/sell action buttons to "TICKER 매수/매도".
 const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
   const etfNamePattern = /(?:\bETF\b|\bETN\b|SPDR|iShares|Vanguard|Invesco|ProShares|Direxion|VanEck|Global X|ARK(?:K|W|G|F|Q)?\b|WisdomTree|Schwab|First Trust|Pacer|GraniteShares|YieldMax|Roundhill|Simplify|Defiance|REX Shares|T-REX|MicroSectors|Amplify|Innovator|Avantis)/i;
   const usExchangePattern = /^(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)$/i;
@@ -99,7 +78,7 @@ const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
     document.querySelectorAll("button.order-buy, button.order-sell").forEach((node) => {
       if (!(node instanceof HTMLButtonElement) || node.disabled) return;
       const side = node.classList.contains("order-buy") ? "매수" : "매도";
-      const label = `${ticker} ${side}`;
+      const label = ticker + " " + side;
       if (node.textContent?.trim() !== label) node.textContent = label;
     });
   };
