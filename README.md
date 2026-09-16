@@ -29,7 +29,7 @@
 
 ## 시장 데이터
 
-- 국내주식 현재가: `/api/polling/domestic/stock`
+- 국내주식 현재가: `/api/polling/domestic/stock`, NXT 활성 시 `/api/polling/domestic/NXT/stock`
 - 미국주식 현재가: `/api/polling/worldstock/stock`
 - 가상자산 현재가: `/api/polling/coin/price`
 - 국내·해외 지수: `/api/polling/domestic/index`, `/api/polling/worldstock/index`
@@ -50,10 +50,11 @@
 
 ## 모의주문 체결 안전장치
 
-신규 주문은 주문 순간 `getLiveQuote()`를 다시 호출합니다. 네이버 polling 캐시가 아직 `pollingInterval` 내라면 동일 응답을 재사용하고, 만료됐을 때만 새 upstream 요청을 보냅니다.
+신규 주문은 주문 순간 `getTradingQuote()`로 장 상태와 거래소를 함께 확인한 뒤 최신 시세를 다시 조회합니다. 국내주식은 KRX와 NXT가 동시에 열려 있으면 KRX를 우선하고, KRX가 닫힌 뒤 NXT만 활성 상태일 때만 NXT polling 시세를 사용합니다. 네이버 polling 캐시가 아직 `pollingInterval` 내라면 동일 응답을 재사용하고, 만료됐을 때만 새 upstream 요청을 보냅니다.
 
 - 최신 시세가 stale이면 주식/가상자산 신규 체결을 중단합니다.
 - 시세의 source timestamp가 60초 이상 오래됐으면 체결을 중단합니다.
+- NXT 시세에 실제 체결시각이 없으면 체결을 중단합니다.
 - 미국주식 원화 환산은 네이버증권 `FX_USDKRW`만 사용합니다.
 - 국내/미국주식은 네이버 market-status가 최신 상태로 확인될 때만 체결합니다.
 - 지정가 대기 주문도 stale/60초 초과 시세 또는 stale 장 상태로는 자동 체결하지 않습니다.
@@ -78,7 +79,7 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 - `openTimeKst`
 - `closeTimeKst`
 
-시장상태 API를 확인할 수 없거나 stale cache만 남아 있는 경우에는 안전을 위해 주식 주문을 중단합니다. 가상자산은 24시간 시장으로 처리합니다.
+국내는 KRX/NXT 두 상태를 함께 확인하며 동시 개장 시 KRX를 우선합니다. 시장상태 API를 확인할 수 없거나 stale cache만 남아 있는 경우에는 안전을 위해 주식 주문을 중단합니다. 가상자산은 24시간 시장으로 처리합니다.
 
 ## 네이버 시장 상세 API
 
