@@ -19,6 +19,7 @@ on:
       - vite.config.ts
       - .github/workflows/deploy-cloudflare.yml
 
+# Cloudflare credentials are stored only in GitHub Actions secrets.
 permissions:
   contents: read
 
