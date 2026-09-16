@@ -70,11 +70,13 @@ function sessionLabel(type: string, market: Market) {
   return type || (market === "US" ? "미국장" : "국내장");
 }
 
-function isSupportedTradingSession(market: Market, detail: ReturnType<typeof sessionDetails>) {
+function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen) return false;
-  if (market !== "US") return true;
   const type = detail.currentType.toLocaleLowerCase("en-US");
-  return !type.includes("after");
+  if (type.includes("closing")) return false;
+  if (market === "US") return !type.includes("after");
+  if (market === "KR" && exchange === "krx" && type.includes("pre")) return false;
+  return true;
 }
 
 function closedFallback(market: Market, stale = false): MarketSession {
@@ -102,22 +104,24 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
     const statuses = statusList(result.data).filter(status => exchanges.includes(stringValue(status, ["exchange"]).toLocaleLowerCase("en-US")));
     if (!statuses.length) return closedFallback(market);
 
-    const detailed = statuses.map(status => ({
-      status,
-      exchange: stringValue(status, ["exchange"]).toLocaleLowerCase("en-US"),
-      detail: sessionDetails(status),
-    }));
+    const detailed = statuses.map(status => {
+      const exchange = stringValue(status, ["exchange"]).toLocaleLowerCase("en-US");
+      const detail = sessionDetails(status);
+      return { status, exchange, detail, tradable: isSupportedTradingSession(market, exchange, detail) };
+    });
     const selected = market === "KR"
-      ? detailed.find(item => item.exchange === "krx" && item.detail.isOpen)
-        ?? detailed.find(item => item.exchange === "nxt" && item.detail.isOpen)
+      ? detailed.find(item => item.exchange === "krx" && item.tradable)
+        ?? detailed.find(item => item.exchange === "nxt" && item.tradable)
         ?? detailed.find(item => item.exchange === "krx" && !item.detail.holiday)
         ?? detailed.find(item => !item.detail.holiday)
         ?? detailed[0]
-      : detailed.find(item => item.detail.isOpen) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
+      : detailed.find(item => item.tradable) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
     const exchange = stringValue(selected.status, ["exchange"]).toUpperCase();
     const detail = selected.detail;
-    const isOpen = isSupportedTradingSession(market, detail);
-    const label = detail.holiday ? "휴장일" : isOpen ? sessionLabel(detail.currentType, market) : detail.isOpen && market === "US" ? "애프터마켓" : "장 마감";
+    const isOpen = selected.tradable;
+    const sessionName = sessionLabel(detail.currentType, market);
+    const excludedOpenSession = detail.isOpen && !isOpen;
+    const label = detail.holiday ? "휴장일" : isOpen ? sessionName : excludedOpenSession ? sessionName : "장 마감";
     const schedule = detail.openTimeKst && detail.closeTimeKst ? ` · ${detail.openTimeKst}~${detail.closeTimeKst} KST` : "";
     const dst = market === "US" && detail.daylight !== undefined ? ` · ${detail.daylight ? "서머타임" : "표준시"}` : "";
     return {
@@ -126,9 +130,9 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
       notice: detail.holiday
         ? "네이버증권 기준 휴장일로 주문할 수 없습니다."
         : isOpen
-          ? `${sessionLabel(detail.currentType, market)} 주문 가능${schedule}${dst}`
-          : detail.isOpen && market === "US"
-            ? `미국 애프터마켓은 현재 모의투자 주문 대상에서 제외됩니다${schedule}${dst}.`
+          ? `${sessionName} 주문 가능${schedule}${dst}`
+          : excludedOpenSession
+            ? `${sessionName}은 현재 모의투자 주문 대상에서 제외됩니다${schedule}${dst}.`
             : `네이버증권 기준 현재 거래 세션이 닫혀 있습니다${schedule}${dst}.`,
       exchange: exchange || undefined,
       isHoliday: detail.holiday,
