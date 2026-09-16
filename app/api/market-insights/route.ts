@@ -69,8 +69,8 @@ export async function GET(request: Request) {
 
     const sizeRaw = url.searchParams.get("size");
     const size = sizeRaw === null ? undefined : Number(sizeRaw);
-    if (size !== undefined && (!Number.isFinite(size) || size < 1 || size > 100)) {
-      return Response.json({ error: "size는 1~100 사이여야 합니다." }, { status: 400 });
+    if (size !== undefined && (!Number.isInteger(size) || size < 1 || size > 100)) {
+      return Response.json({ error: "size는 1~100 사이의 정수여야 합니다." }, { status: 400 });
     }
     if (invalidOption(kind, url)) {
       return Response.json({ error: "요청한 시장 데이터의 옵션을 확인해주세요." }, { status: 400 });
