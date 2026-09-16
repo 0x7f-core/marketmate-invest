@@ -16,15 +16,17 @@ function stringValue(record: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
-function collectRows(payload: unknown) {
-  if (Array.isArray(payload)) return payload.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
-  if (!payload || typeof payload !== "object") return [];
-  const record = payload as Record<string, unknown>;
-  for (const key of ["items", "contents", "news", "articles", "list", "data"]) {
-    const value = record[key];
-    if (Array.isArray(value)) return value.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
+function collectRows(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
+  if (depth > 6 || output.length >= 200 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) collectRows(item, depth + 1, output);
+    return output;
   }
-  return [];
+  if (typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  if (stringValue(record, ["title", "articleTitle", "headline", "newsTitle", "subject"])) output.push(record);
+  for (const child of Object.values(record)) if (child && typeof child === "object") collectRows(child, depth + 1, output);
+  return output;
 }
 
 function collectRecords(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
@@ -151,8 +153,14 @@ export async function GET(request: Request) {
     const symbol = rawSymbol ? normalizeNaverMarketSymbol(market as "KR" | "US" | "CRYPTO", rawSymbol) : "";
     if (symbol && !/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     const result = await fetchNaverNews(market, symbol, name, exchange);
-    const items = normalizeNews(result.data);
-    return Response.json({ items, source: "NAVER", stale: result.stale }, { headers: { "cache-control": "private, max-age=60" } });
+    let items = normalizeNews(result.data);
+    let stale = result.stale;
+    if (!items.length && market === "KR" && name) {
+      const fallback = await naverJson<unknown>(buildNaverPath("/api/domestic/news/search", { query: name, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+      items = normalizeNews(fallback.data);
+      stale = stale || fallback.stale;
+    }
+    return Response.json({ items, source: "NAVER", stale }, { headers: { "cache-control": "private, max-age=60" } });
   } catch (error) {
     if (isNaverStockUnavailable(error)) {
       return Response.json({ items: [], source: "NAVER", error: "네이버증권 뉴스를 불러오지 못했습니다." }, { status: 503, headers: { "retry-after": "30" } });
