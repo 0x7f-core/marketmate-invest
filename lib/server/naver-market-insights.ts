@@ -65,10 +65,6 @@ function safeSymbol(value?: string) {
   return symbol;
 }
 
-function foreignEtfTicker(value?: string) {
-  return safeSymbol(value).toUpperCase().replace(/\.(?:O|N|A)$/i, "");
-}
-
 function stringValue(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = record[key];
@@ -232,7 +228,7 @@ export async function getNaverMarketInsight(kind: MarketInsightKind, params: Mar
       }), { ttlMs: 60_000, staleMs: 15 * 60_000 }), kind);
     }
     case "foreign-etf-components": {
-      const code = foreignEtfTicker(params.symbol ?? params.code);
+      const code = await resolveForeignCode(params.symbol ?? params.code, params.exchange);
       return insight(await naverJson<unknown>(`/api/stockSecurity/etfs/v2/foreign/${encodeURIComponent(code)}/composition`, { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 }), kind);
     }
     case "foreign-sector-ranking": {
