@@ -96,7 +96,20 @@ function normalizeTimestamp(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeKoreaTimestamp(value: unknown, fallback: number) {
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(clean)) {
+      const parsed = Date.parse(`${clean}+09:00`);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return normalizeTimestamp(value, fallback);
+}
+
 function verifiedQuoteTimestamp(record: Record<string, unknown>) {
+  const koreaTradedAt = normalizeKoreaTimestamp(record.koreaTradedAt, 0);
+  if (koreaTradedAt > 0) return koreaTradedAt;
   for (const key of [
     "localTradedAt",
     "tradeDateTime",
