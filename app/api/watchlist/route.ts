@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote } from "@/lib/server/trading-quote";
 
 const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency,
@@ -29,8 +30,9 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     await enforceRateLimit(request, "watchlist", 40, 60_000, user.id);
     const body = await request.json() as { market?:Market; symbol?:string; name?:string; exchange?:string; currency?:"KRW"|"USD" };
-    const symbol = String(body.symbol ?? "").toUpperCase();
-    if (!body.market || !["KR","US","CRYPTO"].includes(body.market) || !/^[A-Z0-9._-]{1,20}$/.test(symbol) || !body.name || !body.exchange || !["KRW","USD"].includes(body.currency ?? "")) return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
+    if (!body.market || !["KR","US","CRYPTO"].includes(body.market) || !body.symbol || !body.name || !body.exchange || !["KRW","USD"].includes(body.currency ?? "")) return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
+    const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
     const instrumentId = `${body.market}:${symbol}`;
     await env.DB!.batch([
       env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1)
