@@ -128,10 +128,6 @@ async function resolveForeignCode(symbolInput?: string, exchangeInput?: string) 
   return `${symbol.replaceAll("_", ".")}${suffix}`;
 }
 
-function foreignEtfTicker(value?: string) {
-  return safeSymbol(value).toUpperCase().replace(/\.(?:O|N|A)$/i, "");
-}
-
 function insight<T>(result: NaverResult<T>, kind: MarketInsightKind) {
   return {
     kind,
@@ -221,15 +217,16 @@ export async function getNaverMarketInsight(kind: MarketInsightKind, params: Mar
       return insight(await naverJson<unknown>(buildNaverPath(path, { reutersCode: code }), { ttlMs: 10 * 60_000, staleMs: 6 * 60 * 60_000 }), kind);
     }
     case "foreign-etf-list": {
-      return insight(await naverJson<unknown>(buildNaverPath("/api/stockSecurity/etfs/v2/foreign", {
-        sortType: "tradingValue",
-        sortDirection: "desc",
-        index: 0,
-        size,
+      return insight(await naverJson<unknown>(buildNaverPath("/api/foreign/market/etf/usa", {
+        orderType: "marketValue",
+        largeCode: "all",
+        middleCode: "all",
+        startIdx: 0,
+        pageSize: size,
       }), { ttlMs: 60_000, staleMs: 15 * 60_000 }), kind);
     }
     case "foreign-etf-components": {
-      const code = foreignEtfTicker(params.symbol ?? params.code);
+      const code = await resolveForeignCode(params.symbol ?? params.code, params.exchange);
       return insight(await naverJson<unknown>(`/api/stockSecurity/etfs/v2/foreign/${encodeURIComponent(code)}/composition`, { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 }), kind);
     }
     case "foreign-sector-ranking": {
