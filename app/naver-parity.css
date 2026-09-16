@@ -1,0 +1,180 @@
+/*
+ * Visual parity pass for the current Naver Pay Securities layout.
+ * This file intentionally contains presentation-only overrides so market,
+ * order and competition behavior stay unchanged.
+ */
+
+:root{
+  --np-green:#03c75a;
+  --np-text:#191f28;
+  --np-sub:#8b95a1;
+  --np-line:#e5e8eb;
+  --np-soft:#f7f8fa;
+  --np-up:#f04452;
+  --np-down:#3182f6;
+}
+
+.marketmate-v2{background:#fff;color:var(--np-text);min-height:100vh}
+.marketmate-v2 .up{color:var(--np-up)!important}
+.marketmate-v2 .down{color:var(--np-down)!important}
+
+/* desktop header / navigation */
+.marketmate-v2 .np-desktop-header{background:#fff;border-bottom:1px solid var(--np-line)}
+.marketmate-v2 .np-head{max-width:1280px;height:76px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:220px minmax(380px,540px) 1fr;align-items:center;gap:28px}
+.marketmate-v2 .np-brand{border:0;background:transparent;padding:0;display:flex;align-items:center;gap:10px;color:var(--np-text)}
+.marketmate-v2 .np-brand>span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--np-green);color:#fff;font-size:11px;font-weight:900}
+.marketmate-v2 .np-brand>b{font-size:21px;letter-spacing:-.055em}
+.marketmate-v2 .search-wrap{height:46px;border:2px solid var(--np-green);border-radius:9px;padding:0 14px;box-shadow:none}
+.marketmate-v2 .search-wrap>svg{color:var(--np-green);width:20px}
+.marketmate-v2 .search-wrap input{font-size:15px;letter-spacing:-.02em}
+.marketmate-v2 .np-head-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;color:#4e5968;font-size:13px}
+.marketmate-v2 .np-head-actions>button:not(.contest-button){border:0;background:transparent;color:#4e5968}
+.marketmate-v2 .np-desktop-header>nav{max-width:1280px;height:52px;margin:0 auto;padding:0 24px;display:flex;align-items:stretch;gap:31px;border-top:1px solid #f3f4f6}
+.marketmate-v2 .np-desktop-header>nav button{position:relative;border:0;background:transparent;color:#4e5968;font-size:15px;font-weight:700;padding:0 2px}
+.marketmate-v2 .np-desktop-header>nav button.active{color:#111827}
+.marketmate-v2 .np-desktop-header>nav button.active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:#111827;border-radius:3px 3px 0 0}
+
+/* index strip */
+.marketmate-v2 .live-market-strip{border-top:1px solid #f0f2f4;border-bottom:1px solid var(--np-line);background:#fff;display:flex;justify-content:center;overflow:hidden}
+.marketmate-v2 .live-market-strip>button{min-width:190px;height:58px;border:0;border-right:1px solid #edf0f2;background:#fff;padding:8px 16px;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;align-items:center;text-align:left}
+.marketmate-v2 .live-market-strip>button:first-child{border-left:1px solid #edf0f2}
+.marketmate-v2 .live-market-strip>button>span{font-size:12px;color:#4e5968;font-weight:600;display:flex;flex-direction:column;line-height:1.25}
+.marketmate-v2 .live-market-strip>button>span small{font-size:9px;color:#b0b8c1;font-weight:500;margin-top:2px}
+.marketmate-v2 .live-market-strip>button>strong{font-size:14px;color:#191f28;justify-self:end}
+.marketmate-v2 .live-market-strip>button>em{grid-column:2;font-size:11px;font-style:normal;justify-self:end}
+
+/* common page surface */
+.marketmate-v2 .np-page{max-width:1280px;margin:20px auto 64px;padding:0 24px}
+.marketmate-v2 .np-panel{background:#fff;border:1px solid var(--np-line);border-radius:10px;box-shadow:none;overflow:hidden}
+.marketmate-v2 .np-section-title{min-height:52px;padding:0 18px;border-bottom:1px solid #eef0f2;display:flex;align-items:center;justify-content:space-between}
+.marketmate-v2 .np-section-title h1,.marketmate-v2 .np-section-title h2{margin:0;color:var(--np-text);letter-spacing:-.035em}
+.marketmate-v2 .np-section-title h2{font-size:16px}
+.marketmate-v2 .np-section-title button{display:flex;align-items:center;gap:2px;border:0;background:none;color:var(--np-sub);font-size:12px}
+.marketmate-v2 .np-section-title button svg{width:15px}
+
+/* market detail */
+.marketmate-v2 .np-trading{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start}
+.marketmate-v2 .np-trading-main{display:flex;flex-direction:column;gap:12px;min-width:0}
+.marketmate-v2 .np-trading>aside{position:sticky;top:14px}
+.marketmate-v2 .np-market-tabs{height:48px;display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--np-line);border-radius:10px;background:#fff;overflow:hidden}
+.marketmate-v2 .np-market-tabs button{position:relative;border:0;border-right:1px solid #edf0f2;background:#fff;color:#6b7684;font-size:14px;font-weight:700}
+.marketmate-v2 .np-market-tabs button:last-child{border-right:0}
+.marketmate-v2 .np-market-tabs button.active{background:#17191c;color:#fff}
+
+.marketmate-v2 .np-quote{border-radius:10px}
+.marketmate-v2 .np-quote-head{padding:26px 24px 0;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.marketmate-v2 .stock-title{display:flex;align-items:center;gap:13px;min-width:0}
+.marketmate-v2 .stock-title>span:last-child{min-width:0}
+.marketmate-v2 .stock-title small{display:block;color:var(--np-sub);font-size:12px;margin-bottom:5px}
+.marketmate-v2 .stock-title h1{margin:0;color:#111827;font-size:25px;line-height:1.25;letter-spacing:-.045em;display:flex;align-items:center;gap:6px}
+.marketmate-v2 .stock-title h1 button{border:0;background:none;padding:2px;color:#b0b8c1}
+.marketmate-v2 .stock-title h1 button.starred{color:var(--np-green)}
+.marketmate-v2 .stock-title h1 svg{width:20px;height:20px}
+.marketmate-v2 .instrument-logo.lg{width:52px;height:52px;flex:0 0 52px}
+.marketmate-v2 .live-pill{border:1px solid #d7f3e3;background:#fff;color:#00a64b;border-radius:999px;padding:6px 9px;font-size:11px;white-space:nowrap}
+.marketmate-v2 .live-pill i{background:var(--np-green)}
+.marketmate-v2 .np-price{padding:28px 24px 20px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.marketmate-v2 .np-price>strong{font-size:35px;line-height:1;font-weight:800;letter-spacing:-.055em;color:#111827}
+.marketmate-v2 .np-price>span{font-size:14px;font-weight:800}
+.marketmate-v2 .np-stats{margin:0 24px 14px;border-top:1px solid #eef0f2;border-bottom:1px solid #eef0f2;display:grid;grid-template-columns:repeat(4,1fr)}
+.marketmate-v2 .np-stats>span{min-height:54px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;color:var(--np-sub);font-size:12px;border-right:1px solid #eef0f2}
+.marketmate-v2 .np-stats>span:first-child{padding-left:4px}
+.marketmate-v2 .np-stats>span:last-child{border-right:0;padding-right:4px}
+.marketmate-v2 .np-stats b{color:#191f28;font-size:12px}
+.marketmate-v2 .np-chart{padding:0 24px 22px}
+
+/* chart surface */
+.marketmate-v2 .naver-light-chart-toolbar{padding:12px 2px 9px}
+.marketmate-v2 .naver-light-chart-toolbar b{font-size:15px}
+.marketmate-v2 .naver-light-chart-ranges{background:#f2f4f6;border-radius:9px}
+.marketmate-v2 .naver-light-chart-ranges button{min-width:38px;padding:7px 8px}
+.marketmate-v2 .naver-light-chart-ranges button.active{color:var(--np-green)}
+.marketmate-v2 .naver-light-chart-stage{height:430px;min-height:340px}
+
+/* order side panel */
+.marketmate-v2 .order-panel{border-color:var(--np-line);border-radius:10px}
+.marketmate-v2 .order-tabs{height:52px!important;background:#fff}
+.marketmate-v2 .order-tabs button{height:52px;font-size:14px}
+.marketmate-v2 .order-form{padding:18px 16px 16px}
+.marketmate-v2 .order-form select,.marketmate-v2 .number-input{height:40px;border-color:#dfe3e8;border-radius:7px}
+.marketmate-v2 .size-buttons{gap:6px}
+.marketmate-v2 .size-buttons button{height:32px;border-color:#e0e4e8;border-radius:6px;background:#fff}
+.marketmate-v2 .order-buy,.marketmate-v2 .order-sell{height:46px;border:0;border-radius:7px;color:#fff;font-weight:800}
+.marketmate-v2 .order-buy{background:var(--np-up)}
+.marketmate-v2 .order-sell{background:var(--np-down)}
+.marketmate-v2 .np-mobile-order{display:none}
+
+/* news list */
+.marketmate-v2 .np-news article{padding:15px 18px;border-bottom:1px solid #f0f2f4}
+.marketmate-v2 .np-news article:last-child{border-bottom:0}
+.marketmate-v2 .np-news article a{color:#333d4b;font-size:14px;font-weight:600;line-height:1.45;text-decoration:none;letter-spacing:-.025em}
+.marketmate-v2 .np-news article span{display:block;margin-top:5px;color:#a0a8b2;font-size:11px}
+
+/* mobile: closer to the Naver stock detail hierarchy */
+@media(max-width:767px){
+  body{background:#fff!important}
+  .marketmate-v2{padding-bottom:66px}
+  .marketmate-v2 .np-desktop-header{display:none}
+  .marketmate-v2 .np-mobile-header{display:block;background:#fff;border-bottom:1px solid var(--np-line);position:relative;z-index:20}
+  .marketmate-v2 .np-mobile-header>div:first-child{height:52px;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
+  .marketmate-v2 .np-mobile-header .np-brand>span{width:28px;height:28px;font-size:9px}
+  .marketmate-v2 .np-mobile-header .np-brand>b{font-size:18px}
+  .marketmate-v2 .np-mobile-header>div:first-child>button:last-child{border:0;background:none;color:#333d4b;padding:6px}
+  .marketmate-v2 .np-mobile-header>div:first-child>button:last-child svg{width:20px}
+  .marketmate-v2 .np-mobile-header .search-wrap{margin:2px 14px 10px;height:40px;border:1px solid #dfe3e8;border-radius:9px;background:#fff;padding:0 12px}
+  .marketmate-v2 .np-mobile-header .search-wrap>svg{color:#6b7684;width:18px}
+  .marketmate-v2 .np-mobile-header .search-wrap input{font-size:14px}
+  .marketmate-v2 .np-mobile-header>nav{height:45px;display:flex;align-items:stretch;gap:26px;padding:0 16px;overflow-x:auto;scrollbar-width:none;border-top:0;white-space:nowrap}
+  .marketmate-v2 .np-mobile-header>nav::-webkit-scrollbar{display:none}
+  .marketmate-v2 .np-mobile-header>nav button{position:relative;flex:none;border:0;background:none;color:#6b7684;font-size:13px;font-weight:700;padding:0}
+  .marketmate-v2 .np-mobile-header>nav button.active{color:#191f28}
+  .marketmate-v2 .np-mobile-header>nav button.active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:#111827}
+
+  .marketmate-v2 .np-page{max-width:none;margin:0;padding:0}
+  .marketmate-v2 .np-trading{display:block}
+  .marketmate-v2 .np-trading-main{gap:0}
+  .marketmate-v2 .np-trading>aside{display:none}
+  .marketmate-v2 .np-market-tabs{height:45px;border:0;border-bottom:1px solid var(--np-line);border-radius:0}
+  .marketmate-v2 .np-market-tabs button{background:#fff;color:#8b95a1;border-right:1px solid #edf0f2;font-size:13px}
+  .marketmate-v2 .np-market-tabs button.active{background:#fff;color:#191f28}
+  .marketmate-v2 .np-market-tabs button.active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:#191f28}
+
+  .marketmate-v2 .np-quote{border:0;border-radius:0;overflow:visible}
+  .marketmate-v2 .np-quote-head{padding:20px 16px 0}
+  .marketmate-v2 .stock-title{gap:11px}
+  .marketmate-v2 .instrument-logo.lg{width:43px;height:43px;flex-basis:43px}
+  .marketmate-v2 .stock-title small{font-size:11px;margin-bottom:4px}
+  .marketmate-v2 .stock-title h1{font-size:21px}
+  .marketmate-v2 .stock-title h1 svg{width:19px;height:19px}
+  .marketmate-v2 .live-pill{padding:5px 8px;font-size:10px}
+  .marketmate-v2 .np-price{padding:28px 16px 18px;display:block}
+  .marketmate-v2 .np-price>strong{display:block;font-size:31px;line-height:1.05}
+  .marketmate-v2 .np-price>span{display:block;margin-top:11px;font-size:14px}
+  .marketmate-v2 .np-stats{margin:0 16px 14px;grid-template-columns:1fr 1fr;border:1px solid #edf0f2;border-radius:0}
+  .marketmate-v2 .np-stats>span{min-height:46px;padding:0 10px!important;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2}
+  .marketmate-v2 .np-stats>span:nth-child(2n){border-right:0}
+  .marketmate-v2 .np-stats>span:nth-last-child(-n+2){border-bottom:0}
+
+  .marketmate-v2 .np-chart{padding:0;border-top:10px solid #f4f5f6}
+  .marketmate-v2 .naver-light-chart{padding:0 0 8px}
+  .marketmate-v2 .naver-light-chart-toolbar{padding:11px 14px 9px}
+  .marketmate-v2 .naver-light-chart-toolbar>div:first-child{gap:6px}
+  .marketmate-v2 .naver-light-chart-toolbar b{font-size:14px}
+  .marketmate-v2 .naver-light-chart-toolbar small{font-size:10px}
+  .marketmate-v2 .naver-light-chart-ranges{border-radius:8px}
+  .marketmate-v2 .naver-light-chart-ranges button{min-width:34px;padding:6px 6px;font-size:11px}
+  .marketmate-v2 .naver-light-chart-stage{height:350px;min-height:300px}
+  .marketmate-v2 .naver-light-chart-attribution{margin-left:14px}
+
+  .marketmate-v2 .np-mobile-order{display:block;border-top:10px solid #f4f5f6;padding:14px 14px 4px}
+  .marketmate-v2 .np-mobile-order .order-panel{border-radius:10px}
+  .marketmate-v2 .np-news{border:0;border-top:10px solid #f4f5f6;border-radius:0}
+  .marketmate-v2 .np-news .np-section-title{padding:0 16px}
+  .marketmate-v2 .np-news article{padding:14px 16px}
+}
+
+@media(min-width:768px) and (max-width:1120px){
+  .marketmate-v2 .np-head{grid-template-columns:180px minmax(320px,1fr) auto}
+  .marketmate-v2 .np-trading{grid-template-columns:minmax(0,1fr) 310px}
+  .marketmate-v2 .live-market-strip>button{min-width:160px}
+}
