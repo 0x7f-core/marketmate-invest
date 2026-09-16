@@ -41,16 +41,18 @@
 - 가상자산 차트: `/api/coin/candle/UPBIT/KRW/{ticker}/days`
 - 뉴스: 국내 뉴스/종목 뉴스, 해외 뉴스, 가상자산 글로벌 뉴스
 - 국내 상세: 종목정보, 투자자 수급, 증권사 수급, 공시, 컨센서스, 재무 메뉴, ESG
-- ETF: 국내·미국 ETF 목록/상세/구성종목
+- ETF: 국내 ETF v2 목록/상세/구성종목, 미국 ETF v2 목록/구성종목
 - 시장 랭킹: 국내 업종·테마·그룹, 미국 섹터, 가상자산 랭킹
 
-네이버증권의 가상자산 endpoint와 ticker에는 거래소 식별자로 `UPBIT` 문자열이 포함됩니다. 이는 네이버 upstream의 공개 경로/식별자에만 사용하며 사용자 화면의 공급자 표시는 `NAVER`로 통일합니다. 사이트가 `api.upbit.com`을 직접 호출하거나 Upbit API 키를 사용하지는 않습니다.
+미국 ETF 목록은 `/api/stockSecurity/etfs/v2/foreign`의 `tradingValue desc` 계약을 사용하고, 구성종목은 Reuters 코드가 아니라 Naver가 요구하는 ETF ticker를 사용합니다. 국내 ETF 목록은 `/api/stockSecurity/etfs/v2/domestic`의 `listingType=tradingValueDesc` 계약을 사용합니다.
+
+네이버증권의 가상자산 endpoint와 ticker에는 거래소 식별자로 `UPBIT` 문자열이 포함됩니다. 이는 네이버 upstream의 공개 경로/식별자에만 사용하며 사용자 화면의 공급자 표시는 `NAVER`로 통일합니다. 사이트가 `api.upbit.com`을 직접 호출하거나 Upbit API 키를 사용하지는 않습니다. 내부 가상자산 종목 ID도 `KRW-{ticker}`로 통일해 `BTC_KRW_UPBIT` 같은 upstream 식별자가 관심종목·포트폴리오 키로 새지 않게 합니다.
 
 현재가 polling 응답의 `pollingInterval`을 다음 네이버 upstream 호출까지의 최소 서버 캐시 시간으로 사용합니다. 같은 URL에 대한 동시 요청은 하나로 합치며, 403·429·timeout·빈 응답·비정상 JSON이 발생하면 허용된 짧은 기간 동안 마지막 네이버 응답만 stale cache로 사용할 수 있습니다. 다른 시세 공급자로 자동 전환하지 않습니다.
 
 시장 개요(KOSPI·KOSDAQ·S&P 500·나스닥·BTC)도 고정 주기로 Worker를 호출하지 않습니다. fresh 응답의 `pollingInterval` 중 가장 빠른 값을 기준으로 다음 호출을 예약하며, 과도한 호출을 막기 위해 2~120초 범위로 제한합니다. 더 느린 upstream은 서버 캐시가 각자 자신의 `pollingInterval`을 계속 존중합니다.
 
-네이버 upstream 응답은 최대 5 MiB로 제한하며 `Content-Length`가 없더라도 스트림을 읽는 도중 제한을 넘으면 즉시 중단합니다. 요청 timeout은 응답 헤더 수신까지만이 아니라 본문 수신·JSON 처리까지 유지합니다.
+네이버 upstream 응답은 최대 5 MiB로 제한하며 `Content-Length`가 없더라도 스트림을 읽는 도중 제한을 넘으면 즉시 중단합니다. identity 응답이 선언된 `Content-Length`보다 짧게 끝나면 전송 중단으로 처리하고, gzip/br 같은 압축 응답은 wire 길이와 디코딩 후 길이가 다를 수 있으므로 그 비교를 적용하지 않습니다. 요청 timeout은 응답 헤더 수신까지만이 아니라 본문 수신·JSON 처리까지 유지합니다.
 
 ## 모의주문 체결 안전장치
 
@@ -63,17 +65,25 @@
 - 미국 프리마켓·애프터마켓 역시 market-status가 OPEN인 것만으로 체결하지 않습니다. Naver worldstock polling 시세에서 실제 거래시각이 확인되고 freshness window 안에 있을 때만 체결합니다. 따라서 정규장 종가와 오래된 거래시각만 남아 있으면 주문은 fail-closed 됩니다.
 - 미국주식 원화 환산은 네이버증권 `FX_USDKRW`만 사용하며, 환율 응답이 stale이면 주가가 최신이어도 미국 거래용 quote를 중단합니다. 표시/거래 경로는 같은 `naver-fx.ts` 파서를 사용하고 거래 경로는 이미 검증한 fresh FX 값을 재사용합니다.
 - 국내/미국주식은 네이버 market-status가 최신 상태로 확인될 때만 체결합니다.
-- 지정가 대기 주문도 미검증 timestamp, stale/freshness window 초과 시세 또는 stale 장 상태로는 자동 체결하지 않습니다.
+- 지정가 대기 주문도 미검증 timestamp, stale/freshness window 초과 시세 또는 stale 장 상태로는 자동 체결하지 않습니다. market-status를 확인한 뒤에도 quote freshness를 한 번 더 검사합니다.
 - 지정가 자동체결 시 국내 현재 거래소와 quote venue가 다르면 체결하지 않습니다.
 - 네이버증권 장애 시 다른 공급자 가격으로 우회 체결하지 않습니다.
 
-국내 종목 메타데이터에는 현재 선택된 실제 quote venue(`KRX` 또는 `NXT`)를 저장합니다. 화면도 quote 응답의 venue를 따라가므로 KRX 우선 구간과 KRX 종료 후 NXT 단독 구간의 표시가 서버 체결 정책과 일치합니다. KRX에서 접수한 지정가 주문이 이후 NXT 단독 구간에서 실제 체결되는 경우에도 성공한 fill의 venue로 종목 메타데이터를 갱신합니다. 포트폴리오와 참가자 공개 투자현황은 저장된 실제 exchange를 그대로 사용합니다.
+국내 종목 메타데이터에는 현재 선택된 실제 quote venue(`KRX` 또는 `NXT`)를 저장합니다. 화면도 quote 응답의 venue를 따라가므로 KRX 우선 구간과 KRX 종료 후 NXT 단독 구간의 표시가 서버 체결 정책과 일치합니다. 지정가 주문이 다른 국내 세션에서 실제 체결된 경우에는 성공한 fresh quote의 venue로 **현재 종목 메타데이터**를 갱신합니다. 포트폴리오와 참가자 공개 투자현황의 보유종목은 이 현재 exchange를 사용합니다.
+
+현재 `fills` 스키마에는 체결 당시 venue를 별도로 저장하는 컬럼이 없습니다. 따라서 과거 체결내역에 현재 mutable `instruments.exchange`를 붙여 체결 당시 거래소처럼 보이게 하지 않습니다. 추후 execution venue 컬럼을 정식 Drizzle 마이그레이션으로 추가하기 전까지 과거 fill UI/API에서는 거래소를 표시하지 않습니다.
+
+## 평가 시세와 순위
+
+포트폴리오 API는 보유종목의 마지막 검증 시세가 없거나 15초 이상 오래된 경우 최대 8종목을 Naver에서 병렬 갱신한 뒤 평가금액을 계산합니다. 갱신 결과가 stale이면 저장하지 않고 마지막 검증 시세를 유지합니다. 기존 snapshot은 임시 claim을 사용해 같은 종목에 대한 중복 upstream 갱신을 줄입니다.
+
+대회 순위도 오래된 보유종목 시세를 최대 8개씩 병렬 갱신합니다. 각 종목은 독립 claim을 사용하고, Naver 오류·stale 응답이면 원래 `received_at`을 복구해 마지막 검증 가격을 유지합니다. 관심종목 갱신도 stale quote로 snapshot이나 국내 venue를 덮어쓰지 않습니다.
 
 ## 차트
 
 기존 TradingView Embed iframe은 사용하지 않습니다. TradingView Lightweight Charts의 standalone 배포본을 필요할 때만 지연 로드해 국내주식·미국주식·가상자산을 같은 캔들차트 UI로 표시합니다. 차트 원본 데이터는 모두 네이버증권 API에서 가져옵니다.
 
-PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 사용하고, 주변 UI는 네이버증권 스타일에 맞춰 반응형으로 구성합니다. 차트 API가 403/429/빈 응답 등을 반환하면 외부 공급자로 fallback하지 않고 오류/재시도 UI를 표시합니다.
+PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 사용하고, 주변 UI는 네이버증권 스타일에 맞춰 반응형으로 구성합니다. 차트 API가 403/429/빈 응답 등을 반환하면 외부 공급자로 fallback하지 않고 오류/재시도 UI를 표시합니다. Lightweight Charts의 attribution logo와 TradingView attribution notice/link를 유지합니다.
 
 ## 거래시간과 휴장
 
@@ -110,7 +120,7 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 - `crypto-ranking`
 - `indicators`
 
-`size`는 1~100 정수만 허용하고 잘못된 cursor·정렬·카테고리·재무 옵션은 다른 기본값으로 바꾸지 않고 400으로 거절합니다.
+`size`는 1~100 정수만 허용하고 잘못된 cursor·정렬·카테고리·재무 옵션은 다른 기본값으로 바꾸지 않고 400으로 거절합니다. exchange 같은 시장 식별자도 길이와 허용 문자를 제한해 Naver resolver와 캐시 키에 임의 입력이 들어가지 않게 합니다.
 
 이 계층은 향후 네이버증권식 종목 상세 탭을 확장할 때 공통 데이터 공급 계층으로 사용합니다.
 
@@ -120,12 +130,12 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 - `sessions`: 30일 만료 로그인 세션
 - `competitions`: 대회 기간, 시작 자금, 초대코드, 상태
 - `participants`: 대회별 참가자와 가상 현금
-- `instruments`: 실제 선택/거래된 종목 메타데이터
+- `instruments`: 실제 선택/거래된 종목 메타데이터와 현재 exchange
 - `orders`: 멱등키가 포함된 모의 주문 원장
-- `fills`: 네이버증권 시세로 계산된 모의 체결
+- `fills`: 네이버증권 시세로 계산된 모의 체결. 현재 스키마에는 execution venue 별도 컬럼이 없음
 - `positions`: 보유수량, 원화 환산 평균단가, 실현손익
 - `cash_ledger`: 모든 가상현금 변동의 감사 원장
-- `quote_snapshots`: 순위 계산용 마지막 검증 시세
+- `quote_snapshots`: 순위·포트폴리오 평가용 마지막 검증 시세
 - `price_history`: 사이트 내부 평가/감사용 시세 스냅샷
 - `watchlist_items`: 사용자별 관심종목
 
@@ -168,6 +178,6 @@ pnpm run lint
 pnpm run build
 ```
 
-`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, active venue 저장/표시, 공통 FX 파서, 시세·환율 freshness guard, 시장개요 pollingInterval, 네이버 응답 크기·timeout guard 같은 핵심 전환 조건을 빠르게 점검합니다.
+`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, active venue 저장/표시, 공통 FX 파서, 시세·환율 freshness guard, 포트폴리오·순위의 fresh 평가 시세 갱신, 시장개요 pollingInterval, 네이버 응답 크기·timeout·중단 응답 guard, crypto canonical symbol, ETF v2 계약, 과거 fills의 mutable exchange 비노출 같은 핵심 전환 조건을 빠르게 점검합니다.
 
 ChatGPT Sites가 `.openai/hosting.json`의 `DB` 바인딩을 실제 D1에 연결하고 배포 시 Drizzle 마이그레이션을 적용합니다.
