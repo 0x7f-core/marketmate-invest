@@ -45,6 +45,7 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const seriesRef = useRef<CandleSeries | null>(null);
+  const [chartReady, setChartReady] = useState(false);
   const [range, setRange] = useState<(typeof RANGES)[number]>("3M");
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -55,6 +56,7 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
     const container = containerRef.current;
     if (!container) return;
     let cancelled = false;
+    setChartReady(false);
     void loadLightweightCharts().then(library => {
       if (cancelled || !containerRef.current) return;
       const chart = library.createChart(containerRef.current, {
@@ -86,6 +88,7 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
       });
       chartRef.current = chart;
       seriesRef.current = series;
+      setChartReady(true);
     }).catch(error => {
       if (!cancelled) {
         setMessage(error instanceof Error ? error.message : "차트 라이브러리를 불러오지 못했습니다.");
@@ -97,19 +100,20 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
       chartRef.current?.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      setChartReady(false);
     };
   }, []);
 
   useEffect(() => {
     const series = seriesRef.current;
     const chart = chartRef.current;
-    if (!series || !chart) return;
+    if (!chartReady || !series || !chart) return;
     const rows = points
       .filter(point => Number.isFinite(point.time) && point.time > 0 && point.open > 0 && point.high > 0 && point.low > 0 && point.close > 0)
       .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
     series.setData(rows);
     if (rows.length) chart.timeScale().fitContent();
-  }, [points, status]);
+  }, [points, chartReady]);
 
   useEffect(() => {
     const controller = new AbortController();
