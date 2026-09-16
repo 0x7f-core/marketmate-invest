@@ -149,7 +149,8 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 ```bash
 pnpm install
 pnpm run db:generate
-pnpm exec tsc --noEmit
+pnpm run typecheck
+pnpm run lint
 pnpm run build
 ```
 
