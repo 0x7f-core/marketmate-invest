@@ -42,9 +42,10 @@ export async function getTradingQuote(
   knownSession?: MarketSession,
 ): Promise<TradingQuote> {
   if (market === "US") {
-    const quote = await getLiveQuote(market, symbol, exchange);
     const fx = await getNaverUsdKrwRate();
-    return normalizeTradingTimestamp({ ...quote, exchangeRate: fx.rate, stale: Boolean(quote.stale || fx.stale) });
+    if (fx.stale) throw new Error("NAVER_FX_UNAVAILABLE");
+    const quote = await getLiveQuote(market, symbol, exchange);
+    return normalizeTradingTimestamp({ ...quote, exchangeRate: fx.rate });
   }
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
