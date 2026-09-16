@@ -22,19 +22,29 @@ export async function GET(request: Request) {
     if (!market || !["KR", "US", "CRYPTO"].includes(market) || symbols.length === 0) {
       return Response.json({ error: "market과 symbols가 필요합니다." }, { status: 400 });
     }
+
     const results = await Promise.allSettled(symbols.map(symbol => getLiveQuote(market, symbol.toUpperCase(), symbols.length === 1 ? exchange : undefined)));
-    const quotes = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+    const resolved = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+    const quotes = resolved.filter(quote => !quote.stale);
+
     if (quotes.length === 0) {
       const rejected = results.find(result => result.status === "rejected");
       if (rejected?.status === "rejected" && !isQuoteUnavailable(rejected.reason)) throw rejected.reason;
-      return Response.json({ error: "네이버증권 실시간 시세를 불러오지 못했습니다.", source: "NAVER" }, { status: 503, headers: { "retry-after": "30" } });
+      return Response.json(
+        { error: resolved.length ? "네이버증권 최신 시세 갱신이 지연되고 있습니다." : "네이버증권 실시간 시세를 불러오지 못했습니다.", source: "NAVER", stale: resolved.length > 0 },
+        { status: 503, headers: { "retry-after": "10", "cache-control": "no-store" } },
+      );
     }
+
     await env.DB!.batch(quotes.map(quote => env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active)
       VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,exchange=excluded.exchange,is_active=1`)
       .bind(`${quote.market}:${quote.symbol}`, quote.market, quote.symbol, quote.symbol, quote.currency, exchange ?? quote.market)));
     await Promise.allSettled(quotes.map(persistQuoteSnapshot));
     await Promise.allSettled(quotes.map(matchPendingOrders));
-    return Response.json({ quotes, partial: quotes.length !== symbols.length, source: "NAVER" }, { headers: { "cache-control": "no-store" } });
+    return Response.json(
+      { quotes, partial: quotes.length !== symbols.length, staleOmitted: resolved.length !== quotes.length, source: "NAVER" },
+      { headers: { "cache-control": "no-store" } },
+    );
   } catch (error) {
     if (isQuoteUnavailable(error)) {
       return Response.json({ error: "네이버증권 실시간 시세를 불러오지 못했습니다.", source: "NAVER" }, { status: 503, headers: { "retry-after": "30" } });
