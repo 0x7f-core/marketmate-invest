@@ -47,14 +47,18 @@ function statusList(payload: unknown) {
   return Array.isArray(statuses) ? statuses.filter(item => item && typeof item === "object") as NaverStatus[] : [];
 }
 
+function sessionType(record: NaverStatus | null) {
+  return stringValue(record, ["marketSessionType", "marketStatusDetailType", "sessionType", "type"]);
+}
+
 function sessionDetails(status: NaverStatus) {
   const current = asRecord(status.currentSession);
   const sessions = Array.isArray(status.sessions) ? status.sessions.map(asRecord).filter((item): item is NaverStatus => Boolean(item)) : [];
-  const currentType = stringValue(current, ["marketSessionType", "sessionType", "type"]);
+  const currentType = sessionType(current);
   const state = stringValue(current, ["marketState", "legacyState", "state", "status"]).toUpperCase();
   const explicitOpen = ["OPEN", "OPENED", "TRADING", "TRADE", "RUNNING"].includes(state);
   const holiday = booleanValue(status, ["isHoliday", "holiday"]) ?? false;
-  const matchingSession = sessions.find(item => stringValue(item, ["marketSessionType", "sessionType", "type"]) === currentType) ?? sessions[0] ?? null;
+  const matchingSession = sessions.find(item => sessionType(item) === currentType) ?? sessions[0] ?? null;
   const openTimeKst = stringValue(current, ["openTimeKst", "openTime"]) || stringValue(matchingSession, ["openTimeKst", "openTime"]);
   const closeTimeKst = stringValue(current, ["closeTimeKst", "closeTime"]) || stringValue(matchingSession, ["closeTimeKst", "closeTime"]);
   const daylight = booleanValue(status, ["isDaylightSavingTime"]) ?? booleanValue(current, ["isDaylightSavingTime"]);
