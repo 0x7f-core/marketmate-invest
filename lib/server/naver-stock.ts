@@ -176,9 +176,9 @@ async function fetchJson(path: string, timeoutMs: number) {
   const safePath = validatePath(path);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
+
   try {
-    response = await fetch(`${NAVER_STOCK_BASE_URL}${safePath}`, {
+    const response = await fetch(`${NAVER_STOCK_BASE_URL}${safePath}`, {
       method: "GET",
       redirect: "manual",
       signal: controller.signal,
@@ -189,40 +189,43 @@ async function fetchJson(path: string, timeoutMs: number) {
         "user-agent": "Mozilla/5.0 MarketMate/2.0 (+public-read-only)",
       },
     });
+
+    if (response.status >= 300 && response.status < 400) {
+      throw new NaverStockError("네이버증권 API가 리다이렉트를 반환했습니다.", { path: safePath, statusCode: response.status, kind: "http" });
+    }
+    if (!response.ok) {
+      throw new NaverStockError(
+        response.status === 403 || response.status === 429
+          ? `네이버증권 API가 HTTP ${response.status}로 요청을 제한했습니다.`
+          : `네이버증권 API가 HTTP ${response.status}를 반환했습니다.`,
+        { path: safePath, statusCode: response.status, retryAfterMs: retryAfterMs(response), kind: "http" },
+      );
+    }
+
+    const text = await readTextLimited(response, safePath);
+    if (!text.trim()) throw new NaverStockError("네이버증권 API가 빈 응답을 반환했습니다.", { path: safePath, kind: "empty" });
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new NaverStockError("네이버증권 API가 JSON이 아닌 응답을 반환했습니다.", { path: safePath, kind: "invalid_json" });
+    }
+    if (payload && typeof payload === "object") {
+      const record = payload as Record<string, unknown>;
+      if (record.detailCode || record.error) {
+        throw new NaverStockError("네이버증권 API 오류 응답을 받았습니다.", { path: safePath, kind: "api" });
+      }
+    }
+    return payload;
   } catch (error) {
-    if (controller.signal.aborted) throw new NaverStockError("네이버증권 API 요청 시간이 초과되었습니다.", { path: safePath, kind: "timeout" });
+    if (error instanceof NaverStockError) throw error;
+    if (controller.signal.aborted) {
+      throw new NaverStockError("네이버증권 API 요청 시간이 초과되었습니다.", { path: safePath, kind: "timeout" });
+    }
     throw new NaverStockError("네이버증권 API에 연결할 수 없습니다.", { path: safePath, kind: "network" });
   } finally {
     clearTimeout(timer);
   }
-
-  if (response.status >= 300 && response.status < 400) {
-    throw new NaverStockError("네이버증권 API가 리다이렉트를 반환했습니다.", { path: safePath, statusCode: response.status, kind: "http" });
-  }
-  if (!response.ok) {
-    throw new NaverStockError(
-      response.status === 403 || response.status === 429
-        ? `네이버증권 API가 HTTP ${response.status}로 요청을 제한했습니다.`
-        : `네이버증권 API가 HTTP ${response.status}를 반환했습니다.`,
-      { path: safePath, statusCode: response.status, retryAfterMs: retryAfterMs(response), kind: "http" },
-    );
-  }
-
-  const text = await readTextLimited(response, safePath);
-  if (!text.trim()) throw new NaverStockError("네이버증권 API가 빈 응답을 반환했습니다.", { path: safePath, kind: "empty" });
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    throw new NaverStockError("네이버증권 API가 JSON이 아닌 응답을 반환했습니다.", { path: safePath, kind: "invalid_json" });
-  }
-  if (payload && typeof payload === "object") {
-    const record = payload as Record<string, unknown>;
-    if (record.detailCode || record.error) {
-      throw new NaverStockError("네이버증권 API 오류 응답을 받았습니다.", { path: safePath, kind: "api" });
-    }
-  }
-  return payload;
 }
 
 export async function naverJson<T>(path: string, options: RequestOptions = {}): Promise<NaverResult<T>> {
