@@ -341,9 +341,10 @@ export async function getChartSeries(market: Market, symbol: string, exchange: s
     result = await naverJson<unknown>(buildNaverPath(`/api/securityService/stock/${encodeURIComponent(code)}/price`, { page: 1, pageSize: Math.min(400, Math.max(30, days + 10)) }), { ttlMs: 60_000, staleMs: 30 * 60_000 });
   } else {
     const ticker = cryptoTicker(symbol);
-    const to = new Date();
-    const from = new Date(Date.now() - days * 86_400_000);
-    result = await naverJson<unknown>(buildNaverPath(`/api/coin/candle/UPBIT/KRW/${encodeURIComponent(ticker)}/days`, { from: from.toISOString(), to: to.toISOString() }), { ttlMs: 30_000, staleMs: 15 * 60_000 });
+    const to = Date.now();
+    const from = to - days * 86_400_000;
+    const kstLocalIso = (value: number) => new Date(value + 9 * 60 * 60_000).toISOString().slice(0, 19);
+    result = await naverJson<unknown>(buildNaverPath(`/api/coin/candle/UPBIT/KRW/${encodeURIComponent(ticker)}/days`, { from: kstLocalIso(from), to: kstLocalIso(to) }), { ttlMs: 30_000, staleMs: 15 * 60_000 });
   }
   const since = Date.now() - days * 86_400_000;
   const points = chartRows(result.data)

@@ -141,8 +141,9 @@ function fxCheck(data) {
   if (!target || !hasPositivePrice(target)) throw new Error("FX_USDKRW positive value missing");
 }
 
-const now = new Date();
-const from = new Date(Date.now() - 8 * 86_400_000);
+const toMs = Date.now();
+const fromMs = toMs - 8 * 86_400_000;
+const kstLocalIso = value => new Date(value + 9 * 60 * 60_000).toISOString().slice(0, 19);
 
 const tests = [
   {
@@ -189,7 +190,7 @@ const tests = [
   },
   {
     name: "crypto daily chart",
-    path: `/api/coin/candle/UPBIT/KRW/BTC/days?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(now.toISOString())}`,
+    path: `/api/coin/candle/UPBIT/KRW/BTC/days?from=${encodeURIComponent(kstLocalIso(fromMs))}&to=${encodeURIComponent(kstLocalIso(toMs))}`,
     check: nonEmptyCheck,
     required: true,
   },
