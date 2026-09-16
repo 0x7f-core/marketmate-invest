@@ -1,21 +1,67 @@
 # 마켓메이트
 
-친구들과 국내주식·미국주식·코인의 실제 시세를 기준으로 겨루는 모의투자 대회 웹앱입니다. 외부 API는 시세 조회에만 사용하며 실제 주문 API는 호출하지 않습니다.
+친구들과 국내주식·미국주식·가상자산의 실제 시세를 기준으로 겨루는 모의투자 대회 웹앱입니다. 실제 증권 주문은 전송하지 않으며, 시장 데이터는 로그인 없이 공개된 `https://stock.naver.com/api/...` 읽기 전용 API만 사용합니다.
+
+> 네이버증권 Web API는 공식 개발자 API가 아닌 비공식 공개 웹 API입니다. 응답 형식·엔드포인트·호출 제한이 예고 없이 바뀔 수 있으므로, 서버 캐시·stale 캐시·오류 UI를 전제로 사용합니다.
 
 ## 구조
 
-```
-브라우저 (PC 전용 3열 UI / 모바일 전용 탭 UI)
+```text
+브라우저 (PC / 모바일 네이버증권 스타일 UI)
   └─ ChatGPT Sites Worker
       ├─ 참가 인증: 고유 닉네임 + 숫자 PIN 4자리
       ├─ 대회·주문·체결·포트폴리오·순위 API
-      ├─ 한국투자증권 Open API 시세 어댑터 (서버 전용 Secrets)
-      ├─ Upbit 공개 시세 어댑터
+      ├─ Naver Stock public read-only adapter
+      │   ├─ /api/polling/domestic/*
+      │   ├─ /api/polling/worldstock/*
+      │   ├─ /api/polling/coin/price
+      │   ├─ /api/stockSecurity/market-status/*
+      │   ├─ 차트 / 뉴스 / 검색 / 지수 / 환율 API
+      │   └─ pollingInterval 기반 서버 캐시
       └─ D1
           ├─ users / competitions / participants
           ├─ instruments / watchlist_items / quote_snapshots
           └─ orders / fills / positions / cash_ledger
 ```
+
+한국투자증권(KIS) Open API와 Upbit REST API는 사용하지 않습니다. App Key, App Secret, OAuth 토큰, Upbit API 키도 필요하지 않습니다.
+
+## 시장 데이터
+
+- 국내주식 현재가: `/api/polling/domestic/stock`
+- 미국주식 현재가: `/api/polling/worldstock/stock`
+- 가상자산 현재가: `/api/polling/coin/price`
+- 국내·해외 지수: `/api/polling/domestic/index`, `/api/polling/worldstock/index`
+- 원/달러 환율: 네이버증권 통합 지표의 `FX_USDKRW`
+- 거래소 장 상태: `/api/stockSecurity/market-status/current`
+- 종목 검색: `/api/autocomplete/search/autoComplete`
+- 국내 차트: `/api/securityService/chart/domestic/item/{code}`
+- 미국 차트: `/api/securityService/stock/{reutersCode}/price`
+- 가상자산 차트: `/api/coin/candle/UPBIT/KRW/{ticker}/days`
+- 뉴스: 국내 뉴스 검색/종목 뉴스, 해외 뉴스, 가상자산 글로벌 뉴스
+
+현재가 polling 응답의 `pollingInterval`을 다음 네이버 API 호출까지의 최소 서버 캐시 시간으로 사용합니다. 같은 종목에 대한 동시 요청은 하나로 합치고, 403·429·timeout·빈 응답·비정상 JSON이 발생하면 짧은 기간 동안 마지막 네이버 응답만 stale cache로 사용할 수 있습니다. 다른 시세 공급자로 자동 전환하지 않습니다.
+
+모의투자 주문은 주문 순간 `getLiveQuote()`를 다시 호출하며, 네이버 polling 캐시가 유효하면 같은 응답을 재사용하고 만료된 경우에만 새 polling 요청을 보냅니다. 시세가 60초 이상 오래된 경우 체결을 중단합니다.
+
+## 차트
+
+기존 TradingView Embed iframe은 사용하지 않습니다. `lightweight-charts`를 사용해 국내주식·미국주식·가상자산을 같은 캔들차트 UI로 표시하며, 차트 원본 데이터는 모두 네이버증권 API에서 가져옵니다.
+
+## 거래시간과 휴장
+
+국내·미국 주식 주문 가능 여부는 로컬 휴장일 표나 직접 계산한 서머타임 로직 대신 네이버증권 `market-status` 응답을 우선 사용합니다.
+
+사용 필드:
+
+- `isHoliday`
+- `currentSession`
+- `marketState`
+- `isDaylightSavingTime`
+- `openTimeKst`
+- `closeTimeKst`
+
+시장상태 API 자체를 확인할 수 없는 경우에는 안전을 위해 주식 주문을 중단합니다. 가상자산은 24시간 시장으로 처리합니다.
 
 ## D1 데이터 모델
 
@@ -23,54 +69,40 @@
 - `sessions`: 30일 만료 로그인 세션
 - `competitions`: 대회 기간, 시작 자금, 초대코드, 상태
 - `participants`: 대회별 참가자와 가상 현금
-- `instruments`: 국내·미국·코인 종목 마스터
+- `instruments`: 실제 거래된 종목 메타데이터
 - `orders`: 멱등키가 포함된 모의 주문 원장
-- `fills`: 실제 시세로 계산된 모의 체결
+- `fills`: 네이버증권 시세로 계산된 모의 체결
 - `positions`: 보유수량, 원화 환산 평균단가, 실현손익
 - `cash_ledger`: 모든 가상현금 변동의 감사 원장
 - `quote_snapshots`: 순위 계산용 마지막 검증 시세
 - `watchlist_items`: 사용자별 관심종목
 
-금액은 원 단위 정수, 수량과 가격은 1/1,000,000 단위 정수로 저장해 부동소수점 오차를 피합니다. 마이그레이션은 `drizzle/`에 있으며 런타임에서 테이블을 임의 생성하지 않습니다.
+금액은 원 단위 정수, 수량과 가격은 1/1,000,000 단위 정수로 저장해 부동소수점 오차를 피합니다.
 
 ## API
 
-- `POST /api/auth/register` — 닉네임과 PIN으로 가입
-- `POST /api/auth/login` — 닉네임과 PIN으로 로그인
+- `POST /api/auth/register`
+- `POST /api/auth/login`
 - `GET /api/auth/me`
 - `POST /api/auth/logout`
 - `GET /api/instruments/search?q=...&market=KR|US|CRYPTO`
 - `GET /api/quotes?market=KR|US|CRYPTO&symbols=...`
+- `GET /api/chart?market=...&symbol=...&range=1W|1M|3M|1Y`
+- `GET /api/market-status?market=KR|US|CRYPTO`
+- `GET /api/market-overview`
+- `GET /api/news`
 - `GET|POST /api/competitions`
 - `POST /api/competitions/join`
-- `POST /api/orders` — 시장가 모의체결
+- `POST /api/orders`
 - `GET /api/portfolio?participantId=...`
-- `GET /api/participants/activity?participantId=...` — 같은 대회 참가자의 보유종목·체결내역
+- `GET /api/participants/activity?participantId=...`
 - `GET /api/leaderboard?competitionId=...`
 
-주문 API는 현재 사용자와 참가자 소유권, 대회 기간, 보유수량/가상현금, 시세 신선도, 중복 주문키를 서버에서 검증합니다. 시세 제공자가 실패하거나 시세가 지연되면 체결하지 않습니다. PC와 모바일에서 시장가 모의매매를 지원하며 코인은 소수점 6자리까지 주문할 수 있습니다. 체결 후 평균단가·실현손익·평가손익·총자산·순위를 다시 계산합니다.
-
-닉네임은 공백과 대소문자를 정규화한 값에 고유 제약을 적용합니다. PIN 원문은 저장하지 않고 PBKDF2-SHA256(100,000회)으로 검증값만 저장하며, 로그인 5회 실패 시 10분간 잠급니다. 세션 토큰도 해시만 D1에 저장합니다.
-
-## 종목 마스터
-
-`data/instruments.json`에는 한국투자증권 공식 국내·미국 종목 마스터와 Upbit 원화·BTC·USDT 마켓을 합친 검색 카탈로그가 들어 있습니다. 현재 17,013종목(국내 3,936, 미국 12,789, 코인 288)이며, 갱신은 아래 명령으로 수행합니다.
-
-```bash
-pnpm run catalog:update
-```
+주문 API는 사용자·참가자 소유권, 대회 기간, 네이버증권 시장 상태, 보유수량/가상현금, 시세 신선도, 중복 주문키를 서버에서 검증합니다.
 
 ## Sites 환경값
 
-다음 값은 Sites 런타임 설정에 저장합니다. Key/Secret은 반드시 secret으로 표시하고 `NEXT_PUBLIC_` 접두사를 사용하지 않습니다.
-
-- `KIS_APP_KEY` (secret)
-- `KIS_APP_SECRET` (secret)
-- `KIS_BASE_URL` — 선택값, 기본값은 `https://openapi.koreainvestment.com:9443`
-
-Upbit 현재가는 서버에서 공개 REST API로 조회하므로 별도 키가 필요하지 않습니다.
-
-한국투자증권 연동은 OAuth 토큰과 국내 현재가·해외 현재가상세 조회 API만 사용합니다. 미국주식은 현재가상세의 당일 환율을 원화 평가와 모의체결에 자동 적용하고 체결 당시 환율을 D1에 보존합니다. 실제 계좌 조회나 주문 API는 호출하지 않으며, 발급한 App Key와 App Secret은 브라우저 번들에 포함되지 않습니다. 접근 토큰은 App Secret에서 파생한 키로 암호화해 D1에 저장하므로 Worker 인스턴스가 달라도 24시간 동안 공유하며, 짧은 중복 시세 조회도 합쳐 API 호출량을 줄입니다.
+시장 데이터용 secret은 없습니다. ChatGPT Sites의 `.openai/hosting.json`에서 `DB` D1 바인딩만 사용합니다.
 
 ## 개발
 
