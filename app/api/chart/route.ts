@@ -5,6 +5,7 @@ import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { enforceRateLimit } from "@/lib/server/safety";
 
 const RANGES = new Set(["1D", "1W", "1M", "3M", "1Y"]);
+const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
 
 export async function GET(request: Request) {
   try {
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
       return Response.json({ error: "차트 요청값을 확인해주세요." }, { status: 400 });
     }
     const symbol = normalizeNaverMarketSymbol(market, rawSymbol);
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !RANGES.has(range)) {
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !RANGES.has(range) || (exchange !== undefined && !EXCHANGE.test(exchange))) {
       return Response.json({ error: "차트 요청값을 확인해주세요." }, { status: 400 });
     }
     const result = await getChartSeries(market, symbol, exchange, range);
