@@ -141,6 +141,14 @@ function fxCheck(data) {
   if (!target || !hasPositivePrice(target)) throw new Error("FX_USDKRW positive value missing");
 }
 
+function autocompleteDiagnostic(label) {
+  return data => {
+    nonEmptyCheck(data);
+    const sample = JSON.stringify(data).slice(0, 5000);
+    console.log(`AUTOCOMPLETE_SAMPLE ${label}: ${sample}`);
+  };
+}
+
 const toMs = Date.now();
 const fromMs = toMs - 8 * 86_400_000;
 const kstLocalIso = value => new Date(value + 9 * 60 * 60_000).toISOString().slice(0, 19);
@@ -198,6 +206,18 @@ const tests = [
     name: "autocomplete AAPL",
     path: "/api/autocomplete/search/autoComplete?query=AAPL&target=stock",
     check: nonEmptyCheck,
+    required: false,
+  },
+  {
+    name: "autocomplete Samsung name diagnostic",
+    path: `/api/autocomplete/search/autoComplete?query=${encodeURIComponent("삼성전자")}&target=stock`,
+    check: autocompleteDiagnostic("삼성전자"),
+    required: false,
+  },
+  {
+    name: "autocomplete Samsung code diagnostic",
+    path: "/api/autocomplete/search/autoComplete?query=005930&target=stock",
+    check: autocompleteDiagnostic("005930"),
     required: false,
   },
   {
