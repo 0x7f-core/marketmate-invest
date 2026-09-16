@@ -118,6 +118,54 @@ const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
   else start();
 })();`;
 
+// Naver Securities presents U.S. stock/ETF current prices to two decimal places.
+// Keep the underlying quote precision untouched for calculations and normalize
+// only the user-facing current-price text after each React quote refresh.
+const US_PRICE_TWO_DECIMALS = String.raw`(() => {
+  const usExchangePattern = /^(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)$/i;
+
+  const apply = () => {
+    document.querySelectorAll(".np-quote").forEach((quote) => {
+      if (!(quote instanceof HTMLElement)) return;
+      const meta = quote.querySelector(".np-quote-head .stock-title small")?.textContent || "";
+      const parts = meta.split("·").map((value) => value.trim());
+      const exchange = parts[1] || "";
+      if (!usExchangePattern.test(exchange)) return;
+
+      const priceNode = quote.querySelector(".np-price > strong");
+      if (!(priceNode instanceof HTMLElement)) return;
+      const raw = priceNode.textContent?.trim() || "";
+      if (!raw.startsWith("$")) return;
+      const price = Number(raw.replace(/[^0-9.-]/g, ""));
+      if (!Number.isFinite(price)) return;
+
+      const formatted = "$" + price.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      if (raw !== formatted) priceNode.textContent = formatted;
+    });
+  };
+
+  const start = () => {
+    let scheduled = false;
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        apply();
+      });
+    };
+    apply();
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  };
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
+})();`;
+
 // The home page originally showed static implementation notes in the market-status
 // row. Replace them with the same compact, live session summary pattern used by
 // Npay Securities: domestic, U.S., and crypto state in one line, backed by this
@@ -268,6 +316,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: NAVER_CRYPTO_LOGO }} />
         <script dangerouslySetInnerHTML={{ __html: US_ETF_ORDER_BUTTON_LABEL }} />
+        <script dangerouslySetInnerHTML={{ __html: US_PRICE_TWO_DECIMALS }} />
         <script dangerouslySetInnerHTML={{ __html: LIVE_MARKET_STATUS_BOARD }} />
       </head>
       <body className="antialiased">{children}</body>
