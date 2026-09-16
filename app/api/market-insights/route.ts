@@ -28,6 +28,7 @@ const KINDS = new Set<MarketInsightKind>([
 ]);
 
 const CURSOR = /^[A-Za-z0-9._~+=:/-]{1,512}$/;
+const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
 const DOMESTIC_RANKING_CATEGORIES = new Set(["industries", "themes", "groups"]);
 const DOMESTIC_RANKING_SORTS = new Set(["changeRate", "marketCap"]);
 const FOREIGN_FINANCE_SECTIONS = new Set(["summary", "finance", "ratios", "balance", "income", "cash"]);
@@ -37,6 +38,8 @@ const CRYPTO_SORTS = new Set(["top", "up", "down", "marketValue"]);
 function invalidOption(kind: MarketInsightKind, url: URL) {
   const cursor = url.searchParams.get("cursor");
   if (cursor !== null && !CURSOR.test(cursor)) return true;
+  const exchange = url.searchParams.get("exchange");
+  if (exchange !== null && !EXCHANGE.test(exchange)) return true;
 
   const category = url.searchParams.get("category");
   const sort = url.searchParams.get("sort");
