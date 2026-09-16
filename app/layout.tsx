@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./mobile.css";
+import "./naver-market.css";
 
 export const metadata: Metadata = {
   title: "마켓메이트 | 친구들과 하는 실전 모의투자",
