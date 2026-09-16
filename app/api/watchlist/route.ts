@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
-import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { getTradingQuote } from "@/lib/server/trading-quote";
 
 const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency,
   q.price_micros AS priceKrwMicros,q.change_rate_ppm AS changeRatePpm,q.fx_rate_micros AS fxRateMicros,q.received_at AS receivedAt
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<{market:Market;symbol:string;exchange:string;receivedAt?:number}>();
     const stale = result.results.filter(item => !item.receivedAt || item.receivedAt < Date.now()-15_000).slice(0,6);
     if (stale.length) {
-      await Promise.allSettled(stale.map(item => getLiveQuote(item.market,item.symbol,item.exchange).then(quote => quote.stale ? undefined : persistQuoteSnapshot(quote))));
+      await Promise.allSettled(stale.map(item => getTradingQuote(item.market,item.symbol,item.exchange).then(quote => quote.stale ? undefined : persistQuoteSnapshot(quote))));
     }
     const fresh = stale.length ? await env.DB!.prepare(watchlistSql).bind(user.id).all() : result;
     return Response.json({ items:fresh.results }, { headers:{"cache-control":"no-store"} });
