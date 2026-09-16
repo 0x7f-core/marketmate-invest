@@ -95,8 +95,18 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
     const statuses = statusList(result.data).filter(status => exchanges.includes(stringValue(status, ["exchange"]).toLocaleLowerCase("en-US")));
     if (!statuses.length) return closedFallback(market);
 
-    const detailed = statuses.map(status => ({ status, detail: sessionDetails(status) }));
-    const selected = detailed.find(item => item.detail.isOpen) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
+    const detailed = statuses.map(status => ({
+      status,
+      exchange: stringValue(status, ["exchange"]).toLocaleLowerCase("en-US"),
+      detail: sessionDetails(status),
+    }));
+    const selected = market === "KR"
+      ? detailed.find(item => item.exchange === "krx" && item.detail.isOpen)
+        ?? detailed.find(item => item.exchange === "nxt" && item.detail.isOpen)
+        ?? detailed.find(item => item.exchange === "krx" && !item.detail.holiday)
+        ?? detailed.find(item => !item.detail.holiday)
+        ?? detailed[0]
+      : detailed.find(item => item.detail.isOpen) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
     const exchange = stringValue(selected.status, ["exchange"]).toUpperCase();
     const detail = selected.detail;
     const label = detail.holiday ? "휴장일" : detail.isOpen ? sessionLabel(detail.currentType, market) : "장 마감";
