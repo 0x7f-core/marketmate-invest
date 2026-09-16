@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { normalizeSupportedExchange } from "@/lib/server/instrument-policy";
+import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
     const exchange = normalizeSupportedExchange(body.market, body.exchange);
     const currency = body.market === "US" ? "USD" : "KRW";
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !exchange || !body.name.trim()) {
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !exchange || !body.name.trim() || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
       return Response.json({error:"한국·미국주식과 가상자산만 등록할 수 있습니다."},{status:400});
     }
     const instrumentId = `${body.market}:${symbol}`;
