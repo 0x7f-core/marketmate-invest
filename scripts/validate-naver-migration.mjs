@@ -101,6 +101,7 @@ for (const path of [
 ]) {
   const text = await source(path);
   if (!text.includes("getTradingQuote")) failures.push(`getTradingQuote wiring is missing: ${path}`);
+  if (/\bgetLiveQuote\b/.test(text)) failures.push(`direct getLiveQuote bypass is forbidden: ${path}`);
 }
 
 const orders = await source("app/api/orders/route.ts");
