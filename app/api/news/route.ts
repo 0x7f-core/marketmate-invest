@@ -38,7 +38,7 @@ function collectRecords(value: unknown, depth = 0, output: Array<Record<string, 
   return output;
 }
 
-function publishedAt(record: Record<string, unknown>, index: number) {
+function publishedAt(record: Record<string, unknown>) {
   for (const key of ["publishedAt", "publishDateTime", "releasedAt", "datetime", "dateTime", "createdAt", "date"]) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value < 1_000_000_000_000 ? value * 1_000 : value;
@@ -53,7 +53,7 @@ function publishedAt(record: Record<string, unknown>, index: number) {
       }
     }
   }
-  return Date.now() - index;
+  return 0;
 }
 
 function articleLink(record: Record<string, unknown>, title: string) {
@@ -67,13 +67,13 @@ function articleLink(record: Record<string, unknown>, title: string) {
 }
 
 function normalizeNews(payload: unknown) {
-  const items = collectRows(payload).map((record, index): NewsItem | null => {
+  const items = collectRows(payload).map((record): NewsItem | null => {
     const title = stringValue(record, ["title", "articleTitle", "headline", "newsTitle", "subject"]);
     if (!title) return null;
     return {
       title,
       link: articleLink(record, title),
-      publishedAt: publishedAt(record, index),
+      publishedAt: publishedAt(record),
       source: stringValue(record, ["officeName", "pressName", "source", "providerName", "mediaName"]) || "네이버증권",
     };
   }).filter((item): item is NewsItem => Boolean(item));
