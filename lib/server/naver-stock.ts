@@ -137,6 +137,8 @@ function retryAfterMs(response: Response) {
 }
 
 function declaredContentLength(response: Response) {
+  const contentEncoding = response.headers.get("content-encoding")?.trim().toLocaleLowerCase("en-US");
+  if (contentEncoding && contentEncoding !== "identity") return undefined;
   const raw = response.headers.get("content-length");
   if (!raw) return undefined;
   const parsed = Number(raw);
