@@ -81,9 +81,20 @@ export async function getTradingQuote(
   }
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
-  const session = knownSession ?? await getCheckedMarketSession("KR");
+  if (knownSession) {
+    if (knownSession.isOpen && !knownSession.stale && knownSession.exchange === "NXT") {
+      return normalizeTradingTimestamp(Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const }));
+    }
+    return normalizeTradingTimestamp(Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const }));
+  }
+
+  // KRX is the common path. Start its quote request while the market-status request
+  // is in flight so a cold quote no longer pays two Naver round trips serially.
+  const regularPrefetch = getLiveQuote(market, symbol, exchange);
+  const session = await getCheckedMarketSession("KR");
   if (session.isOpen && !session.stale && session.exchange === "NXT") {
+    regularPrefetch.catch(() => undefined);
     return normalizeTradingTimestamp(Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const }));
   }
-  return normalizeTradingTimestamp(Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const }));
+  return normalizeTradingTimestamp(Object.assign(await regularPrefetch, { venue: "KRX" as const }));
 }
