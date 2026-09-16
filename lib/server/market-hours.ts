@@ -41,10 +41,25 @@ function booleanValue(record: NaverStatus | null, keys: string[]) {
   return undefined;
 }
 
+function statusArray(record: NaverStatus | null) {
+  if (!record || !Array.isArray(record.statuses)) return [] as NaverStatus[];
+  return record.statuses.map(asRecord).filter((item): item is NaverStatus => Boolean(item));
+}
+
 function statusList(payload: unknown) {
-  if (!payload || typeof payload !== "object") return [] as NaverStatus[];
-  const statuses = (payload as NaverStatus).statuses;
-  return Array.isArray(statuses) ? statuses.filter(item => item && typeof item === "object") as NaverStatus[] : [];
+  const root = asRecord(payload);
+  if (!root) return [] as NaverStatus[];
+
+  // 2026-09-16 current contract is top-level { serverTime, statuses }, but this is an
+  // unofficial API. Accept a small set of common response wrappers without walking
+  // arbitrary payload fields or accidentally treating session timetable rows as markets.
+  const direct = statusArray(root);
+  if (direct.length) return direct;
+  for (const key of ["data", "result", "body", "payload"]) {
+    const nested = statusArray(asRecord(root[key]));
+    if (nested.length) return nested;
+  }
+  return [] as NaverStatus[];
 }
 
 function sessionType(record: NaverStatus | null) {
