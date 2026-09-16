@@ -127,6 +127,20 @@ const quotesRoute = await source("app/api/quotes/route.ts");
 if (!quotesRoute.includes("quote.venue ?? exchange ?? quote.market")) {
   failures.push("quote refreshes must persist the actual active KR venue when available");
 }
+if (!quotesRoute.includes("new Set(symbols.map")) {
+  failures.push("quote refreshes must deduplicate normalized symbols");
+}
+
+const dashboard = await source("app/trading-dashboard.tsx");
+if (/\bUPBIT\b/.test(dashboard)) {
+  failures.push("dashboard must not expose legacy UPBIT fallback labels");
+}
+if (!dashboard.includes('venue?:"KRX"|"NXT"') || !dashboard.includes("exchange:q.venue??current.exchange")) {
+  failures.push("dashboard must follow the active KRX/NXT venue returned by Naver quotes");
+}
+if (!dashboard.includes('exchange: "NAVER"')) {
+  failures.push("dashboard crypto fallback provider label must remain NAVER");
+}
 
 const pendingOrders = await source("lib/server/pending-orders.ts");
 if (!pendingOrders.includes("isExecutableTradingQuote")) {
