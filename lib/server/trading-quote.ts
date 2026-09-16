@@ -4,8 +4,22 @@ import { getNxtLiveQuote } from "@/lib/server/naver-nxt";
 
 export type TradingQuote = LiveQuote & { venue?: "KRX" | "NXT" };
 
+function compactKstTimestampMs(value: number) {
+  const raw = String(Math.trunc(value));
+  if (!/^(?:19|20)\d{12}$/.test(raw)) return value;
+  const parsed = Date.parse(`${raw.slice(0,4)}-${raw.slice(4,6)}-${raw.slice(6,8)}T${raw.slice(8,10)}:${raw.slice(10,12)}:${raw.slice(12,14)}+09:00`);
+  return Number.isFinite(parsed) ? parsed : value;
+}
+
+function normalizeTradingTimestamp<T extends TradingQuote>(quote: T): T {
+  if (!quote.timestampVerified || !Number.isFinite(quote.timestamp)) return quote;
+  const timestamp = compactKstTimestampMs(quote.timestamp);
+  return timestamp === quote.timestamp ? quote : { ...quote, timestamp };
+}
+
 function sourceTimestampMs(quote: TradingQuote) {
-  return quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
+  const timestamp = compactKstTimestampMs(quote.timestamp);
+  return timestamp < 1_000_000_000_000 ? timestamp * 1_000 : timestamp;
 }
 
 export function tradingQuoteFreshnessWindowMs(quote: TradingQuote) {
@@ -26,11 +40,11 @@ export async function getTradingQuote(
   exchange?: string,
   knownSession?: MarketSession,
 ): Promise<TradingQuote> {
-  if (market !== "KR") return getLiveQuote(market, symbol, exchange);
+  if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
   const session = knownSession ?? await getCheckedMarketSession("KR");
   if (session.isOpen && !session.stale && session.exchange === "NXT") {
-    return Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const });
+    return normalizeTradingTimestamp(Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const }));
   }
-  return Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const });
+  return normalizeTradingTimestamp(Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const }));
 }
