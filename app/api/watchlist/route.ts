@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
@@ -8,21 +9,7 @@ import { getTradingQuote } from "@/lib/server/trading-quote";
 const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency,
   q.price_micros AS priceKrwMicros,q.change_rate_ppm AS changeRatePpm,q.fx_rate_micros AS fxRateMicros,q.received_at AS receivedAt
   FROM watchlist_items w JOIN instruments i ON i.id=w.instrument_id LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
-  WHERE w.user_id=? ORDER BY w.sort_order,w.created_at LIMIT 50`;
-
-function normalizeExchange(market: Market, value: string) {
-  if (market === "CRYPTO") return "NAVER";
-  const exchange = value.trim().toUpperCase();
-  if (market === "US") {
-    const compact = exchange.replace(/[\s._-]+/g, "");
-    if (compact.includes("AMEX") || compact.includes("NYSEAMERICAN") || ["AMS", "ASE"].includes(compact)) return "AMS";
-    if (compact.includes("NYSE") || ["NYS", "NYQ"].includes(compact)) return "NYS";
-    if (compact.includes("NASDAQ") || ["NAS", "NSQ", "NMS"].includes(compact)) return "NAS";
-    return ["USA", "US"].includes(compact) ? compact : "";
-  }
-  if (!/^[A-Z0-9._-]{1,16}$/.test(exchange)) return "";
-  return ["KRX", "NXT", "KOSPI", "KOSDAQ", "KONEX"].includes(exchange) ? exchange : "";
-}
+  WHERE w.user_id=? AND i.is_active=1 ORDER BY w.sort_order,w.created_at LIMIT 50`;
 
 export async function GET(request: Request) {
   try {
@@ -55,10 +42,10 @@ export async function POST(request: Request) {
       return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
     }
     const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
-    const exchange = normalizeExchange(body.market, body.exchange);
+    const exchange = normalizeSupportedExchange(body.market, body.exchange);
     const currency = body.market === "US" ? "USD" : "KRW";
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !exchange || !body.name.trim()) {
-      return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
+      return Response.json({error:"한국·미국주식과 가상자산만 등록할 수 있습니다."},{status:400});
     }
     const instrumentId = `${body.market}:${symbol}`;
     await env.DB!.batch([
