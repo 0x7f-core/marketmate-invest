@@ -4,7 +4,7 @@ import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
-import { getTradingQuote } from "@/lib/server/trading-quote";
+import { getTradingQuote, isExecutableTradingQuote } from "@/lib/server/trading-quote";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 type OrderBody = {
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
     const quote = await getTradingQuote(body.market, symbol, body.exchange, marketSession);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
-    if (quote.stale || Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
+    if (!isExecutableTradingQuote(quote, now)) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
     if (!Number.isFinite(fxRate) || fxRate <= 0) return Response.json({ error: "네이버증권 환율을 확인할 수 없어 미국주식 주문을 중단했습니다." }, { status: 503 });
 
