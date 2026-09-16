@@ -5,6 +5,8 @@ import { enforceRateLimit } from "@/lib/server/safety";
 
 type NewsItem = { title: string; link: string; publishedAt: number; source: string };
 
+const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
+
 function stringValue(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = record[key];
@@ -139,10 +141,13 @@ export async function GET(request: Request) {
     await enforceRateLimit(request, "news", 40, 5 * 60_000, user.id);
     const url = new URL(request.url);
     const market = url.searchParams.get("market") ?? "KR";
-    const rawSymbol = (url.searchParams.get("symbol") ?? "").slice(0, 32);
-    const name = (url.searchParams.get("name") ?? "").slice(0, 80);
-    const exchange = (url.searchParams.get("exchange") ?? "").slice(0, 20);
+    const rawSymbol = (url.searchParams.get("symbol") ?? "").trim();
+    const name = (url.searchParams.get("name") ?? "").normalize("NFKC").trim();
+    const exchange = (url.searchParams.get("exchange") ?? "").trim();
     if (!["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "시장을 확인해주세요." }, { status: 400 });
+    if (rawSymbol.length > 32 || name.length > 80 || (exchange && !EXCHANGE.test(exchange))) {
+      return Response.json({ error: "뉴스 요청값을 확인해주세요." }, { status: 400 });
+    }
     const symbol = rawSymbol ? normalizeNaverMarketSymbol(market as "KR" | "US" | "CRYPTO", rawSymbol) : "";
     if (symbol && !/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     const result = await fetchNaverNews(market, symbol, name, exchange);
