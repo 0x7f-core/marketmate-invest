@@ -50,7 +50,8 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
   const host = overview.firstElementChild as HTMLElement | null;
   if (!host) return;
 
-  const selectedId = overview.querySelector<HTMLSelectElement>("select")?.value ?? "";
+  const selector = overview.querySelector("select");
+  const selectedId = selector instanceof HTMLSelectElement ? selector.value : "";
   const title = overview.querySelector("h1")?.textContent?.trim() ?? "";
   const competition = (selectedId ? competitions.find(item => item.id === selectedId) : undefined)
     ?? competitions.find(item => item.name === title);
