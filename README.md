@@ -44,9 +44,11 @@
 - ETF: 국내·미국 ETF 목록/상세/구성종목
 - 시장 랭킹: 국내 업종·테마·그룹, 미국 섹터, 가상자산 랭킹
 
-네이버증권의 가상자산 endpoint와 ticker에는 거래소 식별자로 `UPBIT` 문자열이 포함됩니다. 기존 UI fallback 라벨에도 같은 문자열이 일부 남아 있을 수 있지만 사이트가 `api.upbit.com`을 직접 호출하거나 Upbit API 키를 사용하지는 않습니다.
+네이버증권의 가상자산 endpoint와 ticker에는 거래소 식별자로 `UPBIT` 문자열이 포함됩니다. 이는 네이버 upstream의 공개 경로/식별자에만 사용하며 사용자 화면의 공급자 표시는 `NAVER`로 통일합니다. 사이트가 `api.upbit.com`을 직접 호출하거나 Upbit API 키를 사용하지는 않습니다.
 
 현재가 polling 응답의 `pollingInterval`을 다음 네이버 upstream 호출까지의 최소 서버 캐시 시간으로 사용합니다. 같은 URL에 대한 동시 요청은 하나로 합치며, 403·429·timeout·빈 응답·비정상 JSON이 발생하면 허용된 짧은 기간 동안 마지막 네이버 응답만 stale cache로 사용할 수 있습니다. 다른 시세 공급자로 자동 전환하지 않습니다.
+
+네이버 upstream 응답은 최대 5 MiB로 제한하며 `Content-Length`가 없더라도 스트림을 읽는 도중 제한을 넘으면 즉시 중단합니다. 요청 timeout은 응답 헤더 수신까지만이 아니라 본문 수신·JSON 처리까지 유지합니다.
 
 ## 모의주문 체결 안전장치
 
@@ -59,7 +61,10 @@
 - 미국주식 원화 환산은 네이버증권 `FX_USDKRW`만 사용하며, 환율 응답이 stale이면 주가가 최신이어도 미국 거래용 quote를 중단합니다.
 - 국내/미국주식은 네이버 market-status가 최신 상태로 확인될 때만 체결합니다.
 - 지정가 대기 주문도 미검증 timestamp, stale/freshness window 초과 시세 또는 stale 장 상태로는 자동 체결하지 않습니다.
+- 지정가 자동체결 시 국내 현재 거래소와 quote venue가 다르면 체결하지 않습니다.
 - 네이버증권 장애 시 다른 공급자 가격으로 우회 체결하지 않습니다.
+
+국내 종목 메타데이터에는 현재 선택된 실제 quote venue(`KRX` 또는 `NXT`)를 저장합니다. 화면도 quote 응답의 venue를 따라가므로 KRX 우선 구간과 KRX 종료 후 NXT 단독 구간의 표시가 서버 체결 정책과 일치합니다.
 
 ## 차트
 
@@ -75,12 +80,13 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 
 - `isHoliday`
 - `currentSession`
+- `marketSessionType` / `marketStatusDetailType`
 - `marketState`
 - `isDaylightSavingTime`
 - `openTimeKst`
 - `closeTimeKst`
 
-국내는 KRX/NXT 두 상태를 함께 확인하며 **동시 개장 시 KRX를 우선**합니다. KRX가 거래 가능하지 않고 NXT만 열려 있을 때에만 NXT를 선택합니다. 미국주식은 네이버 market-status가 OPEN으로 확인한 프리마켓·정규장·애프터마켓 세션에서 주문할 수 있으며, closing 세션은 제외합니다. 시장상태 API를 확인할 수 없거나 stale cache만 남아 있는 경우에는 안전을 위해 주식 주문을 중단합니다. 가상자산은 24시간 시장으로 처리합니다.
+국내는 KRX/NXT 두 상태를 함께 확인하며 **동시 개장 시 KRX를 우선**합니다. KRX가 거래 가능하지 않고 NXT만 열려 있을 때에만 NXT를 선택합니다. 미국주식은 네이버 market-status가 OPEN으로 확인한 프리마켓·정규장·애프터마켓 세션에서 주문할 수 있으며, closing 세션은 제외합니다. `marketState`가 OPEN이어도 세션 타입을 확인할 수 없으면 안전을 위해 주문을 중단합니다. 시장상태 API를 확인할 수 없거나 stale cache만 남아 있는 경우에도 주식 주문을 중단합니다. 가상자산은 24시간 시장으로 처리합니다.
 
 ## 네이버 시장 상세 API
 
@@ -98,6 +104,8 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 - `foreign-etf-list`, `foreign-etf-components`, `foreign-sector-ranking`
 - `crypto-ranking`
 - `indicators`
+
+`size`는 1~100 정수만 허용하고 잘못된 cursor·정렬·카테고리·재무 옵션은 다른 기본값으로 바꾸지 않고 400으로 거절합니다.
 
 이 계층은 향후 네이버증권식 종목 상세 탭을 확장할 때 공통 데이터 공급 계층으로 사용합니다.
 
@@ -155,6 +163,6 @@ pnpm run lint
 pnpm run build
 ```
 
-`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, 시세·환율 freshness guard 같은 핵심 전환 조건을 빠르게 점검합니다.
+`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, active venue 저장/표시, 시세·환율 freshness guard, 네이버 응답 크기·timeout guard 같은 핵심 전환 조건을 빠르게 점검합니다.
 
 ChatGPT Sites가 `.openai/hosting.json`의 `DB` 바인딩을 실제 D1에 연결하고 배포 시 Drizzle 마이그레이션을 적용합니다.
