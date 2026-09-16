@@ -1,0 +1,32 @@
+name: Naver runtime smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - refactor/naver-market-data
+    paths:
+      - scripts/validate-naver-runtime.mjs
+      - .github/workflows/naver-runtime-smoke.yml
+  schedule:
+    - cron: "20 0 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+
+      - name: Validate live Naver Stock endpoints
+        run: node scripts/validate-naver-runtime.mjs
