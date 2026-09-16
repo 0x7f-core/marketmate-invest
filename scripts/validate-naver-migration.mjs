@@ -73,6 +73,12 @@ if (!naverStock.includes("MAX_RESPONSE_BYTES") || !naverStock.includes("response
 if (!naverStock.includes("setTimeout(() => controller.abort(), timeoutMs)") || !naverStock.includes("finally {\n    clearTimeout(timer);\n  }")) {
   failures.push("Naver request timeout must remain active through response-body processing");
 }
+if (!naverStock.includes("Array.isArray(raw) ? raw : [raw]") || !naverStock.includes("query.append(key, String(value))")) {
+  failures.push("Naver path builder must preserve repeated query keys such as exchanges=krx&exchanges=nxt");
+}
+if (!naverStock.includes("redirect: \"manual\"") || !naverStock.includes("url.origin !== NAVER_STOCK_BASE_URL")) {
+  failures.push("Naver requests must remain same-origin and reject redirects");
+}
 
 const marketData = await source("lib/server/market-data.ts");
 if (!marketData.includes("getNaverUsdKrwRate") || marketData.includes("async function usdKrwRate(")) {
@@ -95,6 +101,9 @@ const krxPriority = marketHours.indexOf('item.exchange === "krx" && item.tradabl
 const nxtPriority = marketHours.indexOf('item.exchange === "nxt" && item.tradable');
 if (krxPriority < 0 || nxtPriority < 0 || krxPriority > nxtPriority) {
   failures.push("KR trading-session priority must prefer KRX before NXT");
+}
+if (!marketHours.includes('const exchanges = market === "KR" ? ["krx", "nxt"] : ["nasdaq"]') || !marketHours.includes('{ exchanges }')) {
+  failures.push("Naver market-status requests must use repeated lowercase exchange parameters");
 }
 if (!marketHours.includes('if (type.includes("closing")) return false;')) {
   failures.push("closing sessions must remain non-tradable");
@@ -156,6 +165,9 @@ if (!quotesRoute.includes("new Set(symbols.map")) {
 for (const path of ["app/api/portfolio/route.ts", "app/api/participants/activity/route.ts"]) {
   const text = await source(path);
   if (!text.includes("i.exchange")) failures.push(`instrument exchange must be exposed to position clients: ${path}`);
+  if (/f\.executed_at AS executedAt[\s\S]{0,160}i\.exchange/.test(text)) {
+    failures.push(`historical fills must not inherit mutable instrument exchange metadata: ${path}`);
+  }
 }
 
 const dashboard = await source("app/trading-dashboard.tsx");
