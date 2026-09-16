@@ -36,6 +36,14 @@ function marketOf(record: Record<string, unknown>): Market | null {
   return null;
 }
 
+function normalizeUsExchange(value: string) {
+  const upper = value.toUpperCase();
+  if (upper.includes("NYSE") || upper === "NYS" || upper === "NYQ") return "NYS";
+  if (upper.includes("AMEX") || upper === "AMS" || upper === "ASE") return "AMS";
+  if (upper.includes("NASDAQ") || upper === "NAS" || upper === "NSQ" || upper === "NMS") return "NAS";
+  return value || "USA";
+}
+
 function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const market = marketOf(record);
   if (!market) return null;
@@ -54,7 +62,7 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
 
   const normalizedSymbol = market === "US" ? normalizeNaverReutersCode(symbol) : symbol.toUpperCase();
   const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "typeCode", "typeName", "nationType"]);
-  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER";
+  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? normalizeUsExchange(exchangeRaw) : "NAVER";
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
 
