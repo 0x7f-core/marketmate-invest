@@ -40,8 +40,21 @@ function parseTimestamp(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parseKoreaTimestamp(value: unknown) {
+  if (typeof value === "string") {
+    const clean = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(clean)) {
+      const parsed = Date.parse(`${clean}+09:00`);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return parseTimestamp(value);
+}
+
 function rowTimestamp(row: Row) {
-  for (const key of ["localTradedAt", "tradeDateTime", "tradedAt", "tradeBaseAt", "dateTime", "timestamp", "datetime", "tradeTimestamp", "candleDateTimeKst", "candleDateTimeUtc"]) {
+  const koreaTradedAt = parseKoreaTimestamp(row.koreaTradedAt);
+  if (koreaTradedAt > 0) return koreaTradedAt;
+  for (const key of ["localTradedAt", "tradeDateTime", "tradedAt", "tradeBaseAt", "tradeTimestamp"]) {
     const parsed = parseTimestamp(row[key]);
     if (parsed > 0) return parsed;
   }
