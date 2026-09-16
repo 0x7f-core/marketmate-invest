@@ -5,7 +5,7 @@ import type { TradingQuote } from "@/lib/server/trading-quote";
 type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; quantityMicros: number; limitPriceMicros: number };
 
 export async function matchPendingOrders(quote: TradingQuote) {
-  if (!env.DB || quote.stale) return;
+  if (!env.DB || quote.stale || !quote.timestampVerified) return;
   const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
   if (!Number.isFinite(sourceTime) || Math.abs(Date.now() - sourceTime) > 60_000) return;
 
