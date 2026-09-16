@@ -17,6 +17,8 @@ export type MarketSession = {
 
 type NaverStatus = Record<string, unknown>;
 
+const US_AFTER_MARKET_CUTOFF_MINUTES_ET = 19 * 60 + 50;
+
 function asRecord(value: unknown): NaverStatus | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as NaverStatus : null;
 }
@@ -107,6 +109,11 @@ function newYorkMinutesNow() {
   return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1;
 }
 
+function beforeUsAfterMarketCutoff() {
+  const minutes = newYorkMinutesNow();
+  return minutes >= 0 && minutes < US_AFTER_MARKET_CUTOFF_MINUTES_ET;
+}
+
 function isUsAfterMarket(type: string) {
   const normalized = type.toLocaleLowerCase("en-US");
   return normalized.includes("after") && !normalized.includes("closing");
@@ -130,12 +137,7 @@ function isSupportedTradingSession(market: Market, exchange: string, detail: Ret
   if (!detail.isOpen || !detail.currentType) return false;
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
-  if (market === "US") {
-    // Naver keeps the U.S. after-market session open until 20:00 ET. MarketMate
-    // intentionally stops new mock orders ten minutes earlier, at 19:50 ET.
-    if (isUsAfterMarket(detail.currentType) && newYorkMinutesNow() >= 19 * 60 + 50) return false;
-    return true;
-  }
+  if (market === "US") return !type.includes("after") || beforeUsAfterMarketCutoff();
   if (market === "KR" && exchange === "krx" && type.includes("pre")) return false;
   return true;
 }
@@ -182,7 +184,7 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
     const afterMarket = market === "US" && isUsAfterMarket(rawDetail.currentType);
     const detail = afterMarket ? { ...rawDetail, closeTimeKst: usAfterMarketCloseKst(rawDetail) } : rawDetail;
     const isOpen = selected.tradable;
-    const afterMarketCutoffReached = afterMarket && rawDetail.isOpen && !isOpen && newYorkMinutesNow() >= 19 * 60 + 50;
+    const afterMarketCutoffReached = afterMarket && rawDetail.isOpen && !isOpen && !beforeUsAfterMarketCutoff();
     const sessionName = sessionLabel(detail.currentType, market);
     const excludedOpenSession = detail.isOpen && !isOpen;
     const label = detail.holiday
