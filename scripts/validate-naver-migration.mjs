@@ -70,6 +70,9 @@ if (krxPriority < 0 || nxtPriority < 0 || krxPriority > nxtPriority) {
 if (!marketHours.includes('if (type.includes("closing")) return false;')) {
   failures.push("closing sessions must remain non-tradable");
 }
+if (!marketHours.includes('"marketStatusDetailType"')) {
+  failures.push("market session parsing must support marketStatusDetailType fallback");
+}
 
 const tradingQuote = await readFile(join(ROOT, "lib/server/trading-quote.ts"), "utf8");
 if (!tradingQuote.includes('session.exchange === "NXT"')) {
