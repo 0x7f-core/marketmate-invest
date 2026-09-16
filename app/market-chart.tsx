@@ -23,21 +23,20 @@ function loadLightweightCharts() {
   if (typeof window === "undefined") return Promise.reject(new Error("브라우저에서만 차트를 표시할 수 있습니다."));
   if (window.LightweightCharts) return Promise.resolve(window.LightweightCharts);
   chartLibraryPromise ??= new Promise<LightweightChartsApi>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${LIGHTWEIGHT_CHARTS_URL}"]`);
-    const script = existing ?? document.createElement("script");
+    const orphan = document.querySelector<HTMLScriptElement>(`script[src="${LIGHTWEIGHT_CHARTS_URL}"]`);
+    if (orphan && !window.LightweightCharts) orphan.remove();
+    const script = document.createElement("script");
     const finish = () => window.LightweightCharts ? resolve(window.LightweightCharts) : reject(new Error("차트 라이브러리를 초기화하지 못했습니다."));
     const fail = () => {
-      if (!window.LightweightCharts) script.remove();
+      script.remove();
       reject(new Error("차트 라이브러리를 불러오지 못했습니다."));
     };
     script.addEventListener("load", finish, { once: true });
     script.addEventListener("error", fail, { once: true });
-    if (!existing) {
-      script.src = LIGHTWEIGHT_CHARTS_URL;
-      script.async = true;
-      script.crossOrigin = "anonymous";
-      document.head.appendChild(script);
-    }
+    script.src = LIGHTWEIGHT_CHARTS_URL;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    document.head.appendChild(script);
   }).catch(error => {
     chartLibraryPromise = null;
     const failed = document.querySelector<HTMLScriptElement>(`script[src="${LIGHTWEIGHT_CHARTS_URL}"]`);
