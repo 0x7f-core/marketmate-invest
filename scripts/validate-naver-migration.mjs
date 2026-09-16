@@ -119,6 +119,14 @@ const orders = await source("app/api/orders/route.ts");
 if (!orders.includes("isExecutableTradingQuote")) {
   failures.push("new orders must validate executable Naver quote freshness");
 }
+if (!orders.includes("quote.venue ?? body.exchange ?? body.market")) {
+  failures.push("orders must persist the actual active KR venue when available");
+}
+
+const quotesRoute = await source("app/api/quotes/route.ts");
+if (!quotesRoute.includes("quote.venue ?? exchange ?? quote.market")) {
+  failures.push("quote refreshes must persist the actual active KR venue when available");
+}
 
 const pendingOrders = await source("lib/server/pending-orders.ts");
 if (!pendingOrders.includes("isExecutableTradingQuote")) {
