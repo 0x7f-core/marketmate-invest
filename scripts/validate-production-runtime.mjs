@@ -68,7 +68,12 @@ async function quoteInstrument(cookie, instrument) {
   assert(result.response.status === 200, `${instrument.market} quote expected 200, got ${result.response.status}: ${JSON.stringify(result.data)}`);
   assert(result.data?.source === "NAVER", `${instrument.market} quote source is not NAVER`);
   assert(Array.isArray(result.data?.quotes) && Number(result.data.quotes[0]?.price) > 0, `${instrument.market} quote missing positive price`);
-  console.log(`PASS ${instrument.market} quote (${result.data.quotes[0].price}, ${result.elapsedMs}ms)`);
+  const quote = result.data.quotes[0];
+  const timestamp = Number(quote?.timestamp);
+  const ageMs = Number.isFinite(timestamp) && timestamp > 0 ? Date.now() - timestamp : null;
+  const timestampText = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : "none";
+  console.log(`PASS ${instrument.market} quote (${quote.price}, ${result.elapsedMs}ms, timestamp=${timestampText}, ageMs=${ageMs}, verified=${Boolean(quote.timestampVerified)}, polling=${quote.pollingInterval ?? "n/a"})`);
+  return quote;
 }
 
 await waitForDeployment();
