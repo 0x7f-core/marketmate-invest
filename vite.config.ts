@@ -21,7 +21,9 @@ const managedLinux = readExecutionProfile() === "managed-linux";
 const workerBindingConfig = {
   name: workerName,
   main: "vinext/server/fetch-handler",
-  compatibility_date: "2026-09-16",
+  // Keep this at the newest date supported by the pinned Wrangler/Miniflare
+  // runtime so local regression smoke and production deploy use the same ABI.
+  compatibility_date: "2026-05-22",
   compatibility_flags: ["nodejs_compat"],
   workers_dev: true,
   d1_databases: d1
