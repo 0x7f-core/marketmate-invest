@@ -39,6 +39,9 @@ jobs:
       - name: validate:migration
         run: pnpm run validate:migration
 
+      - name: validate:legacy-config
+        run: node scripts/validate-legacy-config.mjs
+
       - name: typecheck
         run: pnpm run typecheck
 
