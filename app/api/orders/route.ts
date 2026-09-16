@@ -98,10 +98,11 @@ export async function POST(request: Request) {
     const isBuy = body.side === "buy";
     const limitPriceMicros = body.orderType === "limit" ? Math.round(Number(body.limitPrice) * 1_000_000) : null;
     const marketable = body.orderType === "market" || (isBuy ? nativePriceMicros <= Number(limitPriceMicros) : nativePriceMicros >= Number(limitPriceMicros));
+    const activeExchange = quote.venue ?? body.exchange ?? body.market;
 
     await env.DB!.prepare(
       "INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,exchange=excluded.exchange,is_active=1"
-    ).bind(instrumentId, body.market, symbol, body.name.slice(0, 80), quote.currency, body.exchange ?? body.market).run();
+    ).bind(instrumentId, body.market, symbol, body.name.slice(0, 80), quote.currency, activeExchange).run();
     await persistQuoteSnapshot(quote);
 
     const position = await env.DB!.prepare(
@@ -121,8 +122,8 @@ export async function POST(request: Request) {
     if (!marketable) {
       await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
-      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice }).catch(() => undefined);
-      return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice } }, { status: 201 });
+      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange }).catch(() => undefined);
+      return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange } }, { status: 201 });
     }
 
     const expectedCash = participant.cashKrw;
@@ -156,8 +157,8 @@ export async function POST(request: Request) {
     ];
     const result = await env.DB!.batch(statements);
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
-    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity }).catch(() => undefined);
-    return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
+    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange }).catch(() => undefined);
+    return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, exchange: activeExchange, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
   } catch (error) {
     if (isQuoteUnavailable(error)) {
       return Response.json({ error: "네이버증권 실시간 시세를 확인할 수 없어 주문을 중단했습니다." }, { status: 503, headers: { "retry-after": "30" } });
