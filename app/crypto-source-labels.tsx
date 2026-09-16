@@ -74,13 +74,14 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
   const competition = (selectedId ? competitions.find(item => item.id === selectedId) : undefined)
     ?? competitions.find(item => item.name === title);
 
-  let row = host.querySelector(".competition-invite-code");
+  const existingRow = host.querySelector(".competition-invite-code");
+  let row: HTMLElement | null = existingRow instanceof HTMLElement ? existingRow : null;
   if (!competition?.inviteCode) {
     row?.remove();
     return;
   }
 
-  if (!(row instanceof HTMLElement)) {
+  if (!row) {
     row = document.createElement("p");
     row.className = "competition-invite-code";
     row.style.display = "flex";
@@ -89,16 +90,18 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
     host.appendChild(row);
   }
 
-  let value = row.querySelector(".competition-invite-code-value");
-  if (!(value instanceof HTMLElement)) {
+  const existingValue = row.querySelector(".competition-invite-code-value");
+  let value: HTMLElement | null = existingValue instanceof HTMLElement ? existingValue : null;
+  if (!value) {
     value = document.createElement("span");
     value.className = "competition-invite-code-value";
     row.appendChild(value);
   }
   value.textContent = `참가 코드 ${competition.inviteCode}`;
 
-  let copyButton = row.querySelector(".competition-invite-copy");
-  if (!(copyButton instanceof HTMLButtonElement)) {
+  const existingCopyButton = row.querySelector(".competition-invite-copy");
+  let copyButton: HTMLButtonElement | null = existingCopyButton instanceof HTMLButtonElement ? existingCopyButton : null;
+  if (!copyButton) {
     copyButton = document.createElement("button");
     copyButton.type = "button";
     copyButton.className = "competition-invite-copy";
@@ -112,20 +115,21 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
     row.appendChild(copyButton);
   }
 
-  copyButton.dataset.inviteCode = competition.inviteCode;
-  copyButton.onclick = async () => {
-    const code = copyButton instanceof HTMLButtonElement ? copyButton.dataset.inviteCode ?? "" : "";
+  const activeCopyButton = copyButton;
+  activeCopyButton.dataset.inviteCode = competition.inviteCode;
+  activeCopyButton.onclick = async () => {
+    const code = activeCopyButton.dataset.inviteCode ?? "";
     if (!code) return;
     try {
       await copyInviteCode(code);
-      copyButton.textContent = "복사됨";
+      activeCopyButton.textContent = "복사됨";
       window.setTimeout(() => {
-        if (copyButton instanceof HTMLButtonElement) copyButton.textContent = "복사";
+        activeCopyButton.textContent = "복사";
       }, 1200);
     } catch {
-      copyButton.textContent = "복사 실패";
+      activeCopyButton.textContent = "복사 실패";
       window.setTimeout(() => {
-        if (copyButton instanceof HTMLButtonElement) copyButton.textContent = "복사";
+        activeCopyButton.textContent = "복사";
       }, 1200);
     }
   };
