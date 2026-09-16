@@ -74,10 +74,17 @@ const aaplSearch = await jsonRequest("/api/instruments/search?q=AAPL&market=US",
 const aapl = aaplSearch.data?.instruments?.find(item => item?.market === "US") ?? { symbol: "AAPL", exchange: "NAS" };
 console.log(`INFO AAPL search (${aapl.name ?? "Apple"}, ${aapl.symbol}, ${aapl.exchange})`);
 
-await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=3", "AAPL stock price");
+await probeNaver("/api/autocomplete/search/autoComplete?query=AAPL&target=stock", "AAPL autocomplete");
+await probeNaver("/api/autocomplete/search/autoComplete?query=SOXS&target=stock", "SOXS autocomplete");
+await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=3", "AAPL stock price size3");
+await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=20", "AAPL stock price size20");
+await probeNaver("/api/securityService/stock/AAPL.O/price?page=1&pageSize=100", "AAPL stock price size100");
 await probeNaver("/api/securityService/stock/AAPL/price?page=1&pageSize=3", "AAPL plain stock price");
-await probeNaver("/api/securityService/etf/SOXS/price?page=1&pageSize=3", "SOXS ETF price");
-await probeNaver("/api/securityService/stock/SOXS.A/price?page=1&pageSize=3", "SOXS Reuters stock price");
+await probeNaver("/api/securityService/etf/SOXS/price?page=1&pageSize=3", "SOXS ETF ticker price");
+await probeNaver("/api/securityService/etf/SOXS.O/price?page=1&pageSize=3", "SOXS ETF Reuters O price");
+await probeNaver("/api/securityService/etf/SOXS.A/price?page=1&pageSize=3", "SOXS ETF Reuters A price");
+await probeNaver("/api/securityService/stock/SOXS.O/price?page=1&pageSize=3", "SOXS stock Reuters O price");
+await probeNaver("/api/securityService/stock/SOXS.A/price?page=1&pageSize=3", "SOXS stock Reuters A price");
 
 const status = await jsonRequest("/api/market-status?market=US", { headers, cache: "no-store" });
 assert(status.response.status === 200, `US market status expected 200, got ${status.response.status}: ${JSON.stringify(status.data)}`);
