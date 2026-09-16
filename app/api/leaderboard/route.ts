@@ -3,6 +3,33 @@ import { apiError, requireUser } from "@/lib/server/auth";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getTradingQuote } from "@/lib/server/trading-quote";
 
+type StaleInstrument = {
+  id: string;
+  market: Market;
+  symbol: string;
+  exchange: string;
+  receivedAt: number;
+};
+
+async function refreshLeaderboardQuote(instrument: StaleInstrument, refreshStartedAt: number) {
+  const claim = await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
+    .bind(refreshStartedAt, instrument.id, instrument.receivedAt).run();
+  if ((claim.meta.changes ?? 0) !== 1) return;
+
+  try {
+    const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
+    if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
+    if (instrument.market === "KR" && quote.venue) {
+      await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, instrument.id).run();
+    }
+    await persistQuoteSnapshot(quote);
+  } catch {
+    await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
+      .bind(instrument.receivedAt, instrument.id, refreshStartedAt).run().catch(() => undefined);
+    // The previous validated price stays in the ranking until Naver returns a fresh quote.
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
@@ -10,6 +37,7 @@ export async function GET(request: Request) {
     if (!competitionId) return Response.json({ error: "competitionId가 필요합니다." }, { status: 400 });
     const member = await env.DB!.prepare("SELECT 1 FROM participants WHERE competition_id=? AND user_id=?").bind(competitionId, user.id).first();
     if (!member) throw new Error("FORBIDDEN");
+
     const refreshStartedAt = Date.now();
     const staleBefore = refreshStartedAt - 15_000;
     const stale = await env.DB!.prepare(
@@ -18,24 +46,10 @@ export async function GET(request: Request) {
        JOIN instruments i ON i.id=pos.instrument_id JOIN quote_snapshots q ON q.instrument_id=i.id
        WHERE p.competition_id=? AND pos.quantity_micros>0 AND q.received_at<?
        ORDER BY q.received_at ASC LIMIT 8`,
-    ).bind(competitionId, staleBefore).all<{ id: string; market: Market; symbol: string; exchange: string; receivedAt: number }>();
-    for (const instrument of stale.results) {
-      const claim = await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
-        .bind(refreshStartedAt, instrument.id, instrument.receivedAt).run();
-      if ((claim.meta.changes ?? 0) !== 1) continue;
-      try {
-        const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
-        if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
-        if (instrument.market === "KR" && quote.venue) {
-          await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, instrument.id).run();
-        }
-        await persistQuoteSnapshot(quote);
-      } catch {
-        await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
-          .bind(instrument.receivedAt, instrument.id, refreshStartedAt).run().catch(() => undefined);
-        // The previous validated price stays in the ranking until Naver returns a fresh quote.
-      }
-    }
+    ).bind(competitionId, staleBefore).all<StaleInstrument>();
+
+    await Promise.allSettled(stale.results.map(instrument => refreshLeaderboardQuote(instrument, refreshStartedAt)));
+
     const rows = await env.DB!.prepare(
       `SELECT p.id AS participantId,u.nickname,p.cash_krw AS cashKrw,p.realized_pnl_krw AS realizedPnlKrw,
               c.initial_cash_krw AS initialCashKrw,
