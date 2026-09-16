@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { getTradingQuote } from "@/lib/server/trading-quote";
 
 export async function GET(request: Request) {
   try {
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
         .bind(refreshStartedAt, instrument.id, instrument.receivedAt).run();
       if ((claim.meta.changes ?? 0) !== 1) continue;
       try {
-        const quote = await getLiveQuote(instrument.market, instrument.symbol, instrument.exchange);
+        const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
         if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
         await persistQuoteSnapshot(quote);
       } catch {
