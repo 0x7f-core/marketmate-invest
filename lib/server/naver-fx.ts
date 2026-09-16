@@ -42,5 +42,19 @@ export async function getNaverUsdKrwRate() {
   const exact = rows.find(row => stringValue(row, ["itemCode", "code", "symbol"]) === "FX_USDKRW") ?? rows[0];
   const rate = exact ? numberValue(exact.currentPrice, exact.closePrice, exact.price, exact.value, exact.nowPrice) : 0;
   if (rate <= 0) throw new Error("NAVER_FX_UNAVAILABLE");
-  return { rate, stale: result.stale, fetchedAt: result.fetchedAt };
+  const change = exact ? numberValue(
+    exact.compareToPreviousClosePrice,
+    exact.changePrice,
+    exact.changeValue,
+    exact.change,
+    exact.netChange,
+    exact.prevChange,
+  ) : 0;
+  const changeRate = exact ? numberValue(
+    exact.fluctuationsRatio,
+    exact.changeRate,
+    exact.changeRatio,
+    exact.prevChangeRate,
+  ) : 0;
+  return { rate, change, changeRate, stale: result.stale, fetchedAt: result.fetchedAt };
 }
