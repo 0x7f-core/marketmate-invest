@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { buildNaverPath, naverJson, naverPolling } from "@/lib/server/naver-stock";
 
 export type Market = "KR" | "US" | "CRYPTO";
 export type LiveQuote = {
@@ -10,7 +11,9 @@ export type LiveQuote = {
   currency: "KRW" | "USD";
   exchangeRate: number;
   timestamp: number;
-  source: "KIS" | "UPBIT";
+  source: "NAVER";
+  stale?: boolean;
+  pollingInterval?: number;
   open?: number;
   high?: number;
   low?: number;
@@ -25,368 +28,350 @@ export type MarketIndexQuote = {
   change: number;
   rate: number;
   unit: string;
-  source: "KIS" | "UPBIT";
+  source: "NAVER";
   timestamp: number;
+  stale?: boolean;
 };
 
-type TokenCache = { token: string; expiresAt: number };
-type CachedQuote = { quote: LiveQuote; expiresAt: number };
-
-const KIS_DEFAULT_BASE_URL = "https://openapi.koreainvestment.com:9443";
-const QUOTE_CACHE_MS = 2_000;
-const usExchangeBySymbol: Record<string, "NAS" | "NYS" | "AMS"> = {
-  AAPL: "NAS", AMZN: "NAS", GOOGL: "NAS", META: "NAS", MSFT: "NAS", NVDA: "NAS", TSLA: "NAS",
-  BRK_B: "NYS", DIS: "NYS", JPM: "NYS", KO: "NYS", NKE: "NYS", V: "NYS", WMT: "NYS",
+export type ChartPoint = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
 };
 
-let tokenCache: TokenCache | null = null;
-let tokenRequest: Promise<TokenCache> | null = null;
-const quoteCache = new Map<string, CachedQuote>();
-const quoteRequests = new Map<string, Promise<LiveQuote>>();
-let overviewCache: { quotes: MarketIndexQuote[]; expiresAt: number } | null = null;
-let overviewRequest: Promise<MarketIndexQuote[]> | null = null;
+export type SearchInstrument = {
+  market: Market;
+  symbol: string;
+  name: string;
+  exchange: string;
+  currency: "KRW" | "USD";
+};
 
 function asNumber(...values: unknown[]) {
   for (const value of values) {
-    const parsed = typeof value === "string" ? Number(value.replace(/,/g, "")) : Number(value);
+    if (value === null || value === undefined || value === "") continue;
+    const parsed = typeof value === "string" ? Number(value.replace(/[,%원$]/g, "").trim()) : Number(value);
     if (Number.isFinite(parsed)) return parsed;
   }
   return 0;
 }
 
-function roundTo(value: number, digits: number) {
-  const scale = 10 ** digits;
-  return Math.round((value + Number.EPSILON) * scale) / scale;
+function stringValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
 }
 
-function kisConfig() {
-  if (!env.KIS_APP_KEY || !env.KIS_APP_SECRET) throw new Error("KIS_NOT_CONFIGURED");
+function normalizeTimestamp(value: unknown, fallback: number) {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 1_000_000_000_000 ? value * 1_000 : value;
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  const clean = value.trim();
+  const numeric = Number(clean);
+  if (Number.isFinite(numeric) && clean.length >= 10) return numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric;
+  const parsed = Date.parse(clean);
+  if (Number.isFinite(parsed)) return parsed;
+  if (/^\d{8}$/.test(clean)) {
+    const date = Date.parse(`${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}T00:00:00+09:00`);
+    if (Number.isFinite(date)) return date;
+  }
+  if (/^\d{14}$/.test(clean)) {
+    const date = Date.parse(`${clean.slice(0,4)}-${clean.slice(4,6)}-${clean.slice(6,8)}T${clean.slice(8,10)}:${clean.slice(10,12)}:${clean.slice(12,14)}+09:00`);
+    if (Number.isFinite(date)) return date;
+  }
+  return fallback;
+}
+
+function recordTimestamp(record: Record<string, unknown>, fallback: number) {
+  for (const key of ["localTradedAt", "tradeDateTime", "tradeBaseAt", "dateTime", "timestamp", "datetime", "date", "businessDate", "baseDate", "xymd"]) {
+    const value = record[key];
+    const parsed = normalizeTimestamp(value, 0);
+    if (parsed > 0) return parsed;
+  }
+  return fallback;
+}
+
+function pollingRow(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null;
+  const datas = (payload as Record<string, unknown>).datas;
+  return Array.isArray(datas) && datas[0] && typeof datas[0] === "object" ? datas[0] as Record<string, unknown> : null;
+}
+
+function quoteValues(row: Record<string, unknown>) {
+  const price = asNumber(row.closePrice, row.currentPrice, row.nowPrice, row.tradePrice, row.price, row.lastPrice, row.last);
+  const change = asNumber(row.compareToPreviousClosePrice, row.changePrice, row.change, row.netChange, row.prevChange);
+  const changeRate = asNumber(row.fluctuationsRatio, row.changeRate, row.changeRatio, row.rate, row.prevChangeRate);
   return {
-    appKey: env.KIS_APP_KEY,
-    appSecret: env.KIS_APP_SECRET,
-    baseUrl: env.KIS_BASE_URL || KIS_DEFAULT_BASE_URL,
+    price,
+    change,
+    changeRate,
+    open: asNumber(row.openPrice, row.open, row.openingPrice),
+    high: asNumber(row.highPrice, row.high, row.highestPrice),
+    low: asNumber(row.lowPrice, row.low, row.lowestPrice),
+    volume: asNumber(row.accumulatedTradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume),
   };
 }
 
-async function requestKisToken(): Promise<TokenCache> {
-  const { appKey, appSecret, baseUrl } = kisConfig();
-  const response = await fetch(new URL("/oauth2/tokenP", baseUrl), {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "text/plain" },
-    body: JSON.stringify({ grant_type: "client_credentials", appkey: appKey, appsecret: appSecret }),
-  });
-  if (!response.ok) throw new Error("KIS_AUTH_FAILED");
-  const data = await response.json() as Record<string, unknown>;
-  const token = String(data.access_token ?? "");
-  const expiresIn = Math.max(60, asNumber(data.expires_in, 86_400));
-  if (!token) throw new Error("KIS_AUTH_FAILED");
-  return { token, expiresAt: Date.now() + expiresIn * 1_000 - 60_000 };
+function normalizeReutersForCompare(value: string) {
+  return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 
-function bytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
+function collectRecords(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
+  if (depth > 5 || output.length > 300 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) collectRecords(item, depth + 1, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.some(key => /(?:item|stock|reuters|ticker|symbol|code|name)/i.test(key))) output.push(record);
+  for (const child of Object.values(record)) if (typeof child === "object" && child !== null) collectRecords(child, depth + 1, output);
+  return output;
 }
 
-function base64ToBytes(value: string) {
-  const binary = atob(value);
-  return Uint8Array.from(binary, character => character.charCodeAt(0));
-}
+const reutersCodeCache = new Map<string, { code: string; expiresAt: number }>();
 
-async function tokenEncryptionKey() {
-  const { appSecret } = kisConfig();
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(appSecret));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-
-async function encryptToken(token: string) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    await tokenEncryptionKey(),
-    new TextEncoder().encode(token),
-  );
-  return { ciphertext: bytesToBase64(new Uint8Array(ciphertext)), iv: bytesToBase64(iv) };
-}
-
-async function decryptToken(ciphertext: string, iv: string) {
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(iv) },
-    await tokenEncryptionKey(),
-    base64ToBytes(ciphertext),
-  );
-  return new TextDecoder().decode(plaintext);
-}
-
-async function readSharedKisToken(): Promise<TokenCache | null> {
-  if (!env.DB) return null;
-  const row = await env.DB.prepare(
-    "SELECT ciphertext,iv,expires_at AS expiresAt FROM provider_tokens WHERE provider='KIS'",
-  ).first<{ ciphertext: string; iv: string; expiresAt: number }>();
-  if (!row || row.expiresAt <= Date.now() || !row.ciphertext || !row.iv) return null;
+async function resolveReutersCode(symbol: string, exchange?: string) {
+  if (/^[A-Za-z0-9._-]+\.[A-Za-z]{1,4}$/.test(symbol)) return symbol;
+  const key = symbol.toUpperCase();
+  const cached = reutersCodeCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.code;
   try {
-    return { token: await decryptToken(row.ciphertext, row.iv), expiresAt: row.expiresAt };
-  } catch {
-    await env.DB.prepare("UPDATE provider_tokens SET expires_at=0 WHERE provider='KIS'").run();
-    return null;
-  }
-}
-
-async function waitForSharedKisToken() {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 250));
-    const shared = await readSharedKisToken();
-    if (shared) return shared;
-  }
-  throw new Error("KIS_AUTH_BUSY");
-}
-
-async function resolveKisToken(): Promise<TokenCache> {
-  const shared = await readSharedKisToken();
-  if (shared) return shared;
-  if (!env.DB) return requestKisToken();
-
-  const now = Date.now();
-  const lease = await env.DB.prepare(
-    `INSERT INTO provider_tokens (provider,ciphertext,iv,expires_at,refresh_started_at,updated_at)
-     VALUES ('KIS','','',0,?,?)
-     ON CONFLICT(provider) DO UPDATE SET refresh_started_at=excluded.refresh_started_at,updated_at=excluded.updated_at
-     WHERE provider_tokens.expires_at<=? AND provider_tokens.refresh_started_at<?`,
-  ).bind(now, now, now + 60_000, now - 30_000).run();
-
-  if ((lease.meta.changes ?? 0) !== 1) return waitForSharedKisToken();
-  try {
-    const fresh = await requestKisToken();
-    const encrypted = await encryptToken(fresh.token);
-    await env.DB.prepare(
-      "UPDATE provider_tokens SET ciphertext=?,iv=?,expires_at=?,refresh_started_at=0,updated_at=? WHERE provider='KIS' AND refresh_started_at=?",
-    ).bind(encrypted.ciphertext, encrypted.iv, fresh.expiresAt, Date.now(), now).run();
-    return fresh;
-  } catch (error) {
-    await env.DB.prepare(
-      "UPDATE provider_tokens SET refresh_started_at=0,updated_at=? WHERE provider='KIS' AND refresh_started_at=?",
-    ).bind(Date.now(), now).run();
-    throw error;
-  }
-}
-
-async function getKisToken() {
-  if (tokenCache && tokenCache.expiresAt > Date.now()) return tokenCache.token;
-  tokenRequest ??= resolveKisToken();
-  try {
-    tokenCache = await tokenRequest;
-    return tokenCache.token;
-  } finally {
-    tokenRequest = null;
-  }
-}
-
-export async function kisGetRoot(path: string, trId: string, params: Record<string, string>) {
-  const { appKey, appSecret, baseUrl } = kisConfig();
-  const url = new URL(path, baseUrl);
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${await getKisToken()}`,
-      appkey: appKey,
-      appsecret: appSecret,
-      tr_id: trId,
-      custtype: "P",
-      accept: "application/json",
-    },
-  });
-  if (!response.ok) throw new Error("KIS_QUOTE_FAILED");
-  const root = await response.json() as Record<string, unknown>;
-  if (String(root.rt_cd ?? "0") !== "0") throw new Error("KIS_QUOTE_FAILED");
-  return root;
-}
-
-async function kisGet(path: string, trId: string, params: Record<string, string>) {
-  const root = await kisGetRoot(path, trId, params);
-  if (!root.output) throw new Error("KIS_QUOTE_FAILED");
-  return root.output as Record<string, unknown>;
-}
-
-async function kisDomesticQuote(symbol: string): Promise<LiveQuote> {
-  const data = await kisGet(
-    "/uapi/domestic-stock/v1/quotations/inquire-price",
-    "FHKST01010100",
-    { FID_COND_MRKT_DIV_CODE: "UN", FID_INPUT_ISCD: symbol },
-  );
-  const price = asNumber(data.stck_prpr);
-  if (price <= 0) throw new Error("INVALID_QUOTE");
-  return {
-    market: "KR", symbol, price,
-    change: asNumber(data.prdy_vrss),
-    changeRate: asNumber(data.prdy_ctrt),
-    currency: "KRW",
-    exchangeRate: 1,
-    timestamp: Date.now(),
-    source: "KIS",
-    open: asNumber(data.stck_oprc), high: asNumber(data.stck_hgpr), low: asNumber(data.stck_lwpr), volume: asNumber(data.acml_vol),
-  };
-}
-
-async function kisOverseasQuote(symbol: string, requestedExchange?: string): Promise<LiveQuote> {
-  const normalized = symbol.replace(".", "_");
-  const preferred = (["NAS", "NYS", "AMS"].includes(requestedExchange ?? "") ? requestedExchange : usExchangeBySymbol[normalized]) as "NAS" | "NYS" | "AMS" | undefined;
-  const exchanges = preferred ? [preferred] : ["NAS", "NYS", "AMS"] as const;
-  for (const exchange of exchanges) {
-    try {
-      const data = await kisGet(
-        "/uapi/overseas-price/v1/quotations/price-detail",
-        "HHDFS76200200",
-        { AUTH: "", EXCD: exchange, SYMB: symbol.replace("_", ".") },
-      );
-      const price = asNumber(data.last);
-      const previousClose = asNumber(data.base);
-      const exchangeRate = asNumber(data.t_rate);
-      if (price <= 0 || previousClose <= 0 || exchangeRate <= 0) continue;
-      const change = roundTo(price - previousClose, 6);
-      return {
-        market: "US", symbol, price,
-        change,
-        changeRate: roundTo((change / previousClose) * 100, 4),
-        currency: "USD",
-        exchangeRate,
-        timestamp: Date.now(),
-        source: "KIS",
-        open: asNumber(data.open), high: asNumber(data.high), low: asNumber(data.low), volume: asNumber(data.tvol),
-      };
-    } catch (error) {
-      if (preferred || exchange === "AMS") throw error;
+    const query = symbol.replaceAll("_", ".");
+    const result = await naverJson<unknown>(buildNaverPath("/api/autocomplete/search/autoComplete", { query, target: "stock" }), { ttlMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 });
+    const wanted = normalizeReutersForCompare(query);
+    const candidates = collectRecords(result.data).map(record => ({
+      record,
+      code: stringValue(record, ["reutersCode", "reuterscode", "symbolCode", "stockCode", "itemCode", "code"]),
+      ticker: stringValue(record, ["ticker", "symbol", "stockSymbol", "itemCode", "code"]),
+      nation: stringValue(record, ["nationType", "nation", "country", "marketType"]),
+    })).filter(item => item.code.includes("."));
+    const match = candidates.find(item => normalizeReutersForCompare(item.ticker) === wanted || normalizeReutersForCompare(item.code.split(".")[0]) === wanted)
+      ?? candidates.find(item => /USA|US|미국/i.test(item.nation))
+      ?? candidates[0];
+    if (match?.code) {
+      reutersCodeCache.set(key, { code: match.code, expiresAt: Date.now() + 24 * 60 * 60_000 });
+      return match.code;
     }
+  } catch {
+    // 검색 API가 일시 실패해도 일반적인 거래소 suffix는 보조 식별자로 사용할 수 있다.
   }
-  throw new Error("KIS_QUOTE_FAILED");
+  const base = symbol.replaceAll("_", ".");
+  const normalizedExchange = (exchange ?? "").toUpperCase();
+  const suffix = normalizedExchange.includes("NYS") || normalizedExchange.includes("NYSE") ? ".N"
+    : normalizedExchange.includes("AMS") || normalizedExchange.includes("AMEX") ? ".A" : ".O";
+  return `${base}${suffix}`;
 }
 
-async function upbitQuote(symbol: string): Promise<LiveQuote> {
-  const market = symbol.startsWith("KRW-") ? symbol : `KRW-${symbol}`;
-  const response = await fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(market)}`, {
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) throw new Error("UPBIT_QUOTE_FAILED");
-  const [data] = await response.json() as Array<Record<string, unknown>>;
-  const price = asNumber(data?.trade_price);
-  if (!data || price <= 0) throw new Error("INVALID_QUOTE");
-  return {
-    market: "CRYPTO", symbol: market, price,
-    change: asNumber(data.signed_change_price),
-    changeRate: asNumber(data.signed_change_rate) * 100,
-    currency: "KRW",
-    exchangeRate: 1,
-    timestamp: asNumber(data.timestamp, Date.now()),
-    source: "UPBIT",
-    open: asNumber(data.opening_price), high: asNumber(data.high_price), low: asNumber(data.low_price), volume: asNumber(data.acc_trade_volume_24h),
-  };
+async function usdKrwRate() {
+  const path = buildNaverPath("/api/securityService/integration/indicators", { indicatorCodes: "FX_USDKRW" });
+  const result = await naverJson<unknown>(path, { ttlMs: 30_000, staleMs: 10 * 60_000 });
+  const rows = collectRecords(result.data);
+  const exact = rows.find(row => stringValue(row, ["itemCode", "code", "symbol"]) === "FX_USDKRW") ?? rows[0];
+  const rate = exact ? asNumber(exact.currentPrice, exact.closePrice, exact.price, exact.value, exact.nowPrice) : 0;
+  if (rate <= 0) throw new Error("NAVER_FX_UNAVAILABLE");
+  return rate;
 }
 
-async function kisDomesticIndex(id: "KOSPI" | "KOSDAQ", symbol: "0001" | "1001"): Promise<MarketIndexQuote> {
-  const data = await kisGet(
-    "/uapi/domestic-stock/v1/quotations/inquire-index-price",
-    "FHPUP02100000",
-    { FID_COND_MRKT_DIV_CODE: "U", FID_INPUT_ISCD: symbol },
-  );
-  const price = asNumber(data.bstp_nmix_prpr);
-  if (price <= 0) throw new Error("INVALID_QUOTE");
-  return {
-    id, name: id === "KOSPI" ? "코스피" : "코스닥", market: "KR", price,
-    change: asNumber(data.bstp_nmix_prdy_vrss), rate: asNumber(data.bstp_nmix_prdy_ctrt),
-    unit: "", source: "KIS", timestamp: Date.now(),
-  };
+async function domesticQuote(symbol: string): Promise<LiveQuote> {
+  const result = await naverPolling<unknown>(buildNaverPath("/api/polling/domestic/stock", { itemCodes: symbol }), { staleMs: 60_000 });
+  const row = pollingRow(result.data);
+  if (!row) throw new Error("NAVER_EMPTY_QUOTE");
+  const values = quoteValues(row);
+  if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
+  return { market: "KR", symbol, ...values, currency: "KRW", exchangeRate: 1, timestamp: recordTimestamp(row, result.fetchedAt), source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
-async function kisOverseasIndex(id: "SPX" | "COMP", name: string): Promise<MarketIndexQuote> {
-  const root = await kisGetRoot(
-    "/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
-    "FHKST03030200",
-    { FID_COND_MRKT_DIV_CODE: "N", FID_INPUT_ISCD: id, FID_HOUR_CLS_CODE: "0", FID_PW_DATA_INCU_YN: "Y" },
-  );
-  const primary = (Array.isArray(root.output1) ? root.output1[0] : root.output1) as Record<string, unknown> | undefined;
-  const series = (Array.isArray(root.output2) ? root.output2 : []) as Array<Record<string, unknown>>;
-  const latest = primary ?? series[series.length - 1];
-  const price = asNumber(latest?.ovrs_nmix_prpr);
-  if (price <= 0) throw new Error("INVALID_QUOTE");
-  return {
-    id, name, market: "US", price, change: asNumber(latest?.ovrs_nmix_prdy_vrss),
-    rate: asNumber(latest?.prdy_ctrt), unit: "", source: "KIS", timestamp: Date.now(),
-  };
+async function foreignQuote(symbol: string, exchange?: string): Promise<LiveQuote> {
+  const code = await resolveReutersCode(symbol, exchange);
+  const result = await naverPolling<unknown>(buildNaverPath("/api/polling/worldstock/stock", { reutersCodes: code }), { staleMs: 60_000 });
+  const row = pollingRow(result.data);
+  if (!row) throw new Error("NAVER_EMPTY_QUOTE");
+  const values = quoteValues(row);
+  if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
+  return { market: "US", symbol, ...values, currency: "USD", exchangeRate: await usdKrwRate(), timestamp: recordTimestamp(row, result.fetchedAt), source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
-async function bitcoinIndex(): Promise<MarketIndexQuote> {
-  const quote = await upbitQuote("KRW-BTC");
-  return { id: "BTC", name: "비트코인", market: "CRYPTO", price: quote.price, change: quote.change, rate: quote.changeRate, unit: "원", source: "UPBIT", timestamp: quote.timestamp };
+function cryptoTicker(symbol: string) {
+  return symbol.toUpperCase().replace(/^KRW-/, "").replace(/_KRW_(?:UPBIT|BITHUMB)$/, "");
 }
 
-async function fetchMarketOverview() {
-  const tasks = [
-    kisDomesticIndex("KOSPI", "0001"), kisDomesticIndex("KOSDAQ", "1001"),
-    kisOverseasIndex("SPX", "S&P 500"), kisOverseasIndex("COMP", "나스닥 종합"), bitcoinIndex(),
-  ];
-  const settled = await Promise.allSettled(tasks);
-  return settled.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
-}
-
-export async function getMarketOverview() {
-  if (overviewCache && overviewCache.expiresAt > Date.now()) return overviewCache.quotes;
-  overviewRequest ??= fetchMarketOverview();
-  try {
-    const quotes = await overviewRequest;
-    if (quotes.length) overviewCache = { quotes, expiresAt: Date.now() + 4_000 };
-    return quotes;
-  } finally {
-    overviewRequest = null;
-  }
-}
-
-async function fetchLiveQuote(market: Market, symbol: string, exchange?: string) {
-  if (market === "CRYPTO") return upbitQuote(symbol);
-  return market === "KR" ? kisDomesticQuote(symbol) : kisOverseasQuote(symbol, exchange);
+async function cryptoQuote(symbol: string): Promise<LiveQuote> {
+  const ticker = cryptoTicker(symbol);
+  const fqnfTicker = `${ticker}_KRW_UPBIT`;
+  const result = await naverPolling<unknown>(buildNaverPath("/api/polling/coin/price", { fqnfTickers: fqnfTicker }), { staleMs: 60_000 });
+  const row = pollingRow(result.data);
+  if (!row) throw new Error("NAVER_EMPTY_QUOTE");
+  const values = quoteValues(row);
+  if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
+  return { market: "CRYPTO", symbol: `KRW-${ticker}`, ...values, currency: "KRW", exchangeRate: 1, timestamp: recordTimestamp(row, result.fetchedAt), source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
 export async function getLiveQuote(market: Market, symbol: string, exchange?: string) {
-  if (!/^[A-Z0-9._-]{1,20}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
-  const key = `${market}:${exchange ?? ""}:${symbol}`;
-  const cached = quoteCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.quote;
-  const existing = quoteRequests.get(key);
-  if (existing) return existing;
-  const request = fetchLiveQuote(market, symbol, exchange).then(quote => {
-    quoteCache.set(key, { quote, expiresAt: Date.now() + QUOTE_CACHE_MS });
-    return quote;
-  }).finally(() => quoteRequests.delete(key));
-  quoteRequests.set(key, request);
-  return request;
+  if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
+  if (market === "KR") return domesticQuote(symbol.toUpperCase());
+  if (market === "US") return foreignQuote(symbol, exchange);
+  return cryptoQuote(symbol);
+}
+
+function indexQuote(row: Record<string, unknown>, id: string, name: string, market: Market, fetchedAt: number, stale: boolean): MarketIndexQuote | null {
+  const values = quoteValues(row);
+  if (values.price <= 0) return null;
+  return { id, name, market, price: values.price, change: values.change, rate: values.changeRate, unit: market === "CRYPTO" ? "원" : "", source: "NAVER", timestamp: recordTimestamp(row, fetchedAt), stale };
+}
+
+export async function getMarketOverview() {
+  const [domestic, foreign, crypto] = await Promise.allSettled([
+    naverPolling<unknown>(buildNaverPath("/api/polling/domestic/index", { itemCodes: "KOSPI,KOSDAQ" }), { staleMs: 120_000 }),
+    naverPolling<unknown>(buildNaverPath("/api/polling/worldstock/index", { reutersCodes: ".INX,.IXIC" }), { staleMs: 120_000 }),
+    naverPolling<unknown>(buildNaverPath("/api/polling/coin/price", { fqnfTickers: "BTC_KRW_UPBIT" }), { staleMs: 120_000 }),
+  ]);
+  const quotes: MarketIndexQuote[] = [];
+  if (domestic.status === "fulfilled") {
+    const rows = ((domestic.value.data as Record<string, unknown>)?.datas ?? []) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const code = stringValue(row, ["itemCode", "code", "symbol"]);
+      const mapped = code === "KOSDAQ" ? ["KOSDAQ", "코스닥"] : ["KOSPI", "코스피"];
+      const quote = indexQuote(row, mapped[0], mapped[1], "KR", domestic.value.fetchedAt, domestic.value.stale);
+      if (quote) quotes.push(quote);
+    }
+  }
+  if (foreign.status === "fulfilled") {
+    const rows = ((foreign.value.data as Record<string, unknown>)?.datas ?? []) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const code = stringValue(row, ["reutersCode", "itemCode", "code", "symbol"]);
+      const mapped = code.includes("IXIC") ? ["COMP", "나스닥 종합"] : ["SPX", "S&P 500"];
+      const quote = indexQuote(row, mapped[0], mapped[1], "US", foreign.value.fetchedAt, foreign.value.stale);
+      if (quote) quotes.push(quote);
+    }
+  }
+  if (crypto.status === "fulfilled") {
+    const row = pollingRow(crypto.value.data);
+    if (row) {
+      const quote = indexQuote(row, "BTC", "비트코인", "CRYPTO", crypto.value.fetchedAt, crypto.value.stale);
+      if (quote) quotes.push(quote);
+    }
+  }
+  return quotes;
+}
+
+function chartRows(payload: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(payload)) return payload.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  for (const key of ["priceInfos", "candleList", "prices", "contents", "items", "data", "datas"]) {
+    const rows = record[key];
+    if (Array.isArray(rows)) return rows.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
+  }
+  return [];
+}
+
+function chartPoint(row: Record<string, unknown>, fallback: number): ChartPoint | null {
+  const close = asNumber(row.closePrice, row.close, row.currentPrice, row.tradePrice, row.price, row.basePrice);
+  if (close <= 0) return null;
+  const open = asNumber(row.openPrice, row.open, row.openingPrice, close) || close;
+  const high = asNumber(row.highPrice, row.high, row.highestPrice, close) || close;
+  const low = asNumber(row.lowPrice, row.low, row.lowestPrice, close) || close;
+  const time = recordTimestamp(row, fallback);
+  return { time, open, high, low, close, volume: asNumber(row.accumulatedTradingVolume, row.volume, row.tradeVolume) || undefined };
+}
+
+const RANGE_DAYS: Record<string, number> = { "1D": 2, "1W": 8, "1M": 32, "3M": 94, "1Y": 367 };
+
+export async function getChartSeries(market: Market, symbol: string, exchange: string | undefined, range: string) {
+  const days = RANGE_DAYS[range];
+  if (!days) throw new Error("INVALID_CHART_RANGE");
+  let result: { data: unknown; fetchedAt: number; stale: boolean };
+  if (market === "KR") {
+    result = await naverJson<unknown>(buildNaverPath(`/api/securityService/chart/domestic/item/${encodeURIComponent(symbol)}`, { periodType: "day" }), { ttlMs: 60_000, staleMs: 30 * 60_000 });
+  } else if (market === "US") {
+    const code = await resolveReutersCode(symbol, exchange);
+    result = await naverJson<unknown>(buildNaverPath(`/api/securityService/stock/${encodeURIComponent(code)}/price`, { page: 1, pageSize: Math.min(400, Math.max(30, days + 10)) }), { ttlMs: 60_000, staleMs: 30 * 60_000 });
+  } else {
+    const ticker = cryptoTicker(symbol);
+    const to = new Date();
+    const from = new Date(Date.now() - days * 86_400_000);
+    result = await naverJson<unknown>(buildNaverPath(`/api/coin/candle/UPBIT/KRW/${encodeURIComponent(ticker)}/days`, { from: from.toISOString(), to: to.toISOString() }), { ttlMs: 30_000, staleMs: 15 * 60_000 });
+  }
+  const since = Date.now() - days * 86_400_000;
+  const points = chartRows(result.data)
+    .map((row, index) => chartPoint(row, result.fetchedAt - index * 86_400_000))
+    .filter((point): point is ChartPoint => Boolean(point))
+    .filter(point => range === "1Y" || point.time >= since)
+    .sort((a, b) => a.time - b.time)
+    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time)
+    .slice(-400);
+  return { points, range, stale: result.stale, source: "NAVER" as const };
+}
+
+function marketFromSearchRecord(record: Record<string, unknown>): Market | null {
+  const reuters = stringValue(record, ["reutersCode", "reuterscode"]);
+  const exchange = stringValue(record, ["exchangeType", "exchange", "marketType", "nationType", "nation", "country"]);
+  const fqnf = stringValue(record, ["fqnfTicker", "fqnf_ticker"]);
+  const type = stringValue(record, ["type", "category", "targetType", "assetType"]);
+  if (fqnf || /UPBIT|BITHUMB|COIN|CRYPTO|가상자산/i.test(`${exchange} ${type}`)) return "CRYPTO";
+  if (reuters || /USA|NASDAQ|NYSE|AMEX|미국/i.test(exchange)) return "US";
+  const code = stringValue(record, ["itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
+  if (/^[A-Za-z0-9]{6}$/.test(code) || /KOSPI|KOSDAQ|KRX|NXT|국내/i.test(`${exchange} ${type}`)) return "KR";
+  return null;
+}
+
+function searchInstrument(record: Record<string, unknown>): SearchInstrument | null {
+  const market = marketFromSearchRecord(record);
+  if (!market) return null;
+  const name = stringValue(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
+  const reuters = stringValue(record, ["reutersCode", "reuterscode"]);
+  const fqnf = stringValue(record, ["fqnfTicker", "fqnf_ticker"]);
+  let symbol = stringValue(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
+  if (market === "US" && !symbol && reuters) symbol = reuters.split(".")[0];
+  if (market === "CRYPTO") {
+    const ticker = symbol || fqnf.split("_")[0];
+    symbol = ticker ? `KRW-${ticker.replace(/^KRW-/, "")}` : "";
+  }
+  if (!name || !symbol) return null;
+  const exchangeRaw = stringValue(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "nationType"]);
+  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER·UPBIT";
+  return { market, symbol: symbol.toUpperCase(), name, exchange, currency: market === "US" ? "USD" : "KRW" };
+}
+
+export async function searchNaverInstruments(query: string, market?: Market) {
+  const target = market === "CRYPTO" ? "coin" : "stock";
+  const result = await naverJson<unknown>(buildNaverPath("/api/autocomplete/search/autoComplete", { query, target }), { ttlMs: 30_000, staleMs: 10 * 60_000 });
+  const instruments = collectRecords(result.data).map(searchInstrument).filter((item): item is SearchInstrument => Boolean(item));
+  const unique = new Map<string, SearchInstrument>();
+  for (const item of instruments) {
+    if (market && item.market !== market) continue;
+    unique.set(`${item.market}:${item.symbol}`, item);
+    if (unique.size >= 20) break;
+  }
+  return { instruments: [...unique.values()], stale: result.stale };
 }
 
 export async function persistQuoteSnapshot(quote: LiveQuote) {
   if (!env.DB) return;
   const instrumentId = `${quote.market}:${quote.symbol}`;
-  const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
+  const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
   const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
   const fxRateMicros = Math.round(quote.exchangeRate * 1_000_000);
   const recordedAt = Math.floor(sourceTimestamp / 60_000) * 60_000;
-  await env.DB.batch([env.DB.prepare(
-    `INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
-     SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
-     ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,
-       change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros,source=excluded.source,
-       source_timestamp=excluded.source_timestamp,received_at=excluded.received_at`,
-  ).bind(
-    instrumentId,
-    priceKrwMicros,
-    Math.round(quote.change * quote.exchangeRate * 1_000_000),
-    Math.round(quote.changeRate * 10_000),
-    fxRateMicros,
-    quote.source,
-    sourceTimestamp,
-    Date.now(),
-    instrumentId,
-  ), env.DB.prepare(`INSERT INTO price_history (id,instrument_id,price_micros,change_rate_ppm,fx_rate_micros,recorded_at)
-    SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
-    ON CONFLICT(instrument_id,recorded_at) DO UPDATE SET price_micros=excluded.price_micros,change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros`)
-    .bind(`${instrumentId}:${recordedAt}`, instrumentId, priceKrwMicros, Math.round(quote.changeRate * 10_000), fxRateMicros, recordedAt, instrumentId)]);
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
+      SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
+      ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,
+      change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros,source=excluded.source,
+      source_timestamp=excluded.source_timestamp,received_at=excluded.received_at`)
+      .bind(instrumentId, priceKrwMicros, Math.round(quote.change * quote.exchangeRate * 1_000_000), Math.round(quote.changeRate * 10_000), fxRateMicros, quote.source, sourceTimestamp, Date.now(), instrumentId),
+    env.DB.prepare(`INSERT INTO price_history (id,instrument_id,price_micros,change_rate_ppm,fx_rate_micros,recorded_at)
+      SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM instruments WHERE id=?)
+      ON CONFLICT(instrument_id,recorded_at) DO UPDATE SET price_micros=excluded.price_micros,change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros`)
+      .bind(`${instrumentId}:${recordedAt}`, instrumentId, priceKrwMicros, Math.round(quote.changeRate * 10_000), fxRateMicros, recordedAt, instrumentId),
+  ]);
   if (crypto.getRandomValues(new Uint8Array(1))[0] === 0) {
     await env.DB.prepare("DELETE FROM price_history WHERE recorded_at<?").bind(Date.now() - 400 * 86_400_000).run().catch(() => undefined);
   }
