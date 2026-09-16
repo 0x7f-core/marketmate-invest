@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     const account = await env.DB!.prepare("SELECT cash_krw AS cashKrw,realized_pnl_krw AS realizedPnlKrw FROM participants WHERE id=? AND user_id=?").bind(participantId, user.id).first();
     if (!account) throw new Error("FORBIDDEN");
     const positions = await env.DB!.prepare(
-      `SELECT i.market,i.symbol,i.name,i.currency,pos.quantity_micros AS quantityMicros,
+      `SELECT i.market,i.symbol,i.name,i.currency,i.exchange,pos.quantity_micros AS quantityMicros,
               pos.average_price_micros AS averagePriceKrwMicros,pos.realized_pnl_krw AS realizedPnlKrw,
               q.price_micros AS currentPriceKrwMicros,q.received_at AS quoteReceivedAt,
               (pos.quantity_micros / 1000000.0) * (q.price_micros / 1000000.0) AS marketValueKrw,
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,
-              f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency
+              f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency,i.exchange
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
        WHERE f.participant_id=? ORDER BY f.executed_at DESC LIMIT 100`
     ).bind(participantId).all();
