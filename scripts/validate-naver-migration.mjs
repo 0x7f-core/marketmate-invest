@@ -89,7 +89,7 @@ if (!tradingQuote.includes('session.exchange === "NXT"')) {
 if (!tradingQuote.includes("isExecutableTradingQuote")) {
   failures.push("executable quote freshness guard is missing");
 }
-if (!tradingQuote.includes("getNaverUsdKrwRate") || !tradingQuote.includes("quote.stale || fx.stale")) {
+if (!tradingQuote.includes("getNaverUsdKrwRate") || !tradingQuote.includes('if (fx.stale) throw new Error("NAVER_FX_UNAVAILABLE")')) {
   failures.push("US trading quotes must reject stale Naver FX data");
 }
 
