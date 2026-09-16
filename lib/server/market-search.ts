@@ -1,5 +1,5 @@
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
-import { looksLikeCaseSensitiveReutersCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
+import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
 
 function text(record: Record<string, unknown>, keys: string[]) {
@@ -54,13 +54,14 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
 
   if (market === "US" && reuters && looksLikeCaseSensitiveReutersCode(reuters)) symbol = reuters;
   else if (market === "US" && !symbol && reuters) symbol = reuters.split(".")[0];
-  if (market === "CRYPTO") {
-    const ticker = (symbol || fqnf.split("_")[0]).replace(/^KRW-/, "");
-    symbol = ticker ? `KRW-${ticker}` : "";
-  }
+  if (market === "CRYPTO") symbol = normalizeNaverMarketSymbol("CRYPTO", symbol || fqnf);
   if (!name || !symbol) return null;
 
-  const normalizedSymbol = market === "US" ? normalizeNaverReutersCode(symbol) : symbol.toUpperCase();
+  const normalizedSymbol = market === "US"
+    ? normalizeNaverReutersCode(symbol)
+    : market === "CRYPTO"
+      ? normalizeNaverMarketSymbol("CRYPTO", symbol)
+      : symbol.toUpperCase();
   const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "typeCode", "typeName", "nationType"]);
   const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? normalizeUsExchange(exchangeRaw) : "NAVER";
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
