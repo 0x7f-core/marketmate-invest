@@ -140,7 +140,6 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
   };
 
   const sessionText = (market, status) => {
-    if (market === "CRYPTO") return "실시간";
     const label = cleanLabel(status?.label) || (status?.isOpen ? "거래중" : "장 마감");
     if (market === "KR") {
       const exchange = String(status?.exchange || "KRX").toUpperCase();
@@ -150,7 +149,6 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
   };
 
   const timeText = (market, status) => {
-    if (market === "CRYPTO") return "";
     const open = clock(status?.openTimeKst);
     const close = clock(status?.closeTimeKst);
     return open && close ? open + "~" + close : "";
@@ -178,6 +176,14 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
       return item;
     }
 
+    if (market === "CRYPTO") {
+      const badge = document.createElement("span");
+      badge.className = "market-status-badge";
+      badge.textContent = "실시간";
+      item.appendChild(badge);
+      return item;
+    }
+
     const session = document.createElement("span");
     session.className = "market-status-session" + (status.isOpen ? " open" : "");
     session.textContent = sessionText(market, status);
@@ -191,20 +197,10 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
       item.appendChild(time);
     }
 
-    if (market === "CRYPTO") {
-      const badge = document.createElement("span");
-      badge.className = "market-status-badge";
-      badge.textContent = "24시간";
-      item.appendChild(badge);
-    } else if (status.isHoliday) {
+    if (status.isHoliday) {
       const badge = document.createElement("span");
       badge.className = "market-status-badge closed";
       badge.textContent = "휴장";
-      item.appendChild(badge);
-    } else if (status.stale) {
-      const badge = document.createElement("span");
-      badge.className = "market-status-badge closed";
-      badge.textContent = "시간판정";
       item.appendChild(badge);
     }
 
