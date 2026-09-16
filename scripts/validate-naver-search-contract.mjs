@@ -12,18 +12,21 @@ if (!source.includes('/^\\/domestic\\//i.test(url)')) {
   failures.push("domestic autocomplete URL fallback is missing");
 }
 
-if (!source.includes('/KOR|KOREA|대한민국/i.test(nation)')) {
-  failures.push("domestic nationCode/nationName classification is missing");
+if (!source.includes("classifySupportedNation") || !source.includes('if (nationKind === "FOREIGN") return null;')) {
+  failures.push("unsupported foreign nation metadata must be rejected before market classification");
+}
+if (!source.includes('if (nationKind === "KR") return "KR";') || !source.includes('if (nationKind === "US") return "US";')) {
+  failures.push("KR/US nation metadata classification is missing");
 }
 
 if (!source.includes('/KOSPI|KOSDAQ|KRX|NXT|국내|코스피|코스닥/i.test(`${exchange} ${type}`)')) {
   failures.push("domestic typeCode/typeName classification is missing");
 }
 
-const domesticIndex = source.indexOf('return "KR";');
-const genericReutersUsIndex = source.indexOf('if (reuters && looksLikeCaseSensitiveReutersCode(reuters)) return "US";');
-if (domesticIndex < 0 || genericReutersUsIndex < 0 || domesticIndex > genericReutersUsIndex) {
-  failures.push("domestic autocomplete classification must run before generic Reuters-code US fallback");
+const foreignNationIndex = source.indexOf('if (nationKind === "FOREIGN") return null;');
+const genericReutersIndex = source.indexOf("looksLikeCaseSensitiveReutersCode(reuters)");
+if (foreignNationIndex < 0 || genericReutersIndex < 0 || foreignNationIndex > genericReutersIndex) {
+  failures.push("foreign nation rejection must run before generic Reuters-code fallbacks");
 }
 
 if (!source.includes('if (/^[A-Za-z0-9]{6}$/.test(code)) return "KR";')) {
@@ -32,6 +35,13 @@ if (!source.includes('if (/^[A-Za-z0-9]{6}$/.test(code)) return "KR";')) {
 
 if (!source.includes('const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "typeCode", "typeName", "nationType"]);')) {
   failures.push("autocomplete exchange normalization must retain typeCode/typeName support");
+}
+
+if (!source.includes('normalizeSupportedExchange("US", exchange)') || !source.includes("hasUnsupportedForeignReutersSuffix(reuters)")) {
+  failures.push("US classification must reject non-US exchanges and known foreign Reuters suffixes");
+}
+if (!source.includes("normalizeSupportedExchange(market, exchangeRaw)")) {
+  failures.push("normalized search results must use the shared supported-exchange policy");
 }
 
 if (failures.length) {
