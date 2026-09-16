@@ -39,6 +39,9 @@ jobs:
       - name: validate:migration
         run: pnpm run validate:migration
 
+      - name: validate:search-contract
+        run: pnpm run validate:search-contract
+
       - name: validate:legacy-config
         run: pnpm run validate:legacy-config
 
