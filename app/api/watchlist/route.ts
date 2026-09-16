@@ -14,7 +14,9 @@ export async function GET(request: Request) {
     await enforceRateLimit(request, "watchlist_read", 20, 60_000, user.id);
     const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<{market:Market;symbol:string;exchange:string;receivedAt?:number}>();
     const stale = result.results.filter(item => !item.receivedAt || item.receivedAt < Date.now()-15_000).slice(0,6);
-    if (stale.length) await Promise.allSettled(stale.map(item => getLiveQuote(item.market,item.symbol,item.exchange).then(persistQuoteSnapshot)));
+    if (stale.length) {
+      await Promise.allSettled(stale.map(item => getLiveQuote(item.market,item.symbol,item.exchange).then(quote => quote.stale ? undefined : persistQuoteSnapshot(quote))));
+    }
     const fresh = stale.length ? await env.DB!.prepare(watchlistSql).bind(user.id).all() : result;
     return Response.json({ items:fresh.results }, { headers:{"cache-control":"no-store"} });
   } catch (error) { return apiError(error); }
