@@ -18,6 +18,8 @@ export type MarketSession = {
 type NaverStatus = Record<string, unknown>;
 
 const US_AFTER_MARKET_CUTOFF_MINUTES_ET = 19 * 60 + 50;
+const KR_NXT_PREMARKET_CLOSE_MINUTES = 8 * 60 + 50;
+const KR_KRX_REGULAR_OPEN_MINUTES = 9 * 60;
 
 function asRecord(value: unknown): NaverStatus | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as NaverStatus : null;
@@ -96,9 +98,9 @@ function sessionLabel(type: string, market: Market) {
   return type || (market === "US" ? "미국장" : "국내장");
 }
 
-function newYorkMinutesNow() {
+function clockMinutesNow(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
+    timeZone,
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
@@ -107,6 +109,15 @@ function newYorkMinutesNow() {
   const hour = Number(value("hour"));
   const minute = Number(value("minute"));
   return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1;
+}
+
+function newYorkMinutesNow() {
+  return clockMinutesNow("America/New_York");
+}
+
+function isKrMorningBreak() {
+  const minutes = clockMinutesNow("Asia/Seoul");
+  return minutes >= KR_NXT_PREMARKET_CLOSE_MINUTES && minutes < KR_KRX_REGULAR_OPEN_MINUTES;
 }
 
 function beforeUsAfterMarketCutoff() {
@@ -135,6 +146,7 @@ function usAfterMarketCloseKst(detail: ReturnType<typeof sessionDetails>) {
 
 function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen || !detail.currentType) return false;
+  if (market === "KR" && isKrMorningBreak()) return false;
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
   if (market === "US") return !type.includes("after") || beforeUsAfterMarketCutoff();
@@ -157,6 +169,20 @@ function closedFallback(market: Market, stale = false): MarketSession {
 export async function getCheckedMarketSession(market: Market): Promise<MarketSession> {
   if (market === "CRYPTO") {
     return { isOpen: true, label: "24시간", notice: "가상자산은 네이버증권 시세 기준으로 24시간 주문할 수 있습니다.", source: "NAVER" };
+  }
+
+  if (market === "KR" && isKrMorningBreak()) {
+    return {
+      isOpen: false,
+      label: "거래 준비시간",
+      notice: "국내주식은 NXT 프리마켓 종료 후 08:50~09:00 KST에는 주문할 수 없습니다. KRX 정규장은 09:00 KST에 시작합니다.",
+      exchange: "NXT",
+      currentSession: "morningBreak",
+      openTimeKst: "09:00",
+      closeTimeKst: "15:30",
+      source: "NAVER",
+      stale: false,
+    };
   }
 
   const exchanges = market === "KR" ? ["krx", "nxt"] : ["nasdaq"];
