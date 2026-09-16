@@ -9,7 +9,7 @@ import { env } from "cloudflare:workers";
 export const dynamic = "force-dynamic";
 
 function isQuoteUnavailable(error: unknown) {
-  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE"].includes(error.message));
+  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
 }
 
 export async function GET(request: Request) {
