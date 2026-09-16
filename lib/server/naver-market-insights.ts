@@ -224,12 +224,11 @@ export async function getNaverMarketInsight(kind: MarketInsightKind, params: Mar
       return insight(await naverJson<unknown>(buildNaverPath(path, { reutersCode: code }), { ttlMs: 10 * 60_000, staleMs: 6 * 60 * 60_000 }), kind);
     }
     case "foreign-etf-list": {
-      return insight(await naverJson<unknown>(buildNaverPath("/api/foreign/market/etf/usa", {
-        orderType: "marketValue",
-        largeCode: "all",
-        middleCode: "all",
-        startIdx: 0,
-        pageSize: size,
+      return insight(await naverJson<unknown>(buildNaverPath("/api/stockSecurity/etfs/v2/foreign", {
+        sortType: "tradingValue",
+        sortDirection: "desc",
+        index: 0,
+        size,
       }), { ttlMs: 60_000, staleMs: 15 * 60_000 }), kind);
     }
     case "foreign-etf-components": {
