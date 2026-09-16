@@ -12,9 +12,13 @@ type StaleInstrument = {
 };
 
 async function refreshLeaderboardQuote(instrument: StaleInstrument, refreshStartedAt: number) {
-  const claim = await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
-    .bind(refreshStartedAt, instrument.id, instrument.receivedAt).run();
-  if ((claim.meta.changes ?? 0) !== 1) return;
+  let claimed = false;
+  if (instrument.receivedAt > 0) {
+    const claim = await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
+      .bind(refreshStartedAt, instrument.id, instrument.receivedAt).run();
+    if ((claim.meta.changes ?? 0) !== 1) return;
+    claimed = true;
+  }
 
   try {
     const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
@@ -24,9 +28,11 @@ async function refreshLeaderboardQuote(instrument: StaleInstrument, refreshStart
     }
     await persistQuoteSnapshot(quote);
   } catch {
-    await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
-      .bind(instrument.receivedAt, instrument.id, refreshStartedAt).run().catch(() => undefined);
-    // The previous validated price stays in the ranking until Naver returns a fresh quote.
+    if (claimed) {
+      await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
+        .bind(instrument.receivedAt, instrument.id, refreshStartedAt).run().catch(() => undefined);
+    }
+    // Existing snapshots remain untouched; a never-priced position is marked incomplete below.
   }
 }
 
@@ -41,11 +47,11 @@ export async function GET(request: Request) {
     const refreshStartedAt = Date.now();
     const staleBefore = refreshStartedAt - 15_000;
     const stale = await env.DB!.prepare(
-      `SELECT DISTINCT i.id,i.market,i.symbol,i.exchange,q.received_at AS receivedAt
+      `SELECT DISTINCT i.id,i.market,i.symbol,i.exchange,COALESCE(q.received_at,0) AS receivedAt
        FROM positions pos JOIN participants p ON p.id=pos.participant_id
-       JOIN instruments i ON i.id=pos.instrument_id JOIN quote_snapshots q ON q.instrument_id=i.id
-       WHERE p.competition_id=? AND pos.quantity_micros>0 AND q.received_at<?
-       ORDER BY q.received_at ASC LIMIT 8`,
+       JOIN instruments i ON i.id=pos.instrument_id LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
+       WHERE p.competition_id=? AND pos.quantity_micros>0 AND (q.received_at IS NULL OR q.received_at<?)
+       ORDER BY COALESCE(q.received_at,0) ASC LIMIT 8`,
     ).bind(competitionId, staleBefore).all<StaleInstrument>();
 
     await Promise.allSettled(stale.results.map(instrument => refreshLeaderboardQuote(instrument, refreshStartedAt)));
@@ -59,7 +65,8 @@ export async function GET(request: Request) {
                  FROM (SELECT i2.symbol AS symbol FROM fills f2 JOIN instruments i2 ON i2.id=f2.instrument_id
                        WHERE f2.participant_id=p.id GROUP BY f2.instrument_id ORDER BY MAX(f2.executed_at) DESC LIMIT 3) recent
               ) AS recentSymbols,
-              p.cash_krw + COALESCE(SUM((pos.quantity_micros / 1000000.0) * (q.price_micros / 1000000.0)),0) AS totalAssetKrw
+              COALESCE(SUM(CASE WHEN pos.id IS NOT NULL AND q.price_micros IS NULL THEN 1 ELSE 0 END),0) AS pricingIncomplete,
+              p.cash_krw + COALESCE(SUM((pos.quantity_micros / 1000000.0) * (COALESCE(q.price_micros,pos.average_price_micros) / 1000000.0)),0) AS totalAssetKrw
        FROM participants p JOIN users u ON u.id=p.user_id JOIN competitions c ON c.id=p.competition_id
        LEFT JOIN positions pos ON pos.participant_id=p.id AND pos.quantity_micros>0
        LEFT JOIN quote_snapshots q ON q.instrument_id=pos.instrument_id
@@ -69,7 +76,8 @@ export async function GET(request: Request) {
     return Response.json({ leaderboard: rows.results.map((row, index) => ({
       ...row,
       rank: index + 1,
+      pricingIncomplete: Number(row.pricingIncomplete ?? 0),
       unrealizedPnlKrw: Number(row.totalAssetKrw) - Number(row.initialCashKrw) - Number(row.realizedPnlKrw),
-    })) });
+    })) }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
