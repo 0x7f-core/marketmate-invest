@@ -2,6 +2,13 @@
 
 import { useEffect } from "react";
 
+type FxQuote = {
+  id: string;
+  price: number;
+  rate: number;
+  unit: string;
+};
+
 function replaceTextNode(element: Element | null, from: string, to: string) {
   if (!element) return;
   for (const node of Array.from(element.childNodes)) {
@@ -10,7 +17,27 @@ function replaceTextNode(element: Element | null, from: string, to: string) {
   }
 }
 
-function patchCryptoSourceLabels() {
+function patchHorizontalFx(fx: FxQuote | null) {
+  if (!fx) return;
+  document.querySelectorAll(".live-market-strip").forEach(strip => {
+    let button = strip.querySelector<HTMLButtonElement>('button[data-market-id="USDKRW"]');
+    if (!button) {
+      button = document.createElement("button");
+      button.dataset.marketId = "USDKRW";
+      button.innerHTML = "<span>원/달러 환율<small>네이버증권</small></span><strong></strong><em></em>";
+      strip.appendChild(button);
+    }
+    const price = button.querySelector("strong");
+    const rate = button.querySelector("em");
+    if (price) price.textContent = `${fx.price.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${fx.unit || "원"}`;
+    if (rate) {
+      rate.className = fx.rate >= 0 ? "up" : "down";
+      rate.textContent = `${fx.rate >= 0 ? "+" : ""}${fx.rate.toFixed(2)}%`;
+    }
+  });
+}
+
+function patchCryptoSourceLabels(fx: FxQuote | null) {
   document.querySelectorAll(".np-market-status span").forEach(element => {
     if (element.textContent?.includes("가상자산 · 네이버증권 24시간 시세")) {
       replaceTextNode(element, "가상자산 · 네이버증권 24시간 시세", "가상자산 · UPBIT 24시간 시세");
@@ -42,6 +69,8 @@ function patchCryptoSourceLabels() {
     }
   });
 
+  patchHorizontalFx(fx);
+
   const cryptoActive = Array.from(document.querySelectorAll(".np-market-tabs button")).some(button =>
     button.classList.contains("active") && button.textContent?.trim() === "가상자산",
   );
@@ -64,20 +93,42 @@ function patchCryptoSourceLabels() {
 
 export default function CryptoSourceLabels() {
   useEffect(() => {
+    let active = true;
+    let latestFx: FxQuote | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
     let scheduled = false;
-    const schedule = () => {
+
+    const schedulePatch = () => {
       if (scheduled) return;
       scheduled = true;
       requestAnimationFrame(() => {
         scheduled = false;
-        patchCryptoSourceLabels();
+        patchCryptoSourceLabels(latestFx);
       });
     };
 
-    schedule();
-    const observer = new MutationObserver(schedule);
+    const loadFx = async () => {
+      try {
+        const response = await fetch("/api/market-overview", { cache: "no-store" });
+        const data = response.ok ? await response.json() as { quotes?: FxQuote[]; pollingInterval?: number } : null;
+        if (!active) return;
+        latestFx = data?.quotes?.find(item => item.id === "USDKRW") ?? null;
+        schedulePatch();
+        pollTimer = setTimeout(loadFx, Math.max(5_000, Math.min(120_000, data?.pollingInterval ?? 10_000)));
+      } catch {
+        if (active) pollTimer = setTimeout(loadFx, 10_000);
+      }
+    };
+
+    schedulePatch();
+    void loadFx();
+    const observer = new MutationObserver(schedulePatch);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
+    return () => {
+      active = false;
+      observer.disconnect();
+      if (pollTimer) clearTimeout(pollTimer);
+    };
   }, []);
 
   return null;
