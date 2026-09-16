@@ -136,17 +136,32 @@ function retryAfterMs(response: Response) {
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
+function declaredContentLength(response: Response) {
+  const raw = response.headers.get("content-length");
+  if (!raw) return undefined;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function assertCompleteBody(receivedBytes: number, declaredLength: number | undefined, path: string) {
+  if (declaredLength !== undefined && receivedBytes < declaredLength) {
+    throw new NaverStockError("네이버증권 API 응답이 전송 도중 끊겼습니다.", { path, kind: "network" });
+  }
+}
+
 async function readTextLimited(response: Response, path: string) {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+  const declaredLength = declaredContentLength(response);
+  if (declaredLength !== undefined && declaredLength > MAX_RESPONSE_BYTES) {
     throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path, kind: "network" });
   }
 
   if (!response.body) {
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
+    const byteLength = new TextEncoder().encode(text).byteLength;
+    if (byteLength > MAX_RESPONSE_BYTES) {
       throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path, kind: "network" });
     }
+    assertCompleteBody(byteLength, declaredLength, path);
     return text;
   }
 
@@ -165,6 +180,7 @@ async function readTextLimited(response: Response, path: string) {
       }
       text += decoder.decode(value, { stream: true });
     }
+    assertCompleteBody(bytesRead, declaredLength, path);
     text += decoder.decode();
     return text;
   } finally {
