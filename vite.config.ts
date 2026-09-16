@@ -8,20 +8,31 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
+const productionD1DatabaseId = process.env.CLOUDFLARE_D1_DATABASE_ID?.trim();
+const productionD1DatabaseName =
+  process.env.CLOUDFLARE_D1_DATABASE_NAME?.trim() || "marketmate-invest";
+const workerName =
+  process.env.CLOUDFLARE_WORKER_NAME?.trim() || "marketmate-invest";
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const managedLinux = readExecutionProfile() === "managed-linux";
 
-const localBindingConfig = {
+const workerBindingConfig = {
+  name: workerName,
   main: "vinext/server/fetch-handler",
+  compatibility_date: "2026-09-16",
   compatibility_flags: ["nodejs_compat"],
+  workers_dev: true,
   d1_databases: d1
     ? [
         {
           binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          database_name: productionD1DatabaseId
+            ? productionD1DatabaseName
+            : "site-creator-d1",
+          database_id:
+            productionD1DatabaseId || SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
         },
       ]
     : [],
@@ -61,7 +72,7 @@ export default defineConfig(async () => {
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         inspectorPort: false,
-        config: localBindingConfig,
+        config: workerBindingConfig,
       }),
     ],
   };
