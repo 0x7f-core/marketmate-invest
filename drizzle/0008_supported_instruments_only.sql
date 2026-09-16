@@ -2,6 +2,14 @@ CREATE TABLE `__unsupported_instruments_0008` (
   `id` text PRIMARY KEY NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `__unsupported_orders_0008` (
+  `id` text PRIMARY KEY NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `__unsupported_fills_0008` (
+  `id` text PRIMARY KEY NOT NULL
+);
+--> statement-breakpoint
 INSERT INTO `__unsupported_instruments_0008` (`id`)
 SELECT `id`
 FROM `instruments`
@@ -60,6 +68,14 @@ WHERE
     )
   );
 --> statement-breakpoint
+INSERT INTO `__unsupported_orders_0008` (`id`)
+SELECT `id` FROM `orders`
+WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+--> statement-breakpoint
+INSERT INTO `__unsupported_fills_0008` (`id`)
+SELECT `id` FROM `fills`
+WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+--> statement-breakpoint
 DELETE FROM `watchlist_items`
 WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
 --> statement-breakpoint
@@ -69,19 +85,27 @@ WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
 DELETE FROM `price_history`
 WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
 --> statement-breakpoint
-UPDATE `orders`
-SET `status`='rejected', `rejection_reason`='지원하지 않는 해외시장 종목', `updated_at`=CAST(strftime('%s','now') AS INTEGER)*1000
-WHERE `status`='pending'
-  AND `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+DELETE FROM `cash_ledger`
+WHERE `reference_id` IN (SELECT `id` FROM `__unsupported_fills_0008`);
 --> statement-breakpoint
-UPDATE `instruments`
-SET `is_active`=0
-WHERE `id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+DELETE FROM `positions`
+WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+--> statement-breakpoint
+DELETE FROM `fills`
+WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+--> statement-breakpoint
+DELETE FROM `orders`
+WHERE `instrument_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+--> statement-breakpoint
+DELETE FROM `audit_logs`
+WHERE (`target_type`='instrument' AND `target_id` IN (SELECT `id` FROM `__unsupported_instruments_0008`))
+   OR (`target_type`='order' AND `target_id` IN (SELECT `id` FROM `__unsupported_orders_0008`));
 --> statement-breakpoint
 DELETE FROM `instruments`
-WHERE `id` IN (SELECT `id` FROM `__unsupported_instruments_0008`)
-  AND NOT EXISTS (SELECT 1 FROM `orders` WHERE `orders`.`instrument_id`=`instruments`.`id`)
-  AND NOT EXISTS (SELECT 1 FROM `fills` WHERE `fills`.`instrument_id`=`instruments`.`id`)
-  AND NOT EXISTS (SELECT 1 FROM `positions` WHERE `positions`.`instrument_id`=`instruments`.`id`);
+WHERE `id` IN (SELECT `id` FROM `__unsupported_instruments_0008`);
+--> statement-breakpoint
+DROP TABLE `__unsupported_fills_0008`;
+--> statement-breakpoint
+DROP TABLE `__unsupported_orders_0008`;
 --> statement-breakpoint
 DROP TABLE `__unsupported_instruments_0008`;
