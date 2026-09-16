@@ -150,6 +150,7 @@ for (const path of [
   "app/api/quotes/route.ts",
   "app/api/watchlist/route.ts",
   "app/api/leaderboard/route.ts",
+  "app/api/portfolio/route.ts",
 ]) {
   const text = await source(path);
   if (!text.includes("getTradingQuote")) failures.push(`getTradingQuote wiring is missing: ${path}`);
@@ -191,6 +192,11 @@ for (const path of ["app/api/portfolio/route.ts", "app/api/participants/activity
   }
 }
 
+const portfolioRoute = await source("app/api/portfolio/route.ts");
+if (!portfolioRoute.includes("refreshPortfolioQuote") || !portfolioRoute.includes("Promise.allSettled(stale.results.map") || !portfolioRoute.includes("quote.stale")) {
+  failures.push("portfolio valuations must refresh stale Naver quotes without replacing them with stale fallback data");
+}
+
 const dashboard = await source("app/trading-dashboard.tsx");
 if (/\bUPBIT\b/.test(dashboard)) {
   failures.push("dashboard must not expose legacy UPBIT fallback labels");
@@ -220,6 +226,9 @@ if (!dashboard.includes("setMarketSession(LOADING_MARKET_SESSION)")) {
 const newsRoute = await source("app/api/news/route.ts");
 if (!newsRoute.includes("return 0;") || /Date\.now\(\)\s*-\s*index/.test(newsRoute)) {
   failures.push("undated Naver news must sort behind dated articles instead of being fabricated as newest");
+}
+if (!newsRoute.includes("const EXCHANGE") || !newsRoute.includes("!EXCHANGE.test(exchange)")) {
+  failures.push("news exchange identifiers must remain bounded and validated");
 }
 
 const marketChart = await source("app/market-chart.tsx");
