@@ -136,6 +136,42 @@ function retryAfterMs(response: Response) {
   return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
 }
 
+async function readTextLimited(response: Response, path: string) {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path, kind: "network" });
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
+      throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path, kind: "network" });
+    }
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesRead += value.byteLength;
+      if (bytesRead > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path, kind: "network" });
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function fetchJson(path: string, timeoutMs: number) {
   const safePath = validatePath(path);
   const controller = new AbortController();
@@ -172,15 +208,8 @@ async function fetchJson(path: string, timeoutMs: number) {
     );
   }
 
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
-    throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path: safePath, kind: "network" });
-  }
-  const text = await response.text();
+  const text = await readTextLimited(response, safePath);
   if (!text.trim()) throw new NaverStockError("네이버증권 API가 빈 응답을 반환했습니다.", { path: safePath, kind: "empty" });
-  if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) {
-    throw new NaverStockError("네이버증권 API 응답 크기가 제한을 초과했습니다.", { path: safePath, kind: "network" });
-  }
   let payload: unknown;
   try {
     payload = JSON.parse(text);
