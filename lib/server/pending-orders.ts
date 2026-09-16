@@ -8,7 +8,7 @@ export async function matchPendingOrders(quote: TradingQuote) {
   if (!env.DB || !isExecutableTradingQuote(quote)) return;
 
   const session = await getCheckedMarketSession(quote.market);
-  if (!session.isOpen || session.stale) return;
+  if (!session.isOpen || session.stale || !isExecutableTradingQuote(quote)) return;
   if (quote.market === "KR" && quote.venue && session.exchange && quote.venue !== session.exchange) return;
   const instrumentId = `${quote.market}:${quote.symbol}`;
   const nativePriceMicros = Math.round(quote.price * 1_000_000);
