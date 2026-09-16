@@ -1,6 +1,6 @@
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getMarketChartSeries } from "@/lib/server/market-chart";
-import type { Market } from "@/lib/server/market-data";
+import { getChartSeries, type Market } from "@/lib/server/market-data";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { enforceRateLimit } from "@/lib/server/safety";
@@ -24,7 +24,9 @@ export async function GET(request: Request) {
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !RANGES.has(range) || (exchange !== undefined && !EXCHANGE.test(exchange))) {
       return Response.json({ error: "차트 요청값을 확인해주세요." }, { status: 400 });
     }
-    const result = await getMarketChartSeries(market, symbol, exchange, range);
+    const result = market === "US"
+      ? await getMarketChartSeries(market, symbol, exchange, range)
+      : await getChartSeries(market, symbol, exchange, range);
     if (!result.points.length) {
       return Response.json({ ...result, error: "네이버증권에서 차트 데이터를 받지 못했습니다." }, { status: 503, headers: { "retry-after": "15" } });
     }
