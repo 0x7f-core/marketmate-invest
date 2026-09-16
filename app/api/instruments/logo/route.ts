@@ -31,6 +31,10 @@ function safeLogoUrl(value: unknown) {
   }
 }
 
+function logoFromBasic(basic: NaverBasic | null) {
+  return safeLogoUrl(basic?.itemLogoUrl) || safeLogoUrl(basic?.itemLogoPngUrl);
+}
+
 async function loadBasic(symbol: string) {
   const result = await naverJson<NaverBasic>(
     `/api/securityService/stock/${symbol}/basic`,
@@ -60,15 +64,23 @@ export async function GET(request: Request) {
     if (!symbol) return new Response(null, { status: 404 });
 
     let basic: NaverBasic | null = null;
+    let logo = "";
     try {
       basic = await loadBasic(symbol);
+      logo = logoFromBasic(basic);
     } catch {
-      const canonical = cleanSymbol(await resolveCanonicalSymbol(symbol));
-      if (canonical && canonical.toUpperCase() !== symbol.toUpperCase()) basic = await loadBasic(canonical);
+      // Legacy/persisted US rows can still contain a plain ticker such as AAPL.
+      // Resolve the current Naver Reuters code (AAPL.O, QQQ.O, etc.) below.
     }
 
-    let logo = safeLogoUrl(basic?.itemLogoUrl);
-    if (!logo) logo = safeLogoUrl(basic?.itemLogoPngUrl);
+    if (!logo) {
+      const canonical = cleanSymbol(await resolveCanonicalSymbol(symbol));
+      if (canonical && canonical.toUpperCase() !== symbol.toUpperCase()) {
+        basic = await loadBasic(canonical);
+        logo = logoFromBasic(basic);
+      }
+    }
+
     if (!logo) return new Response(null, { status: 404, headers: { "cache-control": "private, max-age=300" } });
 
     return new Response(null, {
