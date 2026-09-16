@@ -1,6 +1,7 @@
 const NAVER_STOCK_BASE_URL = "https://stock.naver.com";
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 5_000;
+const MAX_CACHE_ENTRIES = 512;
 
 const PUBLIC_PREFIXES = [
   "/api/coin/",
@@ -68,6 +69,22 @@ type RequestOptions = {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 const inflight = new Map<string, Promise<NaverResult<unknown>>>();
+
+function setCacheEntry<T>(key: string, entry: CacheEntry<T>) {
+  cache.set(key, entry as CacheEntry<unknown>);
+  if (cache.size <= MAX_CACHE_ENTRIES) return;
+
+  const now = Date.now();
+  for (const [cachedKey, cached] of cache) {
+    if (cached.staleUntil <= now) cache.delete(cachedKey);
+    if (cache.size <= MAX_CACHE_ENTRIES) return;
+  }
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
 
 export function buildNaverPath(path: string, params?: Record<string, string | number | boolean | Array<string | number> | null | undefined>) {
   if (!params) return path;
@@ -186,6 +203,7 @@ export async function naverJson<T>(path: string, options: RequestOptions = {}): 
   if (existing && existing.expiresAt > now) {
     return { data: existing.data, fetchedAt: existing.fetchedAt, stale: false, pollingInterval: existing.pollingInterval };
   }
+  if (existing && existing.staleUntil <= now) cache.delete(safePath);
   const pending = inflight.get(safePath) as Promise<NaverResult<T>> | undefined;
   if (pending) return pending;
 
@@ -198,7 +216,7 @@ export async function naverJson<T>(path: string, options: RequestOptions = {}): 
       const fetchedAt = Date.now();
       const interval = options.respectPollingInterval ? pollingInterval(data, ttlMs) : undefined;
       const expiresIn = interval ?? ttlMs;
-      cache.set(safePath, { data, fetchedAt, expiresAt: fetchedAt + expiresIn, staleUntil: fetchedAt + expiresIn + staleMs, pollingInterval: interval });
+      setCacheEntry(safePath, { data, fetchedAt, expiresAt: fetchedAt + expiresIn, staleUntil: fetchedAt + expiresIn + staleMs, pollingInterval: interval });
       return { data, fetchedAt, stale: false, pollingInterval: interval };
     } catch (error) {
       const fallback = cache.get(safePath) as CacheEntry<T> | undefined;
