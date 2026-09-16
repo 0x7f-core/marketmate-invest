@@ -121,8 +121,8 @@ if (!marketHours.includes('const exchanges = market === "KR" ? ["krx", "nxt"] : 
 if (!marketHours.includes('if (type.includes("closing")) return false;')) {
   failures.push("closing sessions must remain non-tradable");
 }
-if (!marketHours.includes('if (market === "US") return true;')) {
-  failures.push("US open sessions, including after-market, must remain tradable");
+if (!marketHours.includes("US_AFTER_MARKET_CUTOFF_MINUTES_ET") || !marketHours.includes("19 * 60 + 50") || !marketHours.includes('return !type.includes("after") || beforeUsAfterMarketCutoff();')) {
+  failures.push("US sessions must remain tradable while enforcing the 19:50 ET after-market cutoff");
 }
 if (!marketHours.includes('"marketStatusDetailType"')) {
   failures.push("market session parsing must support marketStatusDetailType fallback");
