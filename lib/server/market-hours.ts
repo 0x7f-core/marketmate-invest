@@ -80,7 +80,7 @@ function sessionLabel(type: string, market: Market) {
 }
 
 function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
-  if (!detail.isOpen) return false;
+  if (!detail.isOpen || !detail.currentType) return false;
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
   if (market === "US") return true;
