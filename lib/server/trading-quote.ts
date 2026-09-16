@@ -1,5 +1,6 @@
 import { getLiveQuote, type LiveQuote, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession, type MarketSession } from "@/lib/server/market-hours";
+import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
 import { getNxtLiveQuote } from "@/lib/server/naver-nxt";
 
 export type TradingQuote = LiveQuote & { venue?: "KRX" | "NXT" };
@@ -40,6 +41,11 @@ export async function getTradingQuote(
   exchange?: string,
   knownSession?: MarketSession,
 ): Promise<TradingQuote> {
+  if (market === "US") {
+    const quote = await getLiveQuote(market, symbol, exchange);
+    const fx = await getNaverUsdKrwRate();
+    return normalizeTradingTimestamp({ ...quote, exchangeRate: fx.rate, stale: Boolean(quote.stale || fx.stale) });
+  }
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
   const session = knownSession ?? await getCheckedMarketSession("KR");
