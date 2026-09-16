@@ -1,4 +1,4 @@
-import type { Market } from "@/lib/server/market-data";
+type SupportedMarket = "KR" | "US" | "CRYPTO";
 
 export type SupportedNation = "KR" | "US" | "FOREIGN" | null;
 
@@ -21,7 +21,7 @@ export function classifySupportedNation(value: string): SupportedNation {
   return "FOREIGN";
 }
 
-export function normalizeSupportedExchange(market: Market, value: string | null | undefined) {
+export function normalizeSupportedExchange(market: SupportedMarket, value: string | null | undefined) {
   const raw = (value ?? "").normalize("NFKC").trim().toUpperCase();
   if (!raw) return "";
   const compact = raw.replace(/[\s._-]+/g, "");
