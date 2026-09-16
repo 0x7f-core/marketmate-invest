@@ -67,7 +67,7 @@ const LOADING_MARKET_SESSION: MarketSession = {isOpen:false,label:"확인 중",n
 
 const DEFAULTS: Record<Market, Quote> = {
   KR: { market: "KR", symbol: "005930", name: "삼성전자", exchange: "KOSPI", currency: "KRW", price: 0, change: 0, rate: 0, exchangeRate: 1 },
-  US: { market: "US", symbol: "AAPL", name: "애플", exchange: "NAS", currency: "USD", price: 0, change: 0, rate: 0, exchangeRate: 1 },
+  US: { market: "US", symbol: "AAPL.O", name: "애플", exchange: "NAS", currency: "USD", price: 0, change: 0, rate: 0, exchangeRate: 1 },
   CRYPTO: { market: "CRYPTO", symbol: "KRW-BTC", name: "비트코인", exchange: "NAVER", currency: "KRW", price: 0, change: 0, rate: 0, exchangeRate: 1 },
 };
 
@@ -358,7 +358,7 @@ function OrderPanel({ quote, participantId, availableCashKrw, heldQuantityMicros
 
 const NAVER_STOCK_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
 function normalizeNaverLogoCode(symbol:string){let clean=String(symbol??"").trim().replaceAll("\\","/");const tail=clean.split("/").filter(Boolean).pop()??"";clean=tail.replace(/\.svg$/i,"").replace(/^(?:Stock)+/i,"");return clean.replace(/[^A-Za-z0-9._-]/g,"");}
-function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];const urls=[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];if(instrument.market==="US"){const ticker=code.replace(/\.[A-Za-z]$/,"");if(ticker&&ticker!==code)urls.push(`${NAVER_STOCK_LOGO_BASE}Stock${ticker}.svg`);}return[...new Set(urls)];}
+function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`,resolver])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}
 function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}`}>{failed?instrument.name.slice(0,1):<img src={src} alt={`${instrument.name} 로고`} onError={()=>setAttempt(value=>value+1)}/>}</span>;}
 function dDay(endsAt:number){const days=Math.ceil((endsAt-Date.now())/86_400_000);if(days<0)return"종료";if(days===0)return"D-DAY";return`D-${days}`;}
 function formatEndDate(value:number){return new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(value);}
