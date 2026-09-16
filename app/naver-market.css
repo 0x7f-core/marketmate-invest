@@ -13,8 +13,11 @@
 .naver-light-chart-state.error b{color:#4e5968;font-size:14px}
 .naver-light-chart-state.error span{max-width:80%;text-align:center}
 .naver-light-chart-state.error button{border:1px solid #d1d6db;background:#fff;color:#4e5968;border-radius:8px;padding:7px 11px;cursor:pointer}
+.naver-light-chart-attribution{display:block;width:max-content;max-width:100%;margin:4px 2px 0;color:#b0b8c1;font-size:9px;line-height:1.4;text-decoration:none}
+.naver-light-chart-attribution:hover{color:#8b95a1;text-decoration:underline}
 @media (max-width:767px){
   .naver-light-chart-toolbar{padding:9px 0 7px}
   .naver-light-chart-stage{height:330px;min-height:270px}
   .naver-light-chart-ranges button{padding:6px 8px;font-size:11px}
+  .naver-light-chart-attribution{font-size:8px}
 }
