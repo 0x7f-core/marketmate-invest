@@ -72,6 +72,48 @@ const NAVER_US_LOGO_FALLBACK = String.raw`(() => {
   }, true);
 })();`;
 
+// US ETF names can be much longer than the order-card width. Naver search
+// supplies Reuters-style symbols (e.g. SOXL.O), while the user-facing ticker
+// should be SOXL. For ETF/ETN products we keep the full name everywhere else
+// and shorten only the buy/sell action buttons to "TICKER 매수/매도".
+const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
+  const etfNamePattern = /(?:\bETF\b|\bETN\b|SPDR|iShares|Vanguard|Invesco|ProShares|Direxion|VanEck|Global X|ARK(?:K|W|G|F|Q)?\b|WisdomTree|Schwab|First Trust|Pacer|GraniteShares|YieldMax|Roundhill|Simplify|Defiance|REX Shares|T-REX|MicroSectors|Amplify|Innovator|Avantis)/i;
+  const usExchangePattern = /^(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)$/i;
+
+  const apply = () => {
+    const quoteHead = document.querySelector(".np-quote-head");
+    if (!quoteHead) return;
+
+    const name = quoteHead.querySelector(".stock-title h1")?.textContent?.trim() || "";
+    if (!etfNamePattern.test(name)) return;
+
+    const meta = quoteHead.querySelector(".stock-title small")?.textContent || "";
+    const parts = meta.split("·").map((value) => value.trim());
+    const rawSymbol = parts[0] || "";
+    const exchange = parts[1] || "";
+    if (!rawSymbol || !usExchangePattern.test(exchange)) return;
+
+    const ticker = rawSymbol.split(/[._]/)[0].toUpperCase();
+    if (!ticker) return;
+
+    document.querySelectorAll("button.order-buy, button.order-sell").forEach((node) => {
+      if (!(node instanceof HTMLButtonElement) || node.disabled) return;
+      const side = node.classList.contains("order-buy") ? "매수" : "매도";
+      const label = `${ticker} ${side}`;
+      if (node.textContent?.trim() !== label) node.textContent = label;
+    });
+  };
+
+  const start = () => {
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  };
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
+})();`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -81,6 +123,7 @@ export default function RootLayout({
     <html lang="ko">
       <head>
         <script dangerouslySetInnerHTML={{ __html: NAVER_US_LOGO_FALLBACK }} />
+        <script dangerouslySetInnerHTML={{ __html: US_ETF_ORDER_BUTTON_LABEL }} />
       </head>
       <body className="antialiased">{children}</body>
     </html>
