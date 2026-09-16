@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
+import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       if (!exchange) return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
     }
     const symbol = normalizeNaverMarketSymbol(body.market, rawSymbol);
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (body.market === "US" && hasUnsupportedForeignReutersSuffix(symbol))) {
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
       return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
     }
 
