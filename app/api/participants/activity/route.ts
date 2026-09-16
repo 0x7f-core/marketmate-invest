@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     if (!participant) throw new Error("FORBIDDEN");
 
     const positions = await env.DB!.prepare(
-      `SELECT i.market,i.symbol,i.name,pos.quantity_micros AS quantityMicros,
+      `SELECT i.market,i.symbol,i.name,i.currency,i.exchange,pos.quantity_micros AS quantityMicros,
               pos.average_price_micros AS averagePriceKrwMicros,q.price_micros AS currentPriceKrwMicros,
               ((pos.quantity_micros / 1000000.0) * ((q.price_micros - pos.average_price_micros) / 1000000.0)) AS unrealizedPnlKrw
        FROM positions pos JOIN instruments i ON i.id=pos.instrument_id

@@ -1,20 +1,45 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
-import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
+import { getTradingQuote } from "@/lib/server/trading-quote";
 
 const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency,
   q.price_micros AS priceKrwMicros,q.change_rate_ppm AS changeRatePpm,q.fx_rate_micros AS fxRateMicros,q.received_at AS receivedAt
   FROM watchlist_items w JOIN instruments i ON i.id=w.instrument_id LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
   WHERE w.user_id=? ORDER BY w.sort_order,w.created_at LIMIT 50`;
 
+function normalizeExchange(market: Market, value: string) {
+  if (market === "CRYPTO") return "NAVER";
+  const exchange = value.trim().toUpperCase();
+  if (market === "US") {
+    const compact = exchange.replace(/[\s._-]+/g, "");
+    if (compact.includes("AMEX") || compact.includes("NYSEAMERICAN") || ["AMS", "ASE"].includes(compact)) return "AMS";
+    if (compact.includes("NYSE") || ["NYS", "NYQ"].includes(compact)) return "NYS";
+    if (compact.includes("NASDAQ") || ["NAS", "NSQ", "NMS"].includes(compact)) return "NAS";
+    return ["USA", "US"].includes(compact) ? compact : "";
+  }
+  if (!/^[A-Z0-9._-]{1,16}$/.test(exchange)) return "";
+  return ["KRX", "NXT", "KOSPI", "KOSDAQ", "KONEX"].includes(exchange) ? exchange : "";
+}
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
     await enforceRateLimit(request, "watchlist_read", 20, 60_000, user.id);
-    const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<{market:Market;symbol:string;exchange:string;receivedAt?:number}>();
+    const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<{id:string;market:Market;symbol:string;exchange:string;receivedAt?:number}>();
     const stale = result.results.filter(item => !item.receivedAt || item.receivedAt < Date.now()-15_000).slice(0,6);
-    if (stale.length) await Promise.allSettled(stale.map(item => getLiveQuote(item.market,item.symbol,item.exchange).then(persistQuoteSnapshot)));
+    if (stale.length) {
+      await Promise.allSettled(stale.map(async item => {
+        const quote = await getTradingQuote(item.market,item.symbol,item.exchange);
+        if (quote.stale) return;
+        if (item.market === "KR" && quote.venue) {
+          await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, item.id).run();
+        }
+        await persistQuoteSnapshot(quote);
+      }));
+    }
     const fresh = stale.length ? await env.DB!.prepare(watchlistSql).bind(user.id).all() : result;
     return Response.json({ items:fresh.results }, { headers:{"cache-control":"no-store"} });
   } catch (error) { return apiError(error); }
@@ -26,19 +51,26 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     await enforceRateLimit(request, "watchlist", 40, 60_000, user.id);
     const body = await request.json() as { market?:Market; symbol?:string; name?:string; exchange?:string; currency?:"KRW"|"USD" };
-    const symbol = String(body.symbol ?? "").toUpperCase();
-    if (!body.market || !["KR","US","CRYPTO"].includes(body.market) || !/^[A-Z0-9._-]{1,20}$/.test(symbol) || !body.name || !body.exchange || !["KRW","USD"].includes(body.currency ?? "")) return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
+    if (!body.market || !["KR","US","CRYPTO"].includes(body.market) || typeof body.symbol !== "string" || typeof body.name !== "string" || typeof body.exchange !== "string") {
+      return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
+    }
+    const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
+    const exchange = normalizeExchange(body.market, body.exchange);
+    const currency = body.market === "US" ? "USD" : "KRW";
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !exchange || !body.name.trim()) {
+      return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
+    }
     const instrumentId = `${body.market}:${symbol}`;
     await env.DB!.batch([
       env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1)
         ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,currency=excluded.currency,exchange=excluded.exchange,is_active=1`)
-        .bind(instrumentId, body.market, symbol, body.name.slice(0,80), body.currency, body.exchange),
+        .bind(instrumentId, body.market, symbol, body.name.trim().slice(0,80), currency, exchange),
       env.DB!.prepare(`INSERT INTO watchlist_items (id,user_id,instrument_id,sort_order,created_at)
         SELECT ?,?,?,COALESCE((SELECT MAX(sort_order)+1 FROM watchlist_items WHERE user_id=?),0),?
         WHERE changes()>0 OR EXISTS(SELECT 1 FROM instruments WHERE id=?) ON CONFLICT(user_id,instrument_id) DO NOTHING`)
         .bind(crypto.randomUUID(), user.id, instrumentId, user.id, Date.now(), instrumentId),
     ]);
-    await auditLog(request,"watchlist.added","instrument",instrumentId,user.id).catch(()=>undefined);
+    await auditLog(request,"watchlist.added","instrument",instrumentId,user.id,{market:body.market,exchange}).catch(()=>undefined);
     return Response.json({ok:true},{status:201});
   } catch (error) { return apiError(error); }
 }

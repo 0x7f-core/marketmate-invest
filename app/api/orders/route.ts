@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
+import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
+import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
+import { getTradingQuote, isExecutableTradingQuote } from "@/lib/server/trading-quote";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 type OrderBody = {
@@ -9,6 +12,12 @@ type OrderBody = {
   name?: string; exchange?: string; side?: "buy" | "sell"; orderType?: "market" | "limit";
   quantity?: number; limitPrice?: number;
 };
+
+const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function isQuoteUnavailable(error: unknown) {
+  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
+}
 
 export async function GET(request: Request) {
   try {
@@ -46,21 +55,30 @@ export async function POST(request: Request) {
     assertSameOrigin(request);
     await enforceRateLimit(request, "order_create", 30, 60_000, user.id);
     const body = await request.json() as OrderBody;
-    if (!body.participantId || !body.clientOrderId || !body.market || !body.symbol || !body.name ||
+    const participantId = typeof body.participantId === "string" ? body.participantId.trim() : "";
+    const clientOrderId = typeof body.clientOrderId === "string" ? body.clientOrderId.trim() : "";
+    const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const exchange = typeof body.exchange === "string" ? body.exchange.trim() : body.exchange === undefined ? undefined : "";
+    if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !name || name.length > 80 ||
+        (exchange !== undefined && (!exchange || exchange.length > 40 || /[\u0000-\u001F\u007F]/.test(exchange))) ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
         !["market", "limit"].includes(body.orderType ?? "") || !Number.isFinite(body.quantity) || Number(body.quantity) <= 0 || Number(body.quantity) > 1_000_000 ||
         (body.orderType === "limit" && (!Number.isFinite(body.limitPrice) || Number(body.limitPrice) <= 0))) {
       return Response.json({ error: "주문값을 확인해주세요." }, { status: 400 });
     }
+    const symbol = normalizeNaverMarketSymbol(body.market, rawSymbol);
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+
     const participant = await env.DB!.prepare(
       `SELECT p.id,p.cash_krw AS cashKrw,c.status,c.starts_at AS startsAt,c.ends_at AS endsAt
        FROM participants p JOIN competitions c ON c.id=p.competition_id
        WHERE p.id=? AND p.user_id=?`
-    ).bind(body.participantId, user.id).first<{id:string;cashKrw:number;status:string;startsAt:number;endsAt:number}>();
+    ).bind(participantId, user.id).first<{id:string;cashKrw:number;status:string;startsAt:number;endsAt:number}>();
     if (!participant) throw new Error("FORBIDDEN");
     const duplicate = await env.DB!.prepare(
       "SELECT id,status,filled_quantity_micros AS filledQuantityMicros,updated_at AS updatedAt FROM orders WHERE participant_id=? AND client_order_id=?"
-    ).bind(body.participantId, body.clientOrderId).first();
+    ).bind(participantId, clientOrderId).first();
     if (duplicate) return Response.json({ order: duplicate, duplicate: true });
     const now = Date.now();
     if (participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) {
@@ -68,11 +86,11 @@ export async function POST(request: Request) {
     }
     const marketSession = await getCheckedMarketSession(body.market);
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
-    const quote = await getLiveQuote(body.market, body.symbol.toUpperCase(), body.exchange);
+    const quote = await getTradingQuote(body.market, symbol, exchange, marketSession);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
-    if (Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
+    if (!isExecutableTradingQuote(quote, now)) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
-    if (!Number.isFinite(fxRate) || fxRate <= 0) return Response.json({ error: "한국투자증권 환율을 확인할 수 없어 미국주식 주문을 중단했습니다." }, { status: 503 });
+    if (!Number.isFinite(fxRate) || fxRate <= 0) return Response.json({ error: "네이버증권 환율을 확인할 수 없어 미국주식 주문을 중단했습니다." }, { status: 503 });
 
     const quantityMicros = Math.round(Number(body.quantity) * 1_000_000);
     const nativePriceMicros = Math.round(quote.price * 1_000_000);
@@ -81,27 +99,28 @@ export async function POST(request: Request) {
     const tradeValueKrw = Number((BigInt(quantityMicros) * BigInt(priceKrwMicros) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000));
     if (tradeValueKrw <= 0 || quantityMicros <= 0) return Response.json({ error: "최소 주문금액을 확인해주세요." }, { status: 400 });
 
-    const instrumentId = `${body.market}:${body.symbol.toUpperCase()}`;
+    const instrumentId = `${body.market}:${symbol}`;
     const orderId = crypto.randomUUID();
     const fillId = crypto.randomUUID();
     const positionId = crypto.randomUUID();
     const isBuy = body.side === "buy";
     const limitPriceMicros = body.orderType === "limit" ? Math.round(Number(body.limitPrice) * 1_000_000) : null;
     const marketable = body.orderType === "market" || (isBuy ? nativePriceMicros <= Number(limitPriceMicros) : nativePriceMicros >= Number(limitPriceMicros));
+    const activeExchange = quote.venue ?? exchange ?? body.market;
 
     await env.DB!.prepare(
       "INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,exchange=excluded.exchange,is_active=1"
-    ).bind(instrumentId, body.market, body.symbol.toUpperCase(), body.name.slice(0, 80), quote.currency, body.exchange ?? body.market).run();
+    ).bind(instrumentId, body.market, symbol, name, quote.currency, activeExchange).run();
     await persistQuoteSnapshot(quote);
 
     const position = await env.DB!.prepare(
       "SELECT quantity_micros AS quantityMicros,average_price_micros AS averagePriceMicros,realized_pnl_krw AS realizedPnlKrw FROM positions WHERE participant_id=? AND instrument_id=?"
-    ).bind(body.participantId, instrumentId).first<{quantityMicros:number;averagePriceMicros:number;realizedPnlKrw:number}>();
+    ).bind(participantId, instrumentId).first<{quantityMicros:number;averagePriceMicros:number;realizedPnlKrw:number}>();
     const reserved = await env.DB!.prepare(`SELECT
       COALESCE(SUM(CASE WHEN side='buy' THEN (quantity_micros/1000000.0)*(limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0) ELSE 0 END),0) AS cashKrw,
       COALESCE(SUM(CASE WHEN o.side='sell' AND o.instrument_id=? THEN o.quantity_micros ELSE 0 END),0) AS sellQuantityMicros
       FROM orders o LEFT JOIN quote_snapshots q ON q.instrument_id=o.instrument_id WHERE o.participant_id=? AND o.status='pending'`)
-      .bind(instrumentId, body.participantId).first<{cashKrw:number;sellQuantityMicros:number}>();
+      .bind(instrumentId, participantId).first<{cashKrw:number;sellQuantityMicros:number}>();
     const orderCheckValueKrw = body.orderType === "limit"
       ? Number((BigInt(quantityMicros) * BigInt(Math.round(Number(body.limitPrice) * fxRate * 1_000_000)) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000))
       : tradeValueKrw;
@@ -110,9 +129,9 @@ export async function POST(request: Request) {
 
     if (!marketable) {
       await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
-      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice }).catch(() => undefined);
-      return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice } }, { status: 201 });
+        VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
+      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange }).catch(() => undefined);
+      return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange } }, { status: 201 });
     }
 
     const expectedCash = participant.cashKrw;
@@ -129,16 +148,16 @@ export async function POST(request: Request) {
     const ledgerAmount = isBuy ? -tradeValueKrw : tradeValueKrw;
 
     const statements = [
-      env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, body.participantId, expectedCash),
+      env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, participantId, expectedCash),
       env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, body.orderType, quantityMicros, limitPriceMicros, quantityMicros, "filled", null, now, now),
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, body.orderType, quantityMicros, limitPriceMicros, quantityMicros, "filled", null, now, now),
       env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
-        SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, body.participantId, instrumentId, body.side, quantityMicros, nativePriceMicros, fxRateMicros, 0, now, orderId),
+        SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, participantId, instrumentId, body.side, quantityMicros, nativePriceMicros, fxRateMicros, 0, now, orderId),
       env.DB!.prepare(`INSERT INTO positions (id,participant_id,instrument_id,quantity_micros,average_price_micros,realized_pnl_krw,updated_at)
         SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)
-        ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`).bind(positionId, body.participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
+        ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`).bind(positionId, participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
       env.DB!.prepare(`INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at)
-        SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), body.participantId, body.side, ledgerAmount, fillId, nextCash, now, fillId),
+        SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), participantId, body.side, ledgerAmount, fillId, nextCash, now, fillId),
       env.DB!.prepare(`INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
         SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)
         ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros,source=excluded.source,source_timestamp=excluded.source_timestamp,received_at=excluded.received_at`)
@@ -146,11 +165,11 @@ export async function POST(request: Request) {
     ];
     const result = await env.DB!.batch(statements);
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
-    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, orderType: body.orderType, quantity: body.quantity }).catch(() => undefined);
-    return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
+    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange }).catch(() => undefined);
+    return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, exchange: activeExchange, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && ["KIS_NOT_CONFIGURED", "KIS_AUTH_FAILED", "KIS_AUTH_BUSY", "KIS_QUOTE_FAILED", "UPBIT_QUOTE_FAILED"].includes(error.message)) {
-      return Response.json({ error: "실시간 시세 제공자에 연결할 수 없어 주문을 중단했습니다." }, { status: 503 });
+    if (isQuoteUnavailable(error)) {
+      return Response.json({ error: "네이버증권 실시간 시세를 확인할 수 없어 주문을 중단했습니다." }, { status: 503, headers: { "retry-after": "30" } });
     }
     return apiError(error);
   }

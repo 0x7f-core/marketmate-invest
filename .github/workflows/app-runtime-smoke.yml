@@ -1,0 +1,86 @@
+name: App runtime smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - refactor/naver-market-data
+    paths:
+      - app/api/**
+      - lib/server/**
+      - db/**
+      - drizzle/**
+      - scripts/validate-app-runtime.mjs
+      - vite.config.ts
+      - .github/workflows/app-runtime-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-runtime-smoke
+  cancel-in-progress: true
+
+jobs:
+  app-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Worker
+        run: pnpm run build
+
+      - name: Apply local D1 migrations
+        run: |
+          mkdir -p .wrangler/state
+          for file in $(find drizzle -maxdepth 1 -name '*.sql' -type f | sort); do
+            echo "Applying $file"
+            pnpm exec wrangler d1 execute site-creator-d1 \
+              --local \
+              --persist-to .wrangler/state \
+              --config dist/server/wrangler.json \
+              --file "$file"
+          done
+
+      - name: Start local Worker
+        run: |
+          node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev \
+            --config dist/server/wrangler.json \
+            --local \
+            --persist-to .wrangler/state \
+            --ip 127.0.0.1 \
+            --port 8787 \
+            --inspector-port 0 > /tmp/marketmate-worker.log 2>&1 &
+          echo $! > /tmp/marketmate-worker.pid
+
+      - name: Run app-level smoke
+        run: node scripts/validate-app-runtime.mjs
+
+      - name: Print Worker log on failure
+        if: failure()
+        run: cat /tmp/marketmate-worker.log || true
+
+      - name: Stop local Worker
+        if: always()
+        run: |
+          if [ -f /tmp/marketmate-worker.pid ]; then
+            kill "$(cat /tmp/marketmate-worker.pid)" || true
+          fi

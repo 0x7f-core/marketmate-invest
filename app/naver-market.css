@@ -1,0 +1,23 @@
+/* Unified Naver-style Lightweight Charts surface. */
+.naver-light-chart{background:#fff;border:0;overflow:hidden;min-width:0;width:100%}
+.naver-light-chart-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 2px 8px;border-bottom:1px solid #f1f3f5}
+.naver-light-chart-toolbar>div:first-child{display:flex;align-items:baseline;gap:8px}
+.naver-light-chart-toolbar b{font-size:15px;color:#191f28}
+.naver-light-chart-toolbar small{font-size:11px;color:#8b95a1}
+.naver-light-chart-ranges{display:flex;gap:2px;padding:2px;background:#f4f6f8;border-radius:8px}
+.naver-light-chart-ranges button{border:0;background:transparent;color:#6b7684;font-size:12px;font-weight:600;padding:6px 9px;border-radius:6px;cursor:pointer}
+.naver-light-chart-ranges button.active{background:#fff;color:#03c75a;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.naver-light-chart-stage{position:relative;height:410px;min-height:300px;background:#fff}
+.naver-light-chart-canvas{width:100%;height:100%}
+.naver-light-chart-state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;background:rgba(255,255,255,.9);color:#8b95a1;font-size:13px;z-index:2}
+.naver-light-chart-state.error b{color:#4e5968;font-size:14px}
+.naver-light-chart-state.error span{max-width:80%;text-align:center}
+.naver-light-chart-state.error button{border:1px solid #d1d6db;background:#fff;color:#4e5968;border-radius:8px;padding:7px 11px;cursor:pointer}
+.naver-light-chart-attribution{display:block;width:max-content;max-width:100%;margin:4px 2px 0;color:#b0b8c1;font-size:9px;line-height:1.4;text-decoration:none}
+.naver-light-chart-attribution:hover{color:#8b95a1;text-decoration:underline}
+@media (max-width:767px){
+  .naver-light-chart-toolbar{padding:9px 0 7px}
+  .naver-light-chart-stage{height:330px;min-height:270px}
+  .naver-light-chart-ranges button{padding:6px 8px;font-size:11px}
+  .naver-light-chart-attribution{font-size:8px}
+}

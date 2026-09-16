@@ -1,100 +1,138 @@
-import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
-import { kisGetRoot } from "@/lib/server/market-data";
+import { buildNaverPath, isNaverStockUnavailable, naverJson } from "@/lib/server/naver-stock";
+import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import { enforceRateLimit } from "@/lib/server/safety";
 
 type NewsItem = { title: string; link: string; publishedAt: number; source: string };
-const memoryCache = new Map<string, { items: NewsItem[]; expiresAt: number }>();
 
-function sortNews(items: NewsItem[]) {
-  return items.filter(item => item.title && Number.isFinite(item.publishedAt))
-    .sort((a, b) => b.publishedAt - a.publishedAt)
-    .filter((item, index, all) => all.findIndex(other => other.title === item.title) === index)
-    .slice(0, 20);
-}
+const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
 
-function cachedItems(value?: string) {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? sortNews(parsed as NewsItem[]) : [];
-  } catch { return []; }
-}
-
-function decodeXml(value: string) {
-  return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]+>/g, "")
-    .replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#39;", "'")
-    .replaceAll("&lt;", "<").replaceAll("&gt;", ">").trim();
-}
-
-function stringValue(row: Record<string, unknown>, keys: string[]) {
+function stringValue(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
-    const value = String(row[key] ?? "").trim();
-    if (value) return value;
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return "";
 }
 
-function kisTimestamp(row: Record<string, unknown>, index: number) {
-  const date = stringValue(row, ["data_dt", "news_dt", "busi_dt", "date", "DATA_DT"]).replace(/\D/g, "");
-  const time = stringValue(row, ["data_tm", "news_tm", "time", "DATA_TM"]).replace(/\D/g, "").padEnd(6, "0");
-  if (date.length === 8) {
-    const parsed = Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}+09:00`);
-    if (Number.isFinite(parsed)) return parsed;
+function collectRows(payload: unknown) {
+  if (Array.isArray(payload)) return payload.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  for (const key of ["items", "contents", "news", "articles", "list", "data"]) {
+    const value = record[key];
+    if (Array.isArray(value)) return value.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
   }
-  return Date.now() - index;
+  return [];
 }
 
-function mapKisRows(rows: Array<Record<string, unknown>>) {
-  return sortNews(rows.map((row, index) => {
-    const title = stringValue(row, ["hts_pbnt_titl_cntt", "titl_cntt", "news_titl", "title", "HEADLINE", "hts_pbnt_cntt"]);
-    const provider = stringValue(row, ["news_ofer_entp_name", "news_ofer_entp_code", "source", "SOURCE"]);
+function collectRecords(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
+  if (depth > 5 || output.length >= 200 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) collectRecords(item, depth + 1, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some(key => /(?:reuters|ticker|symbol|code|name)/i.test(key))) output.push(record);
+  for (const child of Object.values(record)) if (child && typeof child === "object") collectRecords(child, depth + 1, output);
+  return output;
+}
+
+function publishedAt(record: Record<string, unknown>) {
+  for (const key of ["publishedAt", "publishDateTime", "releasedAt", "datetime", "dateTime", "createdAt", "date"]) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value < 1_000_000_000_000 ? value * 1_000 : value;
+    if (typeof value === "string") {
+      const parsed = Date.parse(value);
+      if (Number.isFinite(parsed)) return parsed;
+      const digits = value.replace(/\D/g, "");
+      if (digits.length >= 8) {
+        const time = digits.slice(8, 14).padEnd(6, "0");
+        const normalized = Date.parse(`${digits.slice(0,4)}-${digits.slice(4,6)}-${digits.slice(6,8)}T${time.slice(0,2)}:${time.slice(2,4)}:${time.slice(4,6)}+09:00`);
+        if (Number.isFinite(normalized)) return normalized;
+      }
+    }
+  }
+  return 0;
+}
+
+function articleLink(record: Record<string, unknown>, title: string) {
+  const raw = stringValue(record, ["url", "link", "href", "articleUrl", "newsUrl"]);
+  if (raw.startsWith("https://")) return raw;
+  if (raw.startsWith("/")) return `https://stock.naver.com${raw}`;
+  const oid = stringValue(record, ["oid", "officeId"]);
+  const aid = stringValue(record, ["aid", "articleId", "id"]);
+  if (oid && aid && /^\d+$/.test(oid) && /^[A-Za-z0-9_-]+$/.test(aid)) return `https://n.news.naver.com/mnews/article/${oid}/${aid}`;
+  return `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(title)}`;
+}
+
+function normalizeNews(payload: unknown) {
+  const items = collectRows(payload).map((record): NewsItem | null => {
+    const title = stringValue(record, ["title", "articleTitle", "headline", "newsTitle", "subject"]);
+    if (!title) return null;
     return {
       title,
-      link: `https://search.naver.com/search.naver?query=${encodeURIComponent(title)}`,
-      publishedAt: kisTimestamp(row, index),
-      source: provider ? `한국투자 · ${provider}` : "한국투자증권 뉴스",
+      link: articleLink(record, title),
+      publishedAt: publishedAt(record),
+      source: stringValue(record, ["officeName", "pressName", "source", "providerName", "mediaName"]) || "네이버증권",
     };
-  }));
+  }).filter((item): item is NewsItem => Boolean(item));
+  return items.sort((a, b) => b.publishedAt - a.publishedAt)
+    .filter((item, index, all) => all.findIndex(other => other.title === item.title) === index)
+    .slice(0, 20);
 }
 
-function currentKisDateTime() {
-  const now = new Date();
-  const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(now).replaceAll("-", "");
-  const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
-    .format(now).replaceAll(":", "");
-  return { date, time };
+function codeKey(value: string) {
+  return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 
-async function fetchKisNews(market: "KR" | "US", symbol: string, exchange: string) {
-  const { date, time } = currentKisDateTime();
-  if (market === "KR") {
-    const root = await kisGetRoot("/uapi/domestic-stock/v1/quotations/news-title", "FHKST01011800", {
-      FID_NEWS_OFER_ENTP_CODE: "0", FID_COND_MRKT_CLS_CODE: "00", FID_INPUT_ISCD: symbol,
-      FID_TITL_CNTT: "", FID_INPUT_DATE_1: date, FID_INPUT_HOUR_1: time,
-      FID_RANK_SORT_CLS_CODE: "01", FID_INPUT_SRNO: "1",
-    });
-    return mapKisRows((Array.isArray(root.output) ? root.output : [root.output]) as Array<Record<string, unknown>>);
+async function resolveReutersCode(symbol: string, exchange: string) {
+  if (symbol.includes(".") || looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
+  try {
+    const query = naverAutocompleteQueryForForeignCode(symbol);
+    const result = await naverJson<unknown>(
+      buildNaverPath("/api/autocomplete/search/autoComplete", { query, target: "stock" }),
+      { ttlMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 },
+    );
+    const wanted = codeKey(query);
+    const matches = collectRecords(result.data).map(record => ({
+      reuters: stringValue(record, ["reutersCode", "reuterscode"]),
+      ticker: stringValue(record, ["ticker", "symbol", "itemCode", "stockCode", "code"]),
+      nation: stringValue(record, ["nationType", "nation", "country", "marketType"]),
+    })).filter(item => item.reuters.length > 0);
+    const found = matches.find(item => codeKey(item.ticker) === wanted || codeKey(item.reuters.split(".")[0]) === wanted)
+      ?? matches.find(item => /USA|US|미국/i.test(item.nation))
+      ?? matches[0];
+    if (found?.reuters) return normalizeNaverReutersCode(found.reuters);
+  } catch {
+    // Use the known exchange suffix only as a Naver Reuters identifier fallback.
   }
-  const root = await kisGetRoot("/uapi/overseas-price/v1/quotations/news-title", "HHPSTH60100C1", {
-    INFO_GB: "", CLASS_CD: "", NATION_CD: "US", EXCHANGE_CD: exchange, SYMB: symbol.replace("_", "."),
-    DATA_DT: date, DATA_TM: time, CTS: "",
-  });
-  return mapKisRows((Array.isArray(root.outblock1) ? root.outblock1 : [root.outblock1]) as Array<Record<string, unknown>>);
+  const venue = exchange.toUpperCase();
+  const suffix = venue.includes("NYS") || venue.includes("NYSE") ? ".N" : venue.includes("AMS") || venue.includes("AMEX") ? ".A" : ".O";
+  return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
-async function fetchGoogleNews(query: string) {
-  const response = await fetch(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=ko&gl=KR&ceid=KR:ko`, {
-    signal: AbortSignal.timeout(2_500), headers: { "user-agent": "MarketMate/1.0" },
-  });
-  if (!response.ok) throw new Error("NEWS_UNAVAILABLE");
-  const xml = await response.text();
-  return sortNews(Array.from(xml.matchAll(/<item>([\s\S]*?)<\/item>/g)).slice(0, 20).map(match => {
-    const item = match[1];
-    const read = (tag: string) => decodeXml(item.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`))?.[1] ?? "");
-    return { title: read("title"), link: read("link"), publishedAt: Date.parse(read("pubDate")) || Date.now(), source: read("source") || "Google 뉴스" };
-  }).filter(item => item.link.startsWith("https://")));
+async function fetchNaverNews(market: string, symbol: string, name: string, exchange: string) {
+  if (market === "CRYPTO") {
+    const ticker = symbol.replace(/^KRW-/, "").split("_")[0] || "BTC";
+    return naverJson<unknown>(buildNaverPath(`/api/coin/globalNews/${encodeURIComponent(ticker)}`, { pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+  }
+  if (market === "US") {
+    if (symbol) {
+      const reutersCode = await resolveReutersCode(symbol, exchange);
+      return naverJson<unknown>(buildNaverPath("/api/foreign/worldStock/list", { reutersCode, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+    }
+    return naverJson<unknown>(buildNaverPath("/api/foreign/news/worldNews", { page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+  }
+  if (symbol) {
+    return naverJson<unknown>(buildNaverPath("/api/domestic/detail/news", { itemCode: symbol, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+  }
+  if (name) {
+    return naverJson<unknown>(buildNaverPath("/api/domestic/news/search", { query: name, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+  }
+  return naverJson<unknown>(buildNaverPath("/api/domestic/news/list", { category: "MAINNEWS", page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
 }
 
 export async function GET(request: Request) {
@@ -103,38 +141,22 @@ export async function GET(request: Request) {
     await enforceRateLimit(request, "news", 40, 5 * 60_000, user.id);
     const url = new URL(request.url);
     const market = url.searchParams.get("market") ?? "KR";
-    const name = (url.searchParams.get("name") ?? "").slice(0, 50);
-    const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase().slice(0, 20);
-    const exchange = (url.searchParams.get("exchange") ?? "").toUpperCase().slice(0, 10);
+    const rawSymbol = (url.searchParams.get("symbol") ?? "").trim();
+    const name = (url.searchParams.get("name") ?? "").normalize("NFKC").trim();
+    const exchange = (url.searchParams.get("exchange") ?? "").trim();
     if (!["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "시장을 확인해주세요." }, { status: 400 });
-    const query = name ? `${name} ${market === "CRYPTO" ? "암호화폐" : "주가"}` : market === "US" ? "미국 증시" : market === "CRYPTO" ? "가상자산 시장" : "국내 증시";
-    const key = `v2:${market}:${symbol || name.normalize("NFKC").toLocaleLowerCase("ko-KR") || "market"}`;
-    const inMemory = memoryCache.get(key);
-    if (inMemory && inMemory.expiresAt > Date.now()) return Response.json({ items: inMemory.items }, { headers: { "cache-control": "private, max-age=60" } });
-    const stored = await env.DB!.prepare("SELECT items,updated_at AS updatedAt FROM news_cache WHERE key=?").bind(key).first<{ items: string; updatedAt: number }>();
-    if (stored && stored.updatedAt > Date.now() - 3 * 60_000) {
-      const items = cachedItems(stored.items);
-      memoryCache.set(key, { items, expiresAt: Date.now() + 90_000 });
-      return Response.json({ items }, { headers: { "cache-control": "private, max-age=60" } });
+    if (rawSymbol.length > 32 || name.length > 80 || (exchange && !EXCHANGE.test(exchange))) {
+      return Response.json({ error: "뉴스 요청값을 확인해주세요." }, { status: 400 });
     }
-    let items: NewsItem[] = [];
-    try {
-      if ((market === "KR" || market === "US") && symbol) items = await fetchKisNews(market, symbol, exchange);
-      if (!items.length) items = await fetchGoogleNews(query);
-    } catch {
-      try { items = await fetchGoogleNews(query); }
-      catch {
-        if (stored) return Response.json({ items: cachedItems(stored.items), stale: true }, { headers: { "cache-control": "private, max-age=30" } });
-        throw new Error("NEWS_UNAVAILABLE");
-      }
-    }
-    items = sortNews(items);
-    memoryCache.set(key, { items, expiresAt: Date.now() + 90_000 });
-    await env.DB!.prepare(`INSERT INTO news_cache (key,items,updated_at) VALUES (?,?,?)
-      ON CONFLICT(key) DO UPDATE SET items=excluded.items,updated_at=excluded.updated_at`).bind(key, JSON.stringify(items), Date.now()).run();
-    return Response.json({ items }, { headers: { "cache-control": "private, max-age=60" } });
+    const symbol = rawSymbol ? normalizeNaverMarketSymbol(market as "KR" | "US" | "CRYPTO", rawSymbol) : "";
+    if (symbol && !/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+    const result = await fetchNaverNews(market, symbol, name, exchange);
+    const items = normalizeNews(result.data);
+    return Response.json({ items, source: "NAVER", stale: result.stale }, { headers: { "cache-control": "private, max-age=60" } });
   } catch (error) {
-    if (error instanceof Error && error.message === "NEWS_UNAVAILABLE") return Response.json({ items: [], error: "뉴스를 불러오지 못했습니다." }, { status: 503, headers: { "retry-after": "30" } });
+    if (isNaverStockUnavailable(error)) {
+      return Response.json({ items: [], source: "NAVER", error: "네이버증권 뉴스를 불러오지 못했습니다." }, { status: 503, headers: { "retry-after": "30" } });
+    }
     return apiError(error);
   }
 }
