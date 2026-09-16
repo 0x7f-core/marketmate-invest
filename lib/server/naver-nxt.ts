@@ -52,9 +52,11 @@ function parseKoreaTimestamp(value: unknown) {
 }
 
 function rowTimestamp(row: Row) {
-  const koreaTradedAt = parseKoreaTimestamp(row.koreaTradedAt);
-  if (koreaTradedAt > 0) return koreaTradedAt;
-  for (const key of ["localTradedAt", "tradeDateTime", "tradedAt", "tradeBaseAt", "tradeTimestamp"]) {
+  for (const key of ["koreaTradedAt", "localTradedAt"]) {
+    const parsed = parseKoreaTimestamp(row[key]);
+    if (parsed > 0) return parsed;
+  }
+  for (const key of ["tradeDateTime", "tradedAt", "tradeBaseAt", "tradeTimestamp"]) {
     const parsed = parseTimestamp(row[key]);
     if (parsed > 0) return parsed;
   }
