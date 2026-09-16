@@ -209,6 +209,18 @@ const tests = [
     required: false,
   },
   {
+    name: "autocomplete QQQ logo diagnostic",
+    path: "/api/autocomplete/search/autoComplete?query=qqq&target=stock",
+    check: autocompleteDiagnostic("QQQ"),
+    required: false,
+  },
+  {
+    name: "autocomplete GEV logo diagnostic",
+    path: "/api/autocomplete/search/autoComplete?query=GEV&target=stock",
+    check: autocompleteDiagnostic("GEV"),
+    required: false,
+  },
+  {
     name: "autocomplete Samsung name diagnostic",
     path: `/api/autocomplete/search/autoComplete?query=${encodeURIComponent("삼성전자")}&target=stock`,
     check: autocompleteDiagnostic("삼성전자"),
