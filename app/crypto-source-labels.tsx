@@ -43,6 +43,24 @@ function patchHorizontalFx(fx: FxQuote | null) {
   });
 }
 
+async function copyInviteCode(code: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(code);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = code;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("copy failed");
+}
+
 function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
   const overview = document.querySelector<HTMLElement>(".contest-overview");
   if (!overview) return;
@@ -56,19 +74,61 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
   const competition = (selectedId ? competitions.find(item => item.id === selectedId) : undefined)
     ?? competitions.find(item => item.name === title);
 
-  let row = host.querySelector<HTMLElement>(".competition-invite-code");
+  let row = host.querySelector(".competition-invite-code");
   if (!competition?.inviteCode) {
     row?.remove();
     return;
   }
 
-  if (!row) {
+  if (!(row instanceof HTMLElement)) {
     row = document.createElement("p");
     row.className = "competition-invite-code";
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "8px";
     host.appendChild(row);
   }
 
-  row.textContent = `참가 코드 ${competition.inviteCode}`;
+  let value = row.querySelector(".competition-invite-code-value");
+  if (!(value instanceof HTMLElement)) {
+    value = document.createElement("span");
+    value.className = "competition-invite-code-value";
+    row.appendChild(value);
+  }
+  value.textContent = `참가 코드 ${competition.inviteCode}`;
+
+  let copyButton = row.querySelector(".competition-invite-copy");
+  if (!(copyButton instanceof HTMLButtonElement)) {
+    copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "competition-invite-copy";
+    copyButton.textContent = "복사";
+    copyButton.style.border = "1px solid #dfe3e6";
+    copyButton.style.background = "#fff";
+    copyButton.style.borderRadius = "6px";
+    copyButton.style.padding = "4px 8px";
+    copyButton.style.fontSize = "12px";
+    copyButton.style.color = "#59636c";
+    row.appendChild(copyButton);
+  }
+
+  copyButton.dataset.inviteCode = competition.inviteCode;
+  copyButton.onclick = async () => {
+    const code = copyButton instanceof HTMLButtonElement ? copyButton.dataset.inviteCode ?? "" : "";
+    if (!code) return;
+    try {
+      await copyInviteCode(code);
+      copyButton.textContent = "복사됨";
+      window.setTimeout(() => {
+        if (copyButton instanceof HTMLButtonElement) copyButton.textContent = "복사";
+      }, 1200);
+    } catch {
+      copyButton.textContent = "복사 실패";
+      window.setTimeout(() => {
+        if (copyButton instanceof HTMLButtonElement) copyButton.textContent = "복사";
+      }, 1200);
+    }
+  };
 }
 
 function patchCryptoSourceLabels(fx: FxQuote | null) {
