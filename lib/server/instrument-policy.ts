@@ -51,3 +51,9 @@ export function hasUnsupportedForeignReutersSuffix(symbol: string) {
   const match = clean.match(/\.([A-Z]{1,4})$/);
   return Boolean(match && FOREIGN_REUTERS_SUFFIXES.has(match[1]));
 }
+
+export function isSupportedUsSymbolInput(symbol: string) {
+  const clean = symbol.normalize("NFKC").trim();
+  if (!clean || /^\d/.test(clean)) return false;
+  return !hasUnsupportedForeignReutersSuffix(clean);
+}
