@@ -27,6 +27,35 @@ const KINDS = new Set<MarketInsightKind>([
   "indicators",
 ]);
 
+const CURSOR = /^[A-Za-z0-9._~+=:/-]{1,512}$/;
+const DOMESTIC_RANKING_CATEGORIES = new Set(["industries", "themes", "groups"]);
+const DOMESTIC_RANKING_SORTS = new Set(["changeRate", "marketCap"]);
+const FOREIGN_FINANCE_SECTIONS = new Set(["summary", "finance", "ratios", "balance", "income", "cash"]);
+const FINANCE_PERIODS = new Set(["annual", "quarter"]);
+const CRYPTO_SORTS = new Set(["top", "up", "down", "marketValue"]);
+
+function invalidOption(kind: MarketInsightKind, url: URL) {
+  const cursor = url.searchParams.get("cursor");
+  if (cursor !== null && !CURSOR.test(cursor)) return true;
+
+  const category = url.searchParams.get("category");
+  const sort = url.searchParams.get("sort");
+  const section = url.searchParams.get("section");
+  const period = url.searchParams.get("period");
+
+  if (kind === "domestic-ranking") {
+    if (category !== null && !DOMESTIC_RANKING_CATEGORIES.has(category)) return true;
+    if (sort !== null && !DOMESTIC_RANKING_SORTS.has(sort)) return true;
+  }
+  if (kind === "foreign-finance") {
+    if (section !== null && !FOREIGN_FINANCE_SECTIONS.has(section)) return true;
+    if (period !== null && !FINANCE_PERIODS.has(period)) return true;
+  }
+  if (kind === "foreign-sector-ranking" && sort !== null && !DOMESTIC_RANKING_SORTS.has(sort)) return true;
+  if (kind === "crypto-ranking" && sort !== null && !CRYPTO_SORTS.has(sort)) return true;
+  return false;
+}
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
@@ -42,6 +71,9 @@ export async function GET(request: Request) {
     const size = sizeRaw === null ? undefined : Number(sizeRaw);
     if (size !== undefined && (!Number.isFinite(size) || size < 1 || size > 100)) {
       return Response.json({ error: "size는 1~100 사이여야 합니다." }, { status: 400 });
+    }
+    if (invalidOption(kind, url)) {
+      return Response.json({ error: "요청한 시장 데이터의 옵션을 확인해주세요." }, { status: 400 });
     }
 
     const result = await getNaverMarketInsight(kind, {
