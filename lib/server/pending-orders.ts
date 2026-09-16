@@ -1,11 +1,13 @@
 import { env } from "cloudflare:workers";
 import type { LiveQuote } from "@/lib/server/market-data";
-import { getMarketSession } from "@/lib/server/market-hours";
+import { getCheckedMarketSession } from "@/lib/server/market-hours";
 
 type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; quantityMicros: number; limitPriceMicros: number };
 
 export async function matchPendingOrders(quote: LiveQuote) {
-  if (!env.DB || !getMarketSession(quote.market).isOpen) return;
+  if (!env.DB) return;
+  const session = await getCheckedMarketSession(quote.market);
+  if (!session.isOpen) return;
   const instrumentId = `${quote.market}:${quote.symbol}`;
   const nativePriceMicros = Math.round(quote.price * 1_000_000);
   const rows = await env.DB.prepare(`SELECT id,participant_id AS participantId,side,quantity_micros AS quantityMicros,limit_price_micros AS limitPriceMicros
