@@ -11,6 +11,11 @@ export function normalizeNaverReutersCode(code: string) {
   return `${base.toUpperCase()}_${rest.slice(0, dot)}.${rest.slice(dot + 1).toUpperCase()}`;
 }
 
+export function normalizeNaverMarketSymbol(market: "KR" | "US" | "CRYPTO", symbol: string) {
+  const clean = symbol.trim();
+  return market === "US" ? normalizeNaverReutersCode(clean) : clean.toUpperCase();
+}
+
 export function naverAutocompleteQueryForForeignCode(code: string) {
   const clean = code.trim();
   return LOWERCASE_SUFFIX.test(clean) ? clean : clean.replaceAll("_", ".");
