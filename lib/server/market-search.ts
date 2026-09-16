@@ -65,8 +65,11 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const fqnf = text(record, ["fqnfTicker", "fqnf_ticker"]);
   let symbol = text(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
 
-  if (market === "US" && reuters && looksLikeCaseSensitiveReutersCode(reuters)) symbol = reuters;
-  else if (market === "US" && !symbol && reuters) symbol = reuters;
+  // For US instruments the Reuters code is Naver's canonical identity and logo
+  // key (for example AAPL.O / QQQ.O). The prior case-sensitive heuristic kept
+  // many autocomplete rows as plain AAPL/QQQ, which broke both quote/logo
+  // resolution and persisted stale ticker-only rows.
+  if (market === "US" && reuters) symbol = reuters;
   if (market === "CRYPTO") symbol = normalizeNaverMarketSymbol("CRYPTO", symbol || fqnf);
   if (!name || !symbol) return null;
 
