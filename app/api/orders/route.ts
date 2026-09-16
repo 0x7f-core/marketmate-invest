@@ -3,6 +3,7 @@ import { apiError, requireUser } from "@/lib/server/auth";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
+import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote } from "@/lib/server/trading-quote";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
@@ -58,6 +59,9 @@ export async function POST(request: Request) {
         (body.orderType === "limit" && (!Number.isFinite(body.limitPrice) || Number(body.limitPrice) <= 0))) {
       return Response.json({ error: "주문값을 확인해주세요." }, { status: 400 });
     }
+    const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+
     const participant = await env.DB!.prepare(
       `SELECT p.id,p.cash_krw AS cashKrw,c.status,c.starts_at AS startsAt,c.ends_at AS endsAt
        FROM participants p JOIN competitions c ON c.id=p.competition_id
@@ -74,7 +78,7 @@ export async function POST(request: Request) {
     }
     const marketSession = await getCheckedMarketSession(body.market);
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
-    const quote = await getTradingQuote(body.market, body.symbol.toUpperCase(), body.exchange, marketSession);
+    const quote = await getTradingQuote(body.market, symbol, body.exchange, marketSession);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
     if (quote.stale || Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
@@ -87,7 +91,7 @@ export async function POST(request: Request) {
     const tradeValueKrw = Number((BigInt(quantityMicros) * BigInt(priceKrwMicros) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000));
     if (tradeValueKrw <= 0 || quantityMicros <= 0) return Response.json({ error: "최소 주문금액을 확인해주세요." }, { status: 400 });
 
-    const instrumentId = `${body.market}:${body.symbol.toUpperCase()}`;
+    const instrumentId = `${body.market}:${symbol}`;
     const orderId = crypto.randomUUID();
     const fillId = crypto.randomUUID();
     const positionId = crypto.randomUUID();
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
 
     await env.DB!.prepare(
       "INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,exchange=excluded.exchange,is_active=1"
-    ).bind(instrumentId, body.market, body.symbol.toUpperCase(), body.name.slice(0, 80), quote.currency, body.exchange ?? body.market).run();
+    ).bind(instrumentId, body.market, symbol, body.name.slice(0, 80), quote.currency, body.exchange ?? body.market).run();
     await persistQuoteSnapshot(quote);
 
     const position = await env.DB!.prepare(
@@ -117,7 +121,7 @@ export async function POST(request: Request) {
     if (!marketable) {
       await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
         VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, body.clientOrderId, body.participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
-      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice }).catch(() => undefined);
+      await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice }).catch(() => undefined);
       return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice } }, { status: 201 });
     }
 
@@ -152,7 +156,7 @@ export async function POST(request: Request) {
     ];
     const result = await env.DB!.batch(statements);
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
-    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, orderType: body.orderType, quantity: body.quantity }).catch(() => undefined);
+    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity }).catch(() => undefined);
     return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
   } catch (error) {
     if (isQuoteUnavailable(error)) {
