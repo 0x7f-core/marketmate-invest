@@ -3,6 +3,7 @@ import "./globals.css";
 import "./mobile.css";
 import "./naver-market.css";
 import "./naver-parity.css";
+import "./order-closed.css";
 
 // User-facing U.S. tickers hide Reuters venue suffixes in trading-dashboard while canonical API symbols stay unchanged.
 export const metadata: Metadata = {
