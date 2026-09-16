@@ -2,6 +2,7 @@ import { getLiveQuote, type LiveQuote, type Market } from "@/lib/server/market-d
 import { getCheckedMarketSession, type MarketSession } from "@/lib/server/market-hours";
 import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
 import { getNxtLiveQuote } from "@/lib/server/naver-nxt";
+import { getNaverUsOverMarketQuote, isUsExtendedSession } from "@/lib/server/naver-us-overmarket";
 
 export type TradingQuote = LiveQuote & { venue?: "KRX" | "NXT" };
 
@@ -35,6 +36,15 @@ export function isExecutableTradingQuote(quote: TradingQuote, now = Date.now()) 
   return Math.abs(now - sourceTime) <= tradingQuoteFreshnessWindowMs(quote);
 }
 
+function withExchangeRate<T extends TradingQuote>(quote: T, exchangeRate: number): T {
+  return { ...quote, exchangeRate };
+}
+
+function newerQuote(base: TradingQuote, candidate: TradingQuote | null) {
+  if (!candidate) return base;
+  return sourceTimestampMs(candidate) > sourceTimestampMs(base) ? candidate : base;
+}
+
 export async function getTradingQuote(
   market: Market,
   symbol: string,
@@ -42,10 +52,28 @@ export async function getTradingQuote(
   knownSession?: MarketSession,
 ): Promise<TradingQuote> {
   if (market === "US") {
-    const fx = await getNaverUsdKrwRate();
+    const fxPromise = getNaverUsdKrwRate();
+    const regularPromise = getLiveQuote(market, symbol, exchange, 1);
+
+    if (knownSession && isUsExtendedSession(knownSession)) {
+      const [fx, regular, overMarket] = await Promise.all([
+        fxPromise,
+        regularPromise,
+        getNaverUsOverMarketQuote(symbol, exchange, 1, knownSession).catch(() => null),
+      ]);
+      if (fx.stale) throw new Error("NAVER_FX_UNAVAILABLE");
+      const selected = newerQuote(normalizeTradingTimestamp(regular), overMarket ? normalizeTradingTimestamp(overMarket) : null);
+      return withExchangeRate(selected, fx.rate);
+    }
+
+    const sessionPromise = knownSession ? Promise.resolve(knownSession) : getCheckedMarketSession("US");
+    const [fx, regular, session] = await Promise.all([fxPromise, regularPromise, sessionPromise]);
     if (fx.stale) throw new Error("NAVER_FX_UNAVAILABLE");
-    const quote = await getLiveQuote(market, symbol, exchange, fx.rate);
-    return normalizeTradingTimestamp(quote);
+    const regularWithFx = withExchangeRate(normalizeTradingTimestamp(regular), fx.rate);
+    if (!isUsExtendedSession(session)) return regularWithFx;
+
+    const overMarket = await getNaverUsOverMarketQuote(symbol, exchange, fx.rate, session).catch(() => null);
+    return newerQuote(regularWithFx, overMarket ? normalizeTradingTimestamp(overMarket) : null);
   }
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
