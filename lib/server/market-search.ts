@@ -1,4 +1,5 @@
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
+import { normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
 
 function text(record: Record<string, unknown>, keys: string[]) {
@@ -50,9 +51,10 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   }
   if (!name || !symbol) return null;
 
+  const normalizedSymbol = market === "US" ? normalizeNaverReutersCode(symbol) : symbol.toUpperCase();
   const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "nationType"]);
   const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER·UPBIT";
-  return { market, symbol: symbol.toUpperCase(), name, exchange, currency: market === "US" ? "USD" : "KRW" };
+  return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
 
 export async function searchNaverMarket(query: string, market?: Market) {
