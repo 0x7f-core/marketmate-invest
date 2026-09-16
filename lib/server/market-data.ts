@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { buildNaverPath, naverJson, naverPolling } from "@/lib/server/naver-stock";
+import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
 export type Market = "KR" | "US" | "CRYPTO";
 export type LiveQuote = {
@@ -159,35 +160,35 @@ function collectRecords(value: unknown, depth = 0, output: Array<Record<string, 
 const reutersCodeCache = new Map<string, { code: string; expiresAt: number }>();
 
 async function resolveReutersCode(symbol: string, exchange?: string) {
-  if (/^[A-Za-z0-9._-]+\.[A-Za-z]{1,4}$/.test(symbol)) return symbol;
-  const key = symbol.toUpperCase();
+  if (symbol.includes(".") || looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
+  const key = `${symbol}:${(exchange ?? "").toUpperCase()}`;
   const cached = reutersCodeCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.code;
   try {
-    const query = symbol.replaceAll("_", ".");
+    const query = naverAutocompleteQueryForForeignCode(symbol);
     const result = await naverJson<unknown>(buildNaverPath("/api/autocomplete/search/autoComplete", { query, target: "stock" }), { ttlMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 });
     const wanted = normalizeReutersForCompare(query);
     const candidates = collectRecords(result.data).map(record => ({
-      record,
       code: stringValue(record, ["reutersCode", "reuterscode", "symbolCode", "stockCode", "itemCode", "code"]),
       ticker: stringValue(record, ["ticker", "symbol", "stockSymbol", "itemCode", "code"]),
       nation: stringValue(record, ["nationType", "nation", "country", "marketType"]),
-    })).filter(item => item.code.includes("."));
+    })).filter(item => item.code.length > 0);
     const match = candidates.find(item => normalizeReutersForCompare(item.ticker) === wanted || normalizeReutersForCompare(item.code.split(".")[0]) === wanted)
       ?? candidates.find(item => /USA|US|미국/i.test(item.nation))
       ?? candidates[0];
     if (match?.code) {
-      reutersCodeCache.set(key, { code: match.code, expiresAt: Date.now() + 24 * 60 * 60_000 });
-      return match.code;
+      const code = normalizeNaverReutersCode(match.code);
+      reutersCodeCache.set(key, { code, expiresAt: Date.now() + 24 * 60 * 60_000 });
+      return code;
     }
   } catch {
-    // 검색 API가 일시 실패해도 일반적인 거래소 suffix는 보조 식별자로 사용할 수 있다.
+    // 검색 API가 일시 실패해도 네이버 Reuters 코드 규칙 안에서만 보조 식별자를 사용한다.
   }
-  const base = symbol.replaceAll("_", ".");
+  if (looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
   const normalizedExchange = (exchange ?? "").toUpperCase();
   const suffix = normalizedExchange.includes("NYS") || normalizedExchange.includes("NYSE") ? ".N"
     : normalizedExchange.includes("AMS") || normalizedExchange.includes("AMEX") ? ".A" : ".O";
-  return `${base}${suffix}`;
+  return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
 async function usdKrwRate() {
@@ -332,49 +333,6 @@ export async function getChartSeries(market: Market, symbol: string, exchange: s
     .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time)
     .slice(-400);
   return { points, range, stale: result.stale, source: "NAVER" as const };
-}
-
-function marketFromSearchRecord(record: Record<string, unknown>): Market | null {
-  const reuters = stringValue(record, ["reutersCode", "reuterscode"]);
-  const exchange = stringValue(record, ["exchangeType", "exchange", "marketType", "nationType", "nation", "country"]);
-  const fqnf = stringValue(record, ["fqnfTicker", "fqnf_ticker"]);
-  const type = stringValue(record, ["type", "category", "targetType", "assetType"]);
-  if (fqnf || /UPBIT|BITHUMB|COIN|CRYPTO|가상자산/i.test(`${exchange} ${type}`)) return "CRYPTO";
-  if (reuters || /USA|NASDAQ|NYSE|AMEX|미국/i.test(exchange)) return "US";
-  const code = stringValue(record, ["itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
-  if (/^[A-Za-z0-9]{6}$/.test(code) || /KOSPI|KOSDAQ|KRX|NXT|국내/i.test(`${exchange} ${type}`)) return "KR";
-  return null;
-}
-
-function searchInstrument(record: Record<string, unknown>): SearchInstrument | null {
-  const market = marketFromSearchRecord(record);
-  if (!market) return null;
-  const name = stringValue(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
-  const reuters = stringValue(record, ["reutersCode", "reuterscode"]);
-  const fqnf = stringValue(record, ["fqnfTicker", "fqnf_ticker"]);
-  let symbol = stringValue(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
-  if (market === "US" && !symbol && reuters) symbol = reuters.split(".")[0];
-  if (market === "CRYPTO") {
-    const ticker = symbol || fqnf.split("_")[0];
-    symbol = ticker ? `KRW-${ticker.replace(/^KRW-/, "")}` : "";
-  }
-  if (!name || !symbol) return null;
-  const exchangeRaw = stringValue(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "nationType"]);
-  const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER·UPBIT";
-  return { market, symbol: symbol.toUpperCase(), name, exchange, currency: market === "US" ? "USD" : "KRW" };
-}
-
-export async function searchNaverInstruments(query: string, market?: Market) {
-  const target = market === "CRYPTO" ? "coin" : "stock";
-  const result = await naverJson<unknown>(buildNaverPath("/api/autocomplete/search/autoComplete", { query, target }), { ttlMs: 30_000, staleMs: 10 * 60_000 });
-  const instruments = collectRecords(result.data).map(searchInstrument).filter((item): item is SearchInstrument => Boolean(item));
-  const unique = new Map<string, SearchInstrument>();
-  for (const item of instruments) {
-    if (market && item.market !== market) continue;
-    unique.set(`${item.market}:${item.symbol}`, item);
-    if (unique.size >= 20) break;
-  }
-  return { instruments: [...unique.values()], stale: result.stale };
 }
 
 export async function persistQuoteSnapshot(quote: LiveQuote) {
