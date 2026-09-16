@@ -34,6 +34,7 @@ export type MarketIndexQuote = {
   source: "NAVER";
   timestamp: number;
   stale?: boolean;
+  pollingInterval?: number;
 };
 
 export type ChartPoint = {
@@ -265,10 +266,10 @@ export async function getLiveQuote(market: Market, symbol: string, exchange?: st
   return cryptoQuote(symbol);
 }
 
-function indexQuote(row: Record<string, unknown>, id: string, name: string, market: Market, fetchedAt: number, stale: boolean): MarketIndexQuote | null {
+function indexQuote(row: Record<string, unknown>, id: string, name: string, market: Market, fetchedAt: number, stale: boolean, pollingInterval?: number): MarketIndexQuote | null {
   const values = quoteValues(row);
   if (values.price <= 0) return null;
-  return { id, name, market, price: values.price, change: values.change, rate: values.changeRate, unit: market === "CRYPTO" ? "원" : "", source: "NAVER", timestamp: recordTimestamp(row, fetchedAt), stale };
+  return { id, name, market, price: values.price, change: values.change, rate: values.changeRate, unit: market === "CRYPTO" ? "원" : "", source: "NAVER", timestamp: recordTimestamp(row, fetchedAt), stale, pollingInterval };
 }
 
 export async function getMarketOverview() {
@@ -283,7 +284,7 @@ export async function getMarketOverview() {
     for (const row of rows) {
       const code = stringValue(row, ["itemCode", "code", "symbol"]);
       const mapped = code === "KOSDAQ" ? ["KOSDAQ", "코스닥"] : ["KOSPI", "코스피"];
-      const quote = indexQuote(row, mapped[0], mapped[1], "KR", domestic.value.fetchedAt, domestic.value.stale);
+      const quote = indexQuote(row, mapped[0], mapped[1], "KR", domestic.value.fetchedAt, domestic.value.stale, domestic.value.pollingInterval);
       if (quote) quotes.push(quote);
     }
   }
@@ -292,14 +293,14 @@ export async function getMarketOverview() {
     for (const row of rows) {
       const code = stringValue(row, ["reutersCode", "itemCode", "code", "symbol"]);
       const mapped = code.includes("IXIC") ? ["COMP", "나스닥 종합"] : ["SPX", "S&P 500"];
-      const quote = indexQuote(row, mapped[0], mapped[1], "US", foreign.value.fetchedAt, foreign.value.stale);
+      const quote = indexQuote(row, mapped[0], mapped[1], "US", foreign.value.fetchedAt, foreign.value.stale, foreign.value.pollingInterval);
       if (quote) quotes.push(quote);
     }
   }
   if (crypto.status === "fulfilled") {
     const row = pollingRow(crypto.value.data);
     if (row) {
-      const quote = indexQuote(row, "BTC", "비트코인", "CRYPTO", crypto.value.fetchedAt, crypto.value.stale);
+      const quote = indexQuote(row, "BTC", "비트코인", "CRYPTO", crypto.value.fetchedAt, crypto.value.stale, crypto.value.pollingInterval);
       if (quote) quotes.push(quote);
     }
   }
