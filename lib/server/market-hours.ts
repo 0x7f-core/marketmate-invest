@@ -5,6 +5,7 @@ export type MarketSession = {
   isOpen: boolean;
   label: string;
   notice: string;
+  exchange?: string;
   isHoliday?: boolean;
   currentSession?: string;
   isDaylightSavingTime?: boolean;
@@ -109,6 +110,7 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
         : detail.isOpen
           ? `${sessionLabel(detail.currentType, market)} 주문 가능${schedule}${dst}`
           : `네이버증권 기준 현재 거래 세션이 닫혀 있습니다${schedule}${dst}.`,
+      exchange: exchange || undefined,
       isHoliday: detail.holiday,
       currentSession: detail.currentType || undefined,
       isDaylightSavingTime: detail.daylight,
