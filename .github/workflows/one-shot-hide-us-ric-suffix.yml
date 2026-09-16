@@ -1,0 +1,67 @@
+name: One-shot hide US Reuters suffixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-shot-hide-us-ric-suffix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Hide Reuters suffixes in user-facing US tickers
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('app/trading-dashboard.tsx')
+          text = path.read_text()
+
+          anchor = '\nfunction PinSlot({ index }: { index: number }) {'
+          helper = '''\nfunction displaySymbol(market: Market, symbol: string) {\n  return market === "US" ? symbol.replace(/\\.(?:O|K|N|P|A)$/i, "") : symbol;\n}\n\nfunction displayRecentSymbols(value?: string) {\n  if (!value) return "거래 없음";\n  return value.replace(/([A-Z0-9-]{1,12})\\.(?:O|K|N|P|A)\\b/gi, "$1");\n}\n'''
+          if 'function displaySymbol(' not in text:
+              if anchor not in text:
+                  raise SystemExit('display helper anchor not found')
+              text = text.replace(anchor, helper + anchor, 1)
+
+          replacements = [
+              ('<small>{item.symbol} · {item.exchange}</small>', '<small>{displaySymbol(item.market,item.symbol)} · {item.exchange}</small>'),
+              ('<small>{position.market} · {position.symbol} · {position.exchange}</small>', '<small>{position.market} · {displaySymbol(position.market,position.symbol)} · {position.exchange}</small>'),
+              ('<small>{p.symbol} · {instrument.exchange}</small>', '<small>{displaySymbol(p.market,p.symbol)} · {instrument.exchange}</small>'),
+              ('<small>{p.symbol} · {instrument.exchange} · {formatQuantity(p.quantityMicros)}', '<small>{displaySymbol(p.market,p.symbol)} · {instrument.exchange} · {formatQuantity(p.quantityMicros)}'),
+              ('<small>{item.symbol}</small>', '<small>{displaySymbol(item.market,item.symbol)}</small>'),
+              ('<small>{selected.symbol} · {selected.exchange}</small>', '<small>{displaySymbol(selected.market,selected.symbol)} · {selected.exchange}</small>'),
+              ('<small>{fill.market} · {fill.symbol} · {formatDateTime(fill.executedAt)}</small>', '<small>{fill.market} · {displaySymbol(fill.market,fill.symbol)} · {formatDateTime(fill.executedAt)}</small>'),
+              ('<small>{row.recentSymbols||"거래 없음"}</small>', '<small>{displayRecentSymbols(row.recentSymbols)}</small>'),
+          ]
+
+          changed = 0
+          for old, new in replacements:
+              count = text.count(old)
+              if count:
+                  text = text.replace(old, new)
+                  changed += count
+
+          if changed < 9:
+              raise SystemExit(f'expected at least 9 UI ticker replacements, got {changed}')
+
+          path.write_text(text)
+          print(f'patched {changed} user-facing ticker occurrences')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/trading-dashboard.tsx
+          git diff --cached --check
+          git commit -m "Hide Reuters suffixes from US ticker display"
+          git push origin HEAD:main
