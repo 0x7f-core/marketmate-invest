@@ -13,113 +13,76 @@ export const metadata: Metadata = {
   },
 };
 
-// The React renderer currently builds a fallback venue suffix from the simplified
-// exchange label. Naver autocomplete already returns Reuters-coded US symbols
-// such as GEV.N, SOXL.O and NYSE Arca ETF codes ending in .P, so the old renderer
-// can temporarily request invalid paths such as StockGEV.N.K.svg or
-// StockSPY.P.O.svg. Repair those paths proactively and, for genuinely missing
-// venue mappings, retry Naver's common US Reuters venue suffixes before the React
-// letter fallback is allowed to run. Keeping the Reuters code intact also keeps
-// Naver's native ETF artwork, including issuer CI and leverage badges.
-const NAVER_US_LOGO_RECOVERY = String.raw`(() => {
-  const prefix = "https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock";
-  const venueSuffixes = ["N", "O", "P", "K", "A"];
-  const venueClass = "ONPKA";
+// Naver's stock-logo CDN uses the item code itself (for example StockGEV.svg),
+// not the Reuters venue suffix used by quote/search APIs (QQQ.O, SPY.P, etc.).
+// The current dashboard renderer can still produce Reuters-suffixed URLs and an
+// older recovery script could recursively grow malformed /Stock/Stock/... paths.
+// Normalize every Naver stock-logo request to one canonical CDN URL based on the
+// final filename only. This also repairs already-corrupted repeated-path URLs.
+const NAVER_STOCK_LOGO_NORMALIZER = String.raw`(() => {
+  const origin = "https://ssl.pstatic.net";
+  const directory = "/imgstock/fn/real/logo/stock/";
+  const prefix = origin + directory + "Stock";
+  const venueSuffix = /\.(?:O|N|P|K|A)$/i;
 
-  const parseLogo = (source) => {
-    if (!source || !source.startsWith(prefix)) return null;
-    const clean = source.split("?")[0].split("#")[0];
-    const match = clean.match(new RegExp("/Stock(.+)\\.([" + venueClass + "])\\.svg$", "i"));
-    if (!match) return null;
-    return { base: match[1], suffix: match[2].toUpperCase() };
+  const canonicalUrl = (source) => {
+    if (!source) return "";
+    let url;
+    try {
+      url = new URL(source, document.baseURI);
+    } catch {
+      return "";
+    }
+    if (url.origin !== origin || !url.pathname.includes(directory)) return "";
+
+    // Always use only the final path component. This is important for repairing
+    // malformed URLs such as .../stock/Stock/Stock/.../StockSPY.N.svg.
+    const filename = url.pathname.split("/").filter(Boolean).pop() || "";
+    const match = filename.match(/^Stock(.+)\.svg$/i);
+    if (!match) return "";
+
+    let code = match[1];
+    // Search/quote identifiers can contain one or two venue suffixes because the
+    // old renderer sometimes appended a suffix to an already Reuters-coded item.
+    // Naver logo files use the bare item code, so remove those transport suffixes.
+    for (let i = 0; i < 2 && venueSuffix.test(code); i += 1) {
+      code = code.replace(venueSuffix, "");
+    }
+    if (!code || !/^[A-Za-z0-9._-]+$/.test(code)) return "";
+    return prefix + code + ".svg";
   };
 
-  const canonicalizeDuplicatedReutersSuffix = (image) => {
-    const source = image.currentSrc || image.src || "";
-    if (!source.startsWith(prefix)) return false;
-    const clean = source.split("?")[0].split("#")[0];
-    const duplicate = clean.match(new RegExp("/Stock(.+)\\.([" + venueClass + "])\\.([" + venueClass + "])\\.svg$", "i"));
-    if (!duplicate) return false;
-
-    const base = duplicate[1];
-    const embeddedReutersSuffix = duplicate[2].toUpperCase();
-    const corrected = prefix + base + "." + embeddedReutersSuffix + ".svg";
-    if (image.src !== corrected) {
-      image.dataset.naverLogoBase = base;
-      image.dataset.naverLogoTried = embeddedReutersSuffix;
-      image.src = corrected;
-    }
-    return true;
+  const normalizeImage = (image) => {
+    if (!(image instanceof HTMLImageElement)) return;
+    const source = image.getAttribute("src") || image.src || "";
+    const canonical = canonicalUrl(source);
+    if (!canonical || image.src === canonical) return;
+    image.src = canonical;
   };
 
   const scan = (root) => {
-    if (root instanceof HTMLImageElement) canonicalizeDuplicatedReutersSuffix(root);
+    if (root instanceof HTMLImageElement) normalizeImage(root);
     if (!(root instanceof Element || root instanceof Document)) return;
-    root.querySelectorAll("img").forEach((image) => canonicalizeDuplicatedReutersSuffix(image));
+    root.querySelectorAll("img").forEach(normalizeImage);
   };
-
-  document.addEventListener("error", (event) => {
-    const image = event.target;
-    if (!(image instanceof HTMLImageElement)) return;
-    const source = image.currentSrc || image.src || "";
-    if (!source.startsWith(prefix)) return;
-
-    // Most failures are caused by an already Reuters-coded symbol receiving a
-    // second suffix from the simplified exchange mapping. Fix that exact code
-    // first and prevent React's onError fallback from replacing the logo.
-    if (canonicalizeDuplicatedReutersSuffix(image)) {
-      event.stopImmediatePropagation();
-      return;
-    }
-
-    const parsed = parseLogo(source);
-    if (!parsed) return;
-
-    let base = parsed.base;
-    let preferredSuffix = "";
-    const embedded = base.match(new RegExp("^(.*)\\.([" + venueClass + "])$", "i"));
-    if (embedded) {
-      base = embedded[1];
-      preferredSuffix = embedded[2].toUpperCase();
-    }
-
-    if (image.dataset.naverLogoBase !== base) {
-      image.dataset.naverLogoBase = base;
-      image.dataset.naverLogoTried = "";
-    }
-
-    const tried = new Set(
-      (image.dataset.naverLogoTried || "")
-        .split(",")
-        .map((value) => value.trim().toUpperCase())
-        .filter(Boolean),
-    );
-    tried.add(parsed.suffix);
-
-    const candidates = [preferredSuffix].concat(venueSuffixes).filter(
-      (value, index, values) => Boolean(value) && values.indexOf(value) === index,
-    );
-    const nextSuffix = candidates.find((value) => !tried.has(value));
-    if (!nextSuffix) return;
-
-    event.stopImmediatePropagation();
-    tried.add(nextSuffix);
-    image.dataset.naverLogoTried = Array.from(tried).join(",");
-    image.src = prefix + base + "." + nextSuffix + ".svg";
-  }, true);
 
   const start = () => {
     scan(document);
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.type === "attributes" && mutation.target instanceof HTMLImageElement) {
-          canonicalizeDuplicatedReutersSuffix(mutation.target);
+          normalizeImage(mutation.target);
           continue;
         }
-        mutation.addedNodes.forEach((node) => scan(node));
+        mutation.addedNodes.forEach(scan);
       }
     });
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
@@ -172,7 +135,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <head>
-        <script dangerouslySetInnerHTML={{ __html: NAVER_US_LOGO_RECOVERY }} />
+        <script dangerouslySetInnerHTML={{ __html: NAVER_STOCK_LOGO_NORMALIZER }} />
         <script dangerouslySetInnerHTML={{ __html: US_ETF_ORDER_BUTTON_LABEL }} />
       </head>
       <body className="antialiased">{children}</body>
