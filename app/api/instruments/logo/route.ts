@@ -5,6 +5,7 @@ import { naverJson } from "@/lib/server/naver-stock";
 const SYMBOL_PATTERN = /^[A-Za-z0-9._-]{1,40}$/;
 const NAVER_LOGO_ORIGIN = "https://ssl.pstatic.net";
 const NAVER_LOGO_PREFIX = "/imgstock/fn/";
+const NAVER_STOCK_LOGO_BASE = "https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
 
 type NaverBasic = {
   reutersCode?: string;
@@ -35,6 +36,11 @@ function logoFromBasic(basic: NaverBasic | null) {
   return safeLogoUrl(basic?.itemLogoUrl) || safeLogoUrl(basic?.itemLogoPngUrl);
 }
 
+function directStockLogo(symbol: string) {
+  const code = cleanSymbol(symbol);
+  return code ? safeLogoUrl(`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`) : "";
+}
+
 async function loadBasic(symbol: string) {
   const result = await naverJson<NaverBasic>(
     `/api/securityService/stock/${symbol}/basic`,
@@ -56,6 +62,16 @@ async function resolveCanonicalSymbol(symbol: string) {
   return (exact ?? sameTicker ?? search.instruments[0])?.symbol ?? "";
 }
 
+function redirectLogo(logo: string) {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: logo,
+      "cache-control": "private, max-age=86400, stale-while-revalidate=604800",
+    },
+  });
+}
+
 export async function GET(request: Request) {
   try {
     await requireUser(request);
@@ -64,32 +80,55 @@ export async function GET(request: Request) {
     if (!symbol) return new Response(null, { status: 404 });
 
     let basic: NaverBasic | null = null;
+    let resolvedSymbol = symbol;
     let logo = "";
+
+    // Some Naver endpoints accept a plain ticker while others require the
+    // Reuters code. Always try the stored value first so legacy rows keep
+    // working without a migration.
     try {
       basic = await loadBasic(symbol);
       logo = logoFromBasic(basic);
+      const reuters = cleanSymbol(basic.reutersCode ?? "");
+      if (reuters) resolvedSymbol = reuters;
     } catch {
-      // Legacy/persisted US rows can still contain a plain ticker such as AAPL.
-      // Resolve the current Naver Reuters code (AAPL.O, QQQ.O, etc.) below.
+      // Canonical resolution below handles ticker-only rows.
     }
 
+    // A successful /basic response may still omit itemLogoUrl. This is common
+    // enough that canonical resolution must run on an empty logo too, not only
+    // when /basic throws. Autocomplete's reutersCode is Naver's canonical key.
     if (!logo) {
-      const canonical = cleanSymbol(await resolveCanonicalSymbol(symbol));
-      if (canonical && canonical.toUpperCase() !== symbol.toUpperCase()) {
-        basic = await loadBasic(canonical);
-        logo = logoFromBasic(basic);
+      let canonical = "";
+      try {
+        canonical = cleanSymbol(await resolveCanonicalSymbol(symbol));
+      } catch {
+        canonical = "";
+      }
+      if (canonical) {
+        resolvedSymbol = canonical;
+        if (!basic || canonical.toUpperCase() !== symbol.toUpperCase()) {
+          try {
+            basic = await loadBasic(canonical);
+            logo = logoFromBasic(basic);
+            const reuters = cleanSymbol(basic.reutersCode ?? "");
+            if (reuters) resolvedSymbol = reuters;
+          } catch {
+            // Common-stock SVG fallback below still has a chance to resolve.
+          }
+        }
       }
     }
 
-    if (!logo) return new Response(null, { status: 404, headers: { "cache-control": "private, max-age=300" } });
+    // US ETFs expose Naver's issuer/leverage artwork through itemLogoUrl
+    // (SPDR/Invesco/Vanguard, 2x/3x, etc.). Common stocks often use the normal
+    // Stock{ReutersCode}.svg asset instead, so only use this after metadata.
+    if (logo) return redirectLogo(logo);
 
-    return new Response(null, {
-      status: 302,
-      headers: {
-        location: logo,
-        "cache-control": "private, max-age=86400, stale-while-revalidate=604800",
-      },
-    });
+    const fallback = directStockLogo(cleanSymbol(basic?.reutersCode ?? "") || resolvedSymbol);
+    if (fallback) return redirectLogo(fallback);
+
+    return new Response(null, { status: 404, headers: { "cache-control": "private, max-age=300" } });
   } catch (error) {
     return apiError(error);
   }
