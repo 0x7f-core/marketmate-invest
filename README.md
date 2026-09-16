@@ -111,42 +111,16 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 
 - `domestic-detail`, `domestic-price`
 - `domestic-investor`, `domestic-broker`
-- `domestic-disclosure`, `domestic-consensus`
-- `domestic-finance-menu`, `domestic-esg`
-- `domestic-etf-list`, `domestic-etf-detail`, `domestic-etf-components`
-- `domestic-ranking`
+- `domestic-disclosure`, `domestic-consensus`, `domestic-finance-menu`, `domestic-esg`
+- `domestic-etf-list`, `domestic-etf-detail`, `domestic-etf-components`, `domestic-ranking`
 - `foreign-basic`, `foreign-overview`, `foreign-consensus`, `foreign-finance`
 - `foreign-etf-list`, `foreign-etf-components`, `foreign-sector-ranking`
-- `crypto-ranking`
-- `indicators`
+- `crypto-ranking`, `indicators`
 
-`size`는 1~100 정수만 허용하고 잘못된 cursor·정렬·카테고리·재무 옵션은 다른 기본값으로 바꾸지 않고 400으로 거절합니다. exchange 같은 시장 식별자도 길이와 허용 문자를 제한해 Naver resolver와 캐시 키에 임의 입력이 들어가지 않게 합니다.
+`size`는 1~100 정수로 제한하고 cursor, 정렬, 카테고리, 재무 section/period, exchange 식별자를 서버에서 검증합니다. 응답은 `source: "NAVER"`, `stale`, `fetchedAt`을 포함하며 Naver 장애 시 다른 공급자로 전환하지 않습니다.
 
-이 계층은 향후 네이버증권식 종목 상세 탭을 확장할 때 공통 데이터 공급 계층으로 사용합니다.
+## API
 
-## D1 데이터 모델
-
-- `users`: 고유 닉네임, 암호화된 PIN 검증값, 로그인 잠금 상태
-- `sessions`: 30일 만료 로그인 세션
-- `competitions`: 대회 기간, 시작 자금, 초대코드, 상태
-- `participants`: 대회별 참가자와 가상 현금
-- `instruments`: 실제 선택/거래된 종목 메타데이터와 현재 exchange
-- `orders`: 멱등키가 포함된 모의 주문 원장
-- `fills`: 네이버증권 시세로 계산된 모의 체결. 현재 스키마에는 execution venue 별도 컬럼이 없음
-- `positions`: 보유수량, 원화 환산 평균단가, 실현손익
-- `cash_ledger`: 모든 가상현금 변동의 감사 원장
-- `quote_snapshots`: 순위·포트폴리오 평가용 마지막 검증 시세
-- `price_history`: 사이트 내부 평가/감사용 시세 스냅샷
-- `watchlist_items`: 사용자별 관심종목
-
-금액은 원 단위 정수, 수량과 가격은 1/1,000,000 단위 정수로 저장해 부동소수점 오차를 줄입니다.
-
-## 주요 API
-
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-- `POST /api/auth/logout`
 - `GET /api/instruments/search?q=...&market=KR|US|CRYPTO`
 - `GET /api/quotes?market=KR|US|CRYPTO&symbols=...`
 - `GET /api/chart?market=...&symbol=...&range=1W|1M|3M|1Y`
@@ -173,11 +147,16 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 pnpm install
 pnpm run db:generate
 pnpm run validate:migration
+pnpm run validate:legacy-config
 pnpm run typecheck
 pnpm run lint
 pnpm run build
 ```
 
 `validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, active venue 저장/표시, 공통 FX 파서, 시세·환율 freshness guard, 포트폴리오·순위의 fresh 평가 시세 갱신, 시장개요 pollingInterval, 네이버 응답 크기·timeout·중단 응답 guard, crypto canonical symbol, ETF v2 계약, 과거 fills의 mutable exchange 비노출 같은 핵심 전환 조건을 빠르게 점검합니다.
+
+`validate:legacy-config`는 `.env.example`, Cloudflare Env 타입, 직접 패키지 목록, lockfile에 KIS/Upbit 설정·호스트·관련 직접 의존성 또는 기존 TradingView Embed/widget 패키지가 다시 들어오지 않았는지 별도로 확인합니다. 네이버 upstream 가상자산 식별자에 필요한 `UPBIT` 문자열 자체는 금지하지 않습니다.
+
+GitHub Actions의 `Validate Naver migration`은 frozen lockfile 설치 뒤 두 검사를 모두 실행하고 typecheck, lint, build까지 통과해야 성공합니다.
 
 ChatGPT Sites가 `.openai/hosting.json`의 `DB` 바인딩을 실제 D1에 연결하고 배포 시 Drizzle 마이그레이션을 적용합니다.
