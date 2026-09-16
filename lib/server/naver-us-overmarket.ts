@@ -1,6 +1,6 @@
 import type { LiveQuote } from "@/lib/server/market-data";
 import type { MarketSession } from "@/lib/server/market-hours";
-import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
+import { buildNaverPath, naverPolling } from "@/lib/server/naver-stock";
 import { normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
 type Row = Record<string, unknown>;
@@ -56,7 +56,7 @@ export async function getNaverUsOverMarketQuote(
 ): Promise<LiveQuote> {
   if (!isUsExtendedSession(session)) throw new Error("NAVER_US_OVERMARKET_NOT_ACTIVE");
   const code = reutersCode(symbol, exchange);
-  const result = await naverJson<unknown>(
+  const result = await naverPolling<unknown>(
     buildNaverPath("/api/stockSecurity/items/v1/foreign/prices", { itemCodes: code }),
     { ttlMs: 3_000, staleMs: 30_000 },
   );
@@ -86,7 +86,7 @@ export async function getNaverUsOverMarketQuote(
     timestampVerified: true,
     source: "NAVER",
     stale: result.stale,
-    pollingInterval: 7_000,
+    pollingInterval: result.pollingInterval,
     open: numberValue(over.openingPrice, over.openPrice, over.open) || undefined,
     high: numberValue(over.highPrice, over.high) || undefined,
     low: numberValue(over.lowPrice, over.low) || undefined,
