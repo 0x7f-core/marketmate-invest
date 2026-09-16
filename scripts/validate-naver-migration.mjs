@@ -15,7 +15,11 @@ const FORBIDDEN = [
   { pattern: /api\.upbit\.com/i, label: "direct Upbit REST API" },
   { pattern: /openapi\.koreainvestment\.com/i, label: "KIS OpenAPI host" },
   { pattern: /KIS_APP_(?:KEY|SECRET)/, label: "KIS credential" },
+  { pattern: /\b(?:kisGet|requestKisToken)\b/, label: "legacy KIS helper" },
+  { pattern: /\bprovider_tokens\b/i, label: "legacy provider_tokens table" },
+  { pattern: /\bmarket_calendar\b/i, label: "legacy market_calendar table" },
   { pattern: /tradingview\.com\/widgetembed/i, label: "TradingView Embed iframe" },
+  { pattern: /\bTradingViewChart\b/, label: "legacy TradingView chart component" },
 ];
 
 async function walk(path) {
