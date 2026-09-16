@@ -61,7 +61,7 @@ async function resolveReutersCode(symbol: string, exchange?: string) {
     const candidates = collectRecords(result.data).map(record => ({
       reuters: text(record, ["reutersCode", "reuterscode"]),
       ticker: text(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "code"]),
-      nation: text(record, ["nationType", "nation", "country", "marketType"]),
+      nation: text(record, ["nationType", "nation", "country", "marketType", "nationCode", "nationName"]),
     })).filter(item => item.reuters);
     const found = candidates.find(item => codeKey(item.ticker) === wanted || codeKey(item.reuters.split(".")[0]) === wanted)
       ?? candidates.find(item => /USA|US|미국/i.test(item.nation))
@@ -77,16 +77,9 @@ async function resolveReutersCode(symbol: string, exchange?: string) {
 
   const venue = (exchange ?? "").toUpperCase();
   const suffix = venue.includes("NYS") || venue.includes("NYSE") ? ".N"
-    : venue.includes("AMS") || venue.includes("AMEX") ? ".A"
+    : venue.includes("AMS") || venue.includes("AMEX") ? ".K"
       : ".O";
   return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
-}
-
-function etfTicker(symbol: string, reutersCode: string) {
-  const direct = naverAutocompleteQueryForForeignCode(symbol).trim();
-  if (direct && !direct.includes(".")) return direct.toUpperCase();
-  const base = reutersCode.split(".")[0]?.trim();
-  return (base || direct || symbol).toUpperCase();
 }
 
 function parseTimestamp(value: unknown, fallback: number) {
@@ -176,12 +169,11 @@ async function fetchUsPage(family: SecurityFamily, identifier: string, page: num
 
 async function usSeries(symbol: string, exchange: string | undefined, range: string, days: number) {
   const reutersCode = await resolveReutersCode(symbol, exchange);
-  const ticker = etfTicker(symbol, reutersCode);
-  const pageSize = 100;
+  // Naver's foreign closing-price API rejects pageSize > 60.
+  const pageSize = 60;
   const attempts: Array<{ family: SecurityFamily; identifier: string; promise: Promise<JsonResult> }> = [
     { family: "stock", identifier: reutersCode, promise: fetchUsPage("stock", reutersCode, 1, pageSize) },
-    // Naver's foreign ETF price contract uses the plain ticker (e.g. VOO), not the Reuters code.
-    { family: "etf", identifier: ticker, promise: fetchUsPage("etf", ticker, 1, pageSize) },
+    { family: "etf", identifier: reutersCode, promise: fetchUsPage("etf", reutersCode, 1, pageSize) },
   ];
   const settled = await Promise.allSettled(attempts.map(item => item.promise));
   const candidates: Array<{ family: SecurityFamily; identifier: string; result: JsonResult; points: ChartPoint[] }> = [];
@@ -207,7 +199,8 @@ async function usSeries(symbol: string, exchange: string | undefined, range: str
     return { points: [], range, stale: false, source: "NAVER" as const };
   }
 
-  const neededPages = Math.min(4, Math.max(1, Math.ceil((days + 10) / pageSize)));
+  // One year requires roughly 6–7 pages at Naver's 60-row maximum.
+  const neededPages = Math.min(8, Math.max(1, Math.ceil((days + 10) / pageSize)));
   const more = neededPages > 1
     ? await Promise.allSettled(
       Array.from({ length: neededPages - 1 }, (_, offset) =>
