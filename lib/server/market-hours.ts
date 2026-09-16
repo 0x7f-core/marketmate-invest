@@ -72,8 +72,10 @@ function sessionLabel(type: string, market: Market) {
 function closedFallback(market: Market, stale = false): MarketSession {
   return {
     isOpen: false,
-    label: "장 상태 확인 불가",
-    notice: `${market === "US" ? "미국주식" : "국내주식"} 네이버증권 장 상태를 확인할 수 없어 안전을 위해 주문을 중단합니다.`,
+    label: stale ? "장 상태 갱신 지연" : "장 상태 확인 불가",
+    notice: stale
+      ? `${market === "US" ? "미국주식" : "국내주식"} 장 상태가 최신 정보가 아니어서 안전을 위해 주문을 중단합니다.`
+      : `${market === "US" ? "미국주식" : "국내주식"} 네이버증권 장 상태를 확인할 수 없어 안전을 위해 주문을 중단합니다.`,
     source: "NAVER",
     stale,
   };
@@ -87,8 +89,10 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
   const exchanges = market === "KR" ? ["krx", "nxt"] : ["nasdaq"];
   try {
     const result = await naverJson<unknown>(buildNaverPath("/api/stockSecurity/market-status/current", { exchanges }), { ttlMs: 5_000, staleMs: 120_000 });
+    if (result.stale) return closedFallback(market, true);
+
     const statuses = statusList(result.data).filter(status => exchanges.includes(stringValue(status, ["exchange"]).toLocaleLowerCase("en-US")));
-    if (!statuses.length) return closedFallback(market, result.stale);
+    if (!statuses.length) return closedFallback(market);
 
     const detailed = statuses.map(status => ({ status, detail: sessionDetails(status) }));
     const selected = detailed.find(item => item.detail.isOpen) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
@@ -111,7 +115,7 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
       openTimeKst: detail.openTimeKst || undefined,
       closeTimeKst: detail.closeTimeKst || undefined,
       source: "NAVER",
-      stale: result.stale,
+      stale: false,
     };
   } catch {
     return closedFallback(market);
