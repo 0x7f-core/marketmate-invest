@@ -118,13 +118,31 @@ function validatePath(path: string) {
   return `${url.pathname}${url.search}`;
 }
 
+function responseRecords(payload: unknown) {
+  const records: Array<Record<string, unknown>> = [];
+  let current = payload;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) break;
+    const record = current as Record<string, unknown>;
+    records.push(record);
+    const next = ["data", "result", "body", "payload"]
+      .map(key => record[key])
+      .find(value => value && typeof value === "object" && !Array.isArray(value));
+    if (!next) break;
+    current = next;
+  }
+  return records;
+}
+
 function pollingInterval(payload: unknown, fallback: number) {
-  if (!payload || typeof payload !== "object") return fallback;
-  const raw = Number((payload as Record<string, unknown>).pollingInterval);
-  if (!Number.isFinite(raw) || raw <= 0) return fallback;
-  // 현재 공개 API는 ms 단위를 사용하지만 비정상적으로 작은 값은 초 단위 가능성까지 방어한다.
-  const millis = raw < 100 ? raw * 1_000 : raw;
-  return Math.max(1_000, Math.min(120_000, Math.round(millis)));
+  for (const record of responseRecords(payload)) {
+    const raw = Number(record.pollingInterval);
+    if (!Number.isFinite(raw) || raw <= 0) continue;
+    // 현재 공개 API는 ms 단위를 사용하지만 비정상적으로 작은 값은 초 단위 가능성까지 방어한다.
+    const millis = raw < 100 ? raw * 1_000 : raw;
+    return Math.max(1_000, Math.min(120_000, Math.round(millis)));
+  }
+  return fallback;
 }
 
 function retryAfterMs(response: Response) {
