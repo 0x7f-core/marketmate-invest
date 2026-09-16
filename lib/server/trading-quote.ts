@@ -20,27 +20,17 @@ export function isExecutableTradingQuote(quote: TradingQuote, now = Date.now()) 
   return Math.abs(now - sourceTime) <= tradingQuoteFreshnessWindowMs(quote);
 }
 
-function enforceTradingTimestamp(quote: TradingQuote, knownSession?: MarketSession): TradingQuote {
-  // knownSession is supplied by the order path after market-status validation.
-  // Display/ranking callers can still show a quote whose upstream trade timestamp is absent,
-  // but it must never be used as an executable mock fill price.
-  if (knownSession && !quote.timestampVerified) return { ...quote, stale: true };
-  return quote;
-}
-
 export async function getTradingQuote(
   market: Market,
   symbol: string,
   exchange?: string,
   knownSession?: MarketSession,
 ): Promise<TradingQuote> {
-  if (market !== "KR") {
-    return enforceTradingTimestamp(await getLiveQuote(market, symbol, exchange), knownSession);
-  }
+  if (market !== "KR") return getLiveQuote(market, symbol, exchange);
 
   const session = knownSession ?? await getCheckedMarketSession("KR");
   if (session.isOpen && !session.stale && session.exchange === "NXT") {
-    return enforceTradingTimestamp(Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const }), knownSession);
+    return Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const });
   }
-  return enforceTradingTimestamp(Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const }), knownSession);
+  return Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const });
 }
