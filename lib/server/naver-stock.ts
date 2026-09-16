@@ -3,7 +3,6 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 const PUBLIC_PREFIXES = [
-  "/api/autocomplete/",
   "/api/coin/",
   "/api/content/",
   "/api/domestic/",
@@ -15,6 +14,10 @@ const PUBLIC_PREFIXES = [
   "/api/stockDomestic/",
   "/api/stockSecurity/",
 ];
+const PUBLIC_EXACT_PATHS = new Set([
+  "/api/autocomplete/search",
+  "/api/autocomplete/search/autocomplete",
+]);
 
 const DENIED_SEGMENTS = new Set([
   "account", "accounts", "auth", "authorization", "block", "bookmark", "cancel", "create", "delete",
@@ -87,11 +90,13 @@ function validatePath(path: string) {
   if (url.origin !== NAVER_STOCK_BASE_URL || url.pathname.includes("..")) {
     throw new NaverStockError("네이버증권 API 경로가 허용 범위를 벗어났습니다.", { path, kind: "validation" });
   }
-  const segments = url.pathname.toLocaleLowerCase("en-US").split("/").filter(Boolean);
+  const pathnameLower = url.pathname.toLocaleLowerCase("en-US");
+  const segments = pathnameLower.split("/").filter(Boolean);
   if (segments.some(segment => DENIED_SEGMENTS.has(segment))) {
     throw new NaverStockError("개인화 또는 변경 API는 호출하지 않습니다.", { path, kind: "validation" });
   }
-  const allowed = PUBLIC_PREFIXES.some(prefix => url.pathname.toLocaleLowerCase("en-US").startsWith(prefix.toLocaleLowerCase("en-US")));
+  const allowed = PUBLIC_EXACT_PATHS.has(pathnameLower)
+    || PUBLIC_PREFIXES.some(prefix => pathnameLower.startsWith(prefix.toLocaleLowerCase("en-US")));
   if (!allowed) throw new NaverStockError("공개 읽기 전용 API만 호출할 수 있습니다.", { path, kind: "validation" });
   return `${url.pathname}${url.search}`;
 }
