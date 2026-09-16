@@ -26,8 +26,12 @@ export async function GET(request: Request) {
     if (symbol && !/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
 
     const result = await getNaverMarketNews(market, symbol, name, exchange);
+    const items = [...result.items].sort((a, b) => {
+      if (a.publishedAt === b.publishedAt) return 0;
+      return (b.publishedAt || 0) - (a.publishedAt || 0);
+    });
     return Response.json(
-      { items: result.items, source: "NAVER", stale: result.stale },
+      { items, source: "NAVER", stale: result.stale },
       { headers: { "cache-control": "private, max-age=60" } },
     );
   } catch (error) {
