@@ -24,8 +24,7 @@ export async function GET(request: Request) {
         (SELECT COUNT(*) FROM orders WHERE status='pending') AS pendingOrders,
         (SELECT COUNT(*) FROM orders WHERE status='rejected') AS rejectedOrders,
         (SELECT COUNT(*) FROM sessions WHERE expires_at>?) AS activeSessions,
-        (SELECT MAX(received_at) FROM quote_snapshots) AS latestQuoteAt,
-        (SELECT expires_at FROM provider_tokens WHERE provider='KIS') AS kisTokenExpiresAt`).bind(Date.now()).first(),
+        (SELECT MAX(received_at) FROM quote_snapshots) AS latestQuoteAt`).bind(Date.now()).first(),
     ]);
     return Response.json({ users: users.results, competitions: competitions.results, participants: participants.results, audit: audit.results, health }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
