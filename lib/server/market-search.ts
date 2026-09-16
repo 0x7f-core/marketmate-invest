@@ -26,13 +26,27 @@ function collect(value: unknown, depth = 0, output: Array<Record<string, unknown
 
 function marketOf(record: Record<string, unknown>): Market | null {
   const reuters = text(record, ["reutersCode", "reuterscode"]);
-  const exchange = text(record, ["exchangeType", "exchange", "marketType", "typeCode", "typeName", "nationType", "nation", "country"]);
+  const exchange = text(record, ["exchangeType", "exchange", "marketType", "typeCode", "typeName"]);
+  const nation = text(record, ["nationCode", "nationName", "nationType", "nation", "country"]);
   const fqnf = text(record, ["fqnfTicker", "fqnf_ticker"]);
   const type = text(record, ["type", "category", "targetType", "assetType", "typeCode", "typeName"]);
-  if (fqnf || /UPBIT|BITHUMB|COIN|CRYPTO|가상자산/i.test(`${exchange} ${type}`)) return "CRYPTO";
-  if (reuters || /USA|NASDAQ|NYSE|AMEX|미국/i.test(exchange)) return "US";
+  const url = text(record, ["url", "link", "href"]);
   const code = text(record, ["itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
-  if (/^[A-Za-z0-9]{6}$/.test(code) || /KOSPI|KOSDAQ|KRX|NXT|국내/i.test(`${exchange} ${type}`)) return "KR";
+
+  if (fqnf || /UPBIT|BITHUMB|COIN|CRYPTO|가상자산/i.test(`${exchange} ${type}`)) return "CRYPTO";
+
+  // Naver domestic autocomplete rows also expose reutersCode (e.g. 005930), so
+  // a non-empty reutersCode alone must never classify a row as a US instrument.
+  if (/KOR|KOREA|대한민국/i.test(nation)
+      || /KOSPI|KOSDAQ|KRX|NXT|국내|코스피|코스닥/i.test(`${exchange} ${type}`)
+      || /^\/domestic\//i.test(url)) return "KR";
+
+  if (/USA|US|UNITED STATES|미국/i.test(nation)
+      || /NASDAQ|NYSE|AMEX|NAS|NYS|AMS|미국/i.test(exchange)
+      || (reuters.includes(".") && !/^\d{6}(?:\.|$)/.test(reuters))) return "US";
+
+  if (/^[A-Za-z0-9]{6}$/.test(code)) return "KR";
+  if (reuters && looksLikeCaseSensitiveReutersCode(reuters)) return "US";
   return null;
 }
 
