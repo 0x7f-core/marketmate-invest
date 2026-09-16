@@ -1,4 +1,5 @@
 import { buildNaverPath, naverJson, type NaverResult } from "@/lib/server/naver-stock";
+import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
 export type MarketInsightKind =
   | "domestic-detail"
@@ -94,13 +95,13 @@ const foreignCodeCache = new Map<string, { code: string; expiresAt: number }>();
 
 async function resolveForeignCode(symbolInput?: string, exchangeInput?: string) {
   const symbol = safeSymbol(symbolInput);
-  if (symbol.includes(".")) return symbol;
-  const cacheKey = `${symbol.toUpperCase()}:${(exchangeInput ?? "").toUpperCase()}`;
+  if (symbol.includes(".") || looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
+  const cacheKey = `${symbol}:${(exchangeInput ?? "").toUpperCase()}`;
   const cached = foreignCodeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.code;
 
   try {
-    const query = symbol.replaceAll("_", ".");
+    const query = naverAutocompleteQueryForForeignCode(symbol);
     const result = await naverJson<unknown>(
       buildNaverPath("/api/autocomplete/search/autoComplete", { query, target: "stock" }),
       { ttlMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 },
@@ -110,22 +111,24 @@ async function resolveForeignCode(symbolInput?: string, exchangeInput?: string) 
       code: stringValue(record, ["reutersCode", "reuterscode", "code"]),
       ticker: stringValue(record, ["ticker", "symbol", "itemCode", "stockCode", "code"]),
       nation: stringValue(record, ["nationType", "nation", "country", "marketType"]),
-    })).filter(item => item.code.includes("."));
+    })).filter(item => item.code.length > 0);
     const match = candidates.find(item => compareCode(item.ticker) === wanted || compareCode(item.code.split(".")[0]) === wanted)
       ?? candidates.find(item => /USA|US|미국/i.test(item.nation))
       ?? candidates[0];
     if (match?.code) {
-      foreignCodeCache.set(cacheKey, { code: match.code, expiresAt: Date.now() + 24 * 60 * 60_000 });
-      return match.code;
+      const code = normalizeNaverReutersCode(match.code);
+      foreignCodeCache.set(cacheKey, { code, expiresAt: Date.now() + 24 * 60 * 60_000 });
+      return code;
     }
   } catch {
     // Autocomplete changes must not turn a read-only detail request into a different provider fallback.
   }
 
+  if (looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
   const exchange = (exchangeInput ?? "").toUpperCase();
   const suffix = exchange.includes("NYS") || exchange.includes("NYSE") ? ".N"
     : exchange.includes("AMS") || exchange.includes("AMEX") ? ".A" : ".O";
-  return `${symbol.replaceAll("_", ".")}${suffix}`;
+  return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
 function insight<T>(result: NaverResult<T>, kind: MarketInsightKind) {
