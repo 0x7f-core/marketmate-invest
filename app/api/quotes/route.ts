@@ -1,5 +1,4 @@
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
-import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { matchPendingOrders } from "@/lib/server/pending-orders";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
@@ -37,9 +36,11 @@ export async function GET(request: Request) {
       return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     }
 
-    const knownSession = market === "KR" ? await getCheckedMarketSession("KR") : undefined;
+    // getTradingQuote handles market-session lookup internally. Its Naver request
+    // layer deduplicates the shared market-status request for multi-symbol batches,
+    // while allowing the quote requests themselves to start in parallel.
     const results = await Promise.allSettled(normalizedSymbols.map(symbol =>
-      getTradingQuote(market, symbol, normalizedSymbols.length === 1 ? exchange : undefined, knownSession),
+      getTradingQuote(market, symbol, normalizedSymbols.length === 1 ? exchange : undefined),
     ));
     const resolved = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     const quotes = resolved.filter(quote => !quote.stale);
