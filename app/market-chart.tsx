@@ -1,19 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CandlestickSeries, ColorType, createChart, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 
 type Market = "KR" | "US" | "CRYPTO";
 type QuoteLike = { market: Market; symbol: string; name: string; exchange: string };
 type ChartPoint = { time: number; open: number; high: number; low: number; close: number; volume?: number };
 type ChartResponse = { points?: ChartPoint[]; range?: string; source?: string; stale?: boolean; error?: string };
+type CandleRow = { time: number; open: number; high: number; low: number; close: number };
+type CandleSeries = { setData: (rows: CandleRow[]) => void };
+type ChartApi = { addSeries: (seriesType: unknown, options: Record<string, unknown>) => CandleSeries; remove: () => void; timeScale: () => { fitContent: () => void } };
+type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown };
+
+declare global {
+  interface Window { LightweightCharts?: LightweightChartsApi }
+}
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
+const LIGHTWEIGHT_CHARTS_URL = "https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js";
+let chartLibraryPromise: Promise<LightweightChartsApi> | null = null;
+
+function loadLightweightCharts() {
+  if (typeof window === "undefined") return Promise.reject(new Error("브라우저에서만 차트를 표시할 수 있습니다."));
+  if (window.LightweightCharts) return Promise.resolve(window.LightweightCharts);
+  chartLibraryPromise ??= new Promise<LightweightChartsApi>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${LIGHTWEIGHT_CHARTS_URL}"]`);
+    const script = existing ?? document.createElement("script");
+    const finish = () => window.LightweightCharts ? resolve(window.LightweightCharts) : reject(new Error("차트 라이브러리를 초기화하지 못했습니다."));
+    script.addEventListener("load", finish, { once: true });
+    script.addEventListener("error", () => reject(new Error("차트 라이브러리를 불러오지 못했습니다.")), { once: true });
+    if (!existing) {
+      script.src = LIGHTWEIGHT_CHARTS_URL;
+      script.async = true;
+      script.crossOrigin = "anonymous";
+      document.head.appendChild(script);
+    }
+  }).catch(error => {
+    chartLibraryPromise = null;
+    throw error;
+  });
+  return chartLibraryPromise;
+}
 
 export default function MarketChart({ quote }: { quote: QuoteLike }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const chartRef = useRef<ChartApi | null>(null);
+  const seriesRef = useRef<CandleSeries | null>(null);
   const [range, setRange] = useState<(typeof RANGES)[number]>("3M");
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -23,37 +54,47 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const chart = createChart(container, {
-      autoSize: true,
-      attributionLogo: true,
-      layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
-        textColor: "#6b7280",
-        fontFamily: "Arial, 'Noto Sans KR', sans-serif",
-      },
-      grid: {
-        vertLines: { color: "#f3f4f6" },
-        horzLines: { color: "#f3f4f6" },
-      },
-      rightPriceScale: { borderColor: "#e5e7eb" },
-      timeScale: { borderColor: "#e5e7eb", timeVisible: false, secondsVisible: false },
-      crosshair: { vertLine: { labelBackgroundColor: "#374151" }, horzLine: { labelBackgroundColor: "#374151" } },
-      localization: { locale: "ko-KR" },
+    let cancelled = false;
+    void loadLightweightCharts().then(library => {
+      if (cancelled || !containerRef.current) return;
+      const chart = library.createChart(containerRef.current, {
+        autoSize: true,
+        attributionLogo: true,
+        layout: {
+          background: { type: "solid", color: "#ffffff" },
+          textColor: "#6b7280",
+          fontFamily: "Arial, 'Noto Sans KR', sans-serif",
+        },
+        grid: {
+          vertLines: { color: "#f3f4f6" },
+          horzLines: { color: "#f3f4f6" },
+        },
+        rightPriceScale: { borderColor: "#e5e7eb" },
+        timeScale: { borderColor: "#e5e7eb", timeVisible: false, secondsVisible: false },
+        crosshair: { vertLine: { labelBackgroundColor: "#374151" }, horzLine: { labelBackgroundColor: "#374151" } },
+        localization: { locale: "ko-KR" },
+      });
+      const series = chart.addSeries(library.CandlestickSeries, {
+        upColor: "#f04452",
+        downColor: "#3182f6",
+        borderUpColor: "#f04452",
+        borderDownColor: "#3182f6",
+        wickUpColor: "#f04452",
+        wickDownColor: "#3182f6",
+        priceLineVisible: true,
+        lastValueVisible: true,
+      });
+      chartRef.current = chart;
+      seriesRef.current = series;
+    }).catch(error => {
+      if (!cancelled) {
+        setMessage(error instanceof Error ? error.message : "차트 라이브러리를 불러오지 못했습니다.");
+        setStatus("error");
+      }
     });
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: "#f04452",
-      downColor: "#3182f6",
-      borderUpColor: "#f04452",
-      borderDownColor: "#3182f6",
-      wickUpColor: "#f04452",
-      wickDownColor: "#3182f6",
-      priceLineVisible: true,
-      lastValueVisible: true,
-    });
-    chartRef.current = chart;
-    seriesRef.current = series;
     return () => {
-      chart.remove();
+      cancelled = true;
+      chartRef.current?.remove();
       chartRef.current = null;
       seriesRef.current = null;
     };
@@ -65,16 +106,10 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
     if (!series || !chart) return;
     const rows = points
       .filter(point => Number.isFinite(point.time) && point.time > 0 && point.open > 0 && point.high > 0 && point.low > 0 && point.close > 0)
-      .map(point => ({
-        time: Math.floor(point.time / 1_000) as UTCTimestamp,
-        open: point.open,
-        high: point.high,
-        low: point.low,
-        close: point.close,
-      }));
+      .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
     series.setData(rows);
     if (rows.length) chart.timeScale().fitContent();
-  }, [points]);
+  }, [points, status]);
 
   useEffect(() => {
     const controller = new AbortController();
