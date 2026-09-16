@@ -4,11 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - refactor/naver-market-data
+      - main
     paths:
       - scripts/validate-naver-runtime.mjs
       - .github/workflows/naver-runtime-smoke.yml
-  # Scheduled runs become active from the default branch after this PR is merged.
   schedule:
     - cron: "20 0 * * 1-5"
 
