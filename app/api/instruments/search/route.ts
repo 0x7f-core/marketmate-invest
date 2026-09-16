@@ -13,9 +13,20 @@ export async function GET(request: Request) {
     if (query.length < 1 || query.length > 40) return Response.json({ instruments: [] });
     if (market && !["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "지원하지 않는 시장입니다." }, { status: 400 });
 
-    const result = await searchNaverInstruments(query, market ?? undefined);
+    if (market) {
+      const result = await searchNaverInstruments(query, market);
+      return Response.json({ instruments: result.instruments, source: "NAVER", stale: result.stale }, { headers: { "cache-control": "private, max-age=15" } });
+    }
+
+    const results = await Promise.all([
+      searchNaverInstruments(query, "KR"),
+      searchNaverInstruments(query, "US"),
+      searchNaverInstruments(query, "CRYPTO"),
+    ]);
+    const unique = new Map<string, (typeof results)[number]["instruments"][number]>();
+    for (const result of results) for (const item of result.instruments) unique.set(`${item.market}:${item.symbol}`, item);
     return Response.json(
-      { instruments: result.instruments, source: "NAVER", stale: result.stale },
+      { instruments: [...unique.values()].slice(0, 20), source: "NAVER", stale: results.some(result => result.stale) },
       { headers: { "cache-control": "private, max-age=15" } },
     );
   } catch (error) {
