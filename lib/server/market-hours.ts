@@ -70,6 +70,13 @@ function sessionLabel(type: string, market: Market) {
   return type || (market === "US" ? "미국장" : "국내장");
 }
 
+function isSupportedTradingSession(market: Market, detail: ReturnType<typeof sessionDetails>) {
+  if (!detail.isOpen) return false;
+  if (market !== "US") return true;
+  const type = detail.currentType.toLocaleLowerCase("en-US");
+  return !type.includes("after");
+}
+
 function closedFallback(market: Market, stale = false): MarketSession {
   return {
     isOpen: false,
@@ -109,17 +116,20 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
       : detailed.find(item => item.detail.isOpen) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
     const exchange = stringValue(selected.status, ["exchange"]).toUpperCase();
     const detail = selected.detail;
-    const label = detail.holiday ? "휴장일" : detail.isOpen ? sessionLabel(detail.currentType, market) : "장 마감";
+    const isOpen = isSupportedTradingSession(market, detail);
+    const label = detail.holiday ? "휴장일" : isOpen ? sessionLabel(detail.currentType, market) : detail.isOpen && market === "US" ? "애프터마켓" : "장 마감";
     const schedule = detail.openTimeKst && detail.closeTimeKst ? ` · ${detail.openTimeKst}~${detail.closeTimeKst} KST` : "";
     const dst = market === "US" && detail.daylight !== undefined ? ` · ${detail.daylight ? "서머타임" : "표준시"}` : "";
     return {
-      isOpen: detail.isOpen,
+      isOpen,
       label: `${label}${exchange ? ` · ${exchange}` : ""}`,
       notice: detail.holiday
         ? "네이버증권 기준 휴장일로 주문할 수 없습니다."
-        : detail.isOpen
+        : isOpen
           ? `${sessionLabel(detail.currentType, market)} 주문 가능${schedule}${dst}`
-          : `네이버증권 기준 현재 거래 세션이 닫혀 있습니다${schedule}${dst}.`,
+          : detail.isOpen && market === "US"
+            ? `미국 애프터마켓은 현재 모의투자 주문 대상에서 제외됩니다${schedule}${dst}.`
+            : `네이버증권 기준 현재 거래 세션이 닫혀 있습니다${schedule}${dst}.`,
       exchange: exchange || undefined,
       isHoliday: detail.holiday,
       currentSession: detail.currentType || undefined,
