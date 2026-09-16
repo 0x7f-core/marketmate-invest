@@ -1,16 +1,17 @@
 import { env } from "cloudflare:workers";
-import type { LiveQuote } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
+import type { TradingQuote } from "@/lib/server/trading-quote";
 
 type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; quantityMicros: number; limitPriceMicros: number };
 
-export async function matchPendingOrders(quote: LiveQuote) {
+export async function matchPendingOrders(quote: TradingQuote) {
   if (!env.DB || quote.stale) return;
   const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
   if (!Number.isFinite(sourceTime) || Math.abs(Date.now() - sourceTime) > 60_000) return;
 
   const session = await getCheckedMarketSession(quote.market);
   if (!session.isOpen || session.stale) return;
+  if (quote.market === "KR" && quote.venue && session.exchange && quote.venue !== session.exchange) return;
   const instrumentId = `${quote.market}:${quote.symbol}`;
   const nativePriceMicros = Math.round(quote.price * 1_000_000);
   const rows = await env.DB.prepare(`SELECT id,participant_id AS participantId,side,quantity_micros AS quantityMicros,limit_price_micros AS limitPriceMicros
@@ -19,7 +20,7 @@ export async function matchPendingOrders(quote: LiveQuote) {
   for (const order of rows.results) await fillPendingOrder(order, quote, nativePriceMicros);
 }
 
-async function fillPendingOrder(order: PendingOrder, quote: LiveQuote, nativePriceMicros: number) {
+async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, nativePriceMicros: number) {
   const claimed = await env.DB!.prepare("UPDATE orders SET status='partial',updated_at=? WHERE id=? AND status='pending'").bind(Date.now(), order.id).run();
   if ((claimed.meta.changes ?? 0) !== 1) return;
   const participant = await env.DB!.prepare(`SELECT p.cash_krw AS cashKrw,c.status,c.starts_at AS startsAt,c.ends_at AS endsAt
