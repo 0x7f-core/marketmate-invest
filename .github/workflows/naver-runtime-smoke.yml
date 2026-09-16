@@ -34,3 +34,59 @@ jobs:
 
       - name: Validate live Naver Stock endpoints
         run: node scripts/validate-naver-runtime.mjs
+
+      - name: Probe US logo sources
+        run: |
+          node <<'NODE'
+          const headers = { 'user-agent': 'Mozilla/5.0', referer: 'https://stock.naver.com/' };
+          const apiUrls = [
+            'https://stock.naver.com/api/autocomplete/search/autoComplete?query=AAPL&target=stock',
+            'https://stock.naver.com/api/autocomplete/search/autoComplete?query=GEV&target=stock',
+            'https://stock.naver.com/api/autocomplete/search/autoComplete?query=QQQ&target=stock',
+            'https://stock.naver.com/api/autocomplete/search/autoComplete?query=SPY&target=stock',
+            'https://stock.naver.com/api/securityService/stock/AAPL.O/basic',
+            'https://stock.naver.com/api/foreign/AAPL.O/detail?codeType=ETF',
+            'https://stock.naver.com/api/foreign/QQQ.O/detail?codeType=ETF',
+            'https://stock.naver.com/api/foreign/SPY.P/detail?codeType=ETF',
+          ];
+          for (const url of apiUrls) {
+            const response = await fetch(url, { headers });
+            const text = await response.text();
+            console.log('US_LOGO_API', response.status, url, text.slice(0, 8000));
+          }
+
+          const logoCandidates = [
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockAAPL.O.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockAAPL.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockGEV.N.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockGEV.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQ.O.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQ.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSPY.P.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSPY.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockCommonUS.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockCommonUSETF.svg',
+          ];
+          for (const url of logoCandidates) {
+            const response = await fetch(url, { headers });
+            console.log('US_LOGO_HEAD', response.status, response.headers.get('content-type'), response.headers.get('content-length'), url);
+          }
+
+          const pageUrl = 'https://stock.naver.com/market/stock/usa/stocklist/priceTop';
+          const page = await fetch(pageUrl, { headers });
+          const html = await page.text();
+          const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(match => new URL(match[1], pageUrl).href);
+          console.log('US_PAGE_SCRIPTS', scripts.length);
+          const tokens = ['logo/stock', 'StockCommonUS', 'StockCommon', 'thumbnailItemCode', 'imgstock/fn/real/logo', 'region:"US"', 'region:t'];
+          for (const script of scripts) {
+            try {
+              const js = await (await fetch(script, { headers })).text();
+              const hits = [];
+              for (const token of tokens) {
+                let index = js.indexOf(token);
+                if (index >= 0) hits.push(token + ': ' + js.slice(Math.max(0, index - 800), index + 2200));
+              }
+              if (hits.length) console.log('US_LOGO_JS_MATCH', script, hits.join('\n---\n').slice(0, 30000));
+            } catch {}
+          }
+          NODE
