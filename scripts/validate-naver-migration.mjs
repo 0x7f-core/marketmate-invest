@@ -81,6 +81,9 @@ if (!marketHours.includes('if (market === "US") return true;')) {
 if (!marketHours.includes('"marketStatusDetailType"')) {
   failures.push("market session parsing must support marketStatusDetailType fallback");
 }
+if (!marketHours.includes("if (!detail.isOpen || !detail.currentType) return false;")) {
+  failures.push("unknown stock session types must fail closed");
+}
 
 const tradingQuote = await source("lib/server/trading-quote.ts");
 if (!tradingQuote.includes('session.exchange === "NXT"')) {
