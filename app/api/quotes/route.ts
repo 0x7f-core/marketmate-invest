@@ -1,7 +1,8 @@
-import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { matchPendingOrders } from "@/lib/server/pending-orders";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
+import { getTradingQuote } from "@/lib/server/trading-quote";
 import { enforceRateLimit } from "@/lib/server/safety";
 import { env } from "cloudflare:workers";
 
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
       return Response.json({ error: "market과 symbols가 필요합니다." }, { status: 400 });
     }
 
-    const results = await Promise.allSettled(symbols.map(symbol => getLiveQuote(market, symbol.toUpperCase(), symbols.length === 1 ? exchange : undefined)));
+    const results = await Promise.allSettled(symbols.map(symbol => getTradingQuote(market, symbol.toUpperCase(), symbols.length === 1 ? exchange : undefined)));
     const resolved = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     const quotes = resolved.filter(quote => !quote.stale);
 
