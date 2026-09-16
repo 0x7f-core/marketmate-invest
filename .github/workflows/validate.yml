@@ -3,6 +3,7 @@ name: Validate Naver migration
 on:
   push:
     branches:
+      - main
       - refactor/naver-market-data
   pull_request:
     branches:
