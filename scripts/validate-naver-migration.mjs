@@ -154,6 +154,9 @@ if (!pendingOrders.includes("isExecutableTradingQuote")) {
 if (!pendingOrders.includes("quote.venue !== session.exchange")) {
   failures.push("pending KR orders must reject a quote from the wrong active venue");
 }
+if (!pendingOrders.includes("UPDATE instruments SET exchange=?") || !pendingOrders.includes('quote.market === "KR" && quote.venue')) {
+  failures.push("successful pending KR fills must persist the actual execution venue");
+}
 
 if (failures.length) {
   console.error("Naver migration validation failed:\n");
