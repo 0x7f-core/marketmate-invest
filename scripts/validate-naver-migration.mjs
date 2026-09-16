@@ -74,6 +74,14 @@ if (!naverStock.includes("setTimeout(() => controller.abort(), timeoutMs)") || !
   failures.push("Naver request timeout must remain active through response-body processing");
 }
 
+const marketData = await source("lib/server/market-data.ts");
+if (!marketData.includes('getNaverUsdKrwRate') || marketData.includes("async function usdKrwRate(")) {
+  failures.push("US quotes must use the shared Naver FX parser instead of a duplicate local parser");
+}
+if (!marketData.includes("exchangeRateOverride ?? (await getNaverUsdKrwRate()).rate")) {
+  failures.push("US live quotes must support reusing a prevalidated Naver FX rate");
+}
+
 const marketHours = await source("lib/server/market-hours.ts");
 const krxPriority = marketHours.indexOf('item.exchange === "krx" && item.tradable');
 const nxtPriority = marketHours.indexOf('item.exchange === "nxt" && item.tradable');
@@ -102,6 +110,9 @@ if (!tradingQuote.includes("isExecutableTradingQuote")) {
 }
 if (!tradingQuote.includes("getNaverUsdKrwRate") || !tradingQuote.includes('if (fx.stale) throw new Error("NAVER_FX_UNAVAILABLE")')) {
   failures.push("US trading quotes must reject stale Naver FX data");
+}
+if (!tradingQuote.includes("getLiveQuote(market, symbol, exchange, fx.rate)")) {
+  failures.push("US trading quotes must reuse the already validated Naver FX rate");
 }
 
 for (const path of [
