@@ -57,10 +57,10 @@ export async function GET(request: Request) {
     await env.DB!.batch(quotes.map(quote => {
       const resolvedExchange = quote.venue
         ?? (normalizedSymbols.length === 1 ? exchange : undefined)
-        ?? (quote.market === "CRYPTO" ? "NAVER" : quote.market);
+        ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
       return env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active)
         VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,
-        exchange=CASE WHEN excluded.exchange IN ('KRX','NXT','NAS','NYS','AMS','NAVER') THEN excluded.exchange ELSE instruments.exchange END,
+        exchange=CASE WHEN excluded.exchange IN ('KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange ELSE instruments.exchange END,
         is_active=1`)
         .bind(`${quote.market}:${quote.symbol}`, quote.market, quote.symbol, quote.symbol, quote.currency, resolvedExchange);
     }));

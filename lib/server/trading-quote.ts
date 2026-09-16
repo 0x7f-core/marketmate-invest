@@ -4,7 +4,7 @@ import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
 import { getNxtLiveQuote } from "@/lib/server/naver-nxt";
 import { getNaverUsOverMarketQuote, isUsExtendedSession } from "@/lib/server/naver-us-overmarket";
 
-export type TradingQuote = LiveQuote & { venue?: "KRX" | "NXT" };
+export type TradingQuote = LiveQuote & { venue?: "KRX" | "NXT" | "UPBIT" };
 
 function compactKstTimestampMs(value: number) {
   const raw = String(Math.trunc(value));
@@ -79,6 +79,11 @@ export async function getTradingQuote(
     const overMarket = await getNaverUsOverMarketQuote(symbol, exchange, fx.rate, session).catch(() => null);
     return newerQuote(regular, overMarket ? normalizeTradingTimestamp(overMarket) : null);
   }
+
+  if (market === "CRYPTO") {
+    return normalizeTradingTimestamp(Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "UPBIT" as const }));
+  }
+
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
   if (knownSession) {

@@ -83,7 +83,7 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const nation = text(record, ["nationCode", "nationName", "nationType", "nation", "country"]);
   const nationKind = classifySupportedNation(nation);
   const exchange = market === "CRYPTO"
-    ? "NAVER"
+    ? "UPBIT"
     : normalizeSupportedExchange(market, exchangeRaw)
       || (market === "KR" && nationKind === "KR" ? "KRX" : "")
       || (market === "US" && nationKind === "US" ? "USA" : "");
