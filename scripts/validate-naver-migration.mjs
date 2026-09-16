@@ -5,6 +5,7 @@ const ROOT = process.cwd();
 const EXECUTABLE_ROOTS = ["app", "lib", "db"];
 const REQUIRED_FILES = [
   "lib/server/naver-stock.ts",
+  "lib/server/naver-fx.ts",
   "lib/server/trading-quote.ts",
   "lib/server/market-hours.ts",
   "lib/server/market-search.ts",
@@ -87,6 +88,9 @@ if (!tradingQuote.includes('session.exchange === "NXT"')) {
 }
 if (!tradingQuote.includes("isExecutableTradingQuote")) {
   failures.push("executable quote freshness guard is missing");
+}
+if (!tradingQuote.includes("getNaverUsdKrwRate") || !tradingQuote.includes("quote.stale || fx.stale")) {
+  failures.push("US trading quotes must reject stale Naver FX data");
 }
 
 for (const path of [
