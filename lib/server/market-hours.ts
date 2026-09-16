@@ -94,11 +94,48 @@ function sessionLabel(type: string, market: Market) {
   return type || (market === "US" ? "미국장" : "국내장");
 }
 
+function newYorkMinutesNow() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
+  const hour = Number(value("hour"));
+  const minute = Number(value("minute"));
+  return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1;
+}
+
+function isUsAfterMarket(type: string) {
+  const normalized = type.toLocaleLowerCase("en-US");
+  return normalized.includes("after") && !normalized.includes("closing");
+}
+
+function minusTenMinutes(value: string) {
+  const match = value.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "";
+  const total = (hour * 60 + minute - 10 + 24 * 60) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function usAfterMarketCloseKst(detail: ReturnType<typeof sessionDetails>) {
+  return minusTenMinutes(detail.closeTimeKst) || (detail.daylight === false ? "09:50" : "08:50");
+}
+
 function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen || !detail.currentType) return false;
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
-  if (market === "US") return true;
+  if (market === "US") {
+    // Naver keeps the U.S. after-market session open until 20:00 ET. MarketMate
+    // intentionally stops new mock orders ten minutes earlier, at 19:50 ET.
+    if (isUsAfterMarket(detail.currentType) && newYorkMinutesNow() >= 19 * 60 + 50) return false;
+    return true;
+  }
   if (market === "KR" && exchange === "krx" && type.includes("pre")) return false;
   return true;
 }
@@ -141,11 +178,22 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
         ?? detailed[0]
       : detailed.find(item => item.tradable) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
     const exchange = stringValue(selected.status, ["exchange"]).toUpperCase();
-    const detail = selected.detail;
+    const rawDetail = selected.detail;
+    const afterMarket = market === "US" && isUsAfterMarket(rawDetail.currentType);
+    const detail = afterMarket ? { ...rawDetail, closeTimeKst: usAfterMarketCloseKst(rawDetail) } : rawDetail;
     const isOpen = selected.tradable;
+    const afterMarketCutoffReached = afterMarket && rawDetail.isOpen && !isOpen && newYorkMinutesNow() >= 19 * 60 + 50;
     const sessionName = sessionLabel(detail.currentType, market);
     const excludedOpenSession = detail.isOpen && !isOpen;
-    const label = detail.holiday ? "휴장일" : isOpen ? sessionName : excludedOpenSession ? sessionName : "장 마감";
+    const label = detail.holiday
+      ? "휴장일"
+      : afterMarketCutoffReached
+        ? "애프터마켓 마감"
+        : isOpen
+          ? sessionName
+          : excludedOpenSession
+            ? sessionName
+            : "장 마감";
     const schedule = detail.openTimeKst && detail.closeTimeKst ? ` · ${detail.openTimeKst}~${detail.closeTimeKst} KST` : "";
     const dst = market === "US" && detail.daylight !== undefined ? ` · ${detail.daylight ? "서머타임" : "표준시"}` : "";
     return {
@@ -153,11 +201,13 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
       label: `${label}${exchange ? ` · ${exchange}` : ""}`,
       notice: detail.holiday
         ? "네이버증권 기준 휴장일로 주문할 수 없습니다."
-        : isOpen
-          ? `${sessionName} 주문 가능${schedule}${dst}`
-          : excludedOpenSession
-            ? `${sessionName}은 현재 모의투자 주문 대상에서 제외됩니다${schedule}${dst}.`
-            : `네이버증권 기준 현재 거래 세션이 닫혀 있습니다${schedule}${dst}.`,
+        : afterMarketCutoffReached
+          ? `애프터마켓 모의주문은 ${detail.closeTimeKst || (detail.daylight === false ? "09:50" : "08:50")} KST에 마감되었습니다${dst}.`
+          : isOpen
+            ? `${sessionName} 주문 가능${schedule}${dst}`
+            : excludedOpenSession
+              ? `${sessionName}은 현재 모의투자 주문 대상에서 제외됩니다${schedule}${dst}.`
+              : `네이버증권 기준 현재 거래 세션이 닫혀 있습니다${schedule}${dst}.`,
       exchange: exchange || undefined,
       isHoliday: detail.holiday,
       currentSession: detail.currentType || undefined,
