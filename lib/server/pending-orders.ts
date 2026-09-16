@@ -5,9 +5,12 @@ import { getCheckedMarketSession } from "@/lib/server/market-hours";
 type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; quantityMicros: number; limitPriceMicros: number };
 
 export async function matchPendingOrders(quote: LiveQuote) {
-  if (!env.DB) return;
+  if (!env.DB || quote.stale) return;
+  const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
+  if (!Number.isFinite(sourceTime) || Math.abs(Date.now() - sourceTime) > 60_000) return;
+
   const session = await getCheckedMarketSession(quote.market);
-  if (!session.isOpen) return;
+  if (!session.isOpen || session.stale) return;
   const instrumentId = `${quote.market}:${quote.symbol}`;
   const nativePriceMicros = Math.round(quote.price * 1_000_000);
   const rows = await env.DB.prepare(`SELECT id,participant_id AS participantId,side,quantity_micros AS quantityMicros,limit_price_micros AS limitPriceMicros
