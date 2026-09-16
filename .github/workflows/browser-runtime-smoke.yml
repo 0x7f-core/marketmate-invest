@@ -1,0 +1,127 @@
+name: Browser runtime smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - refactor/naver-market-data
+    paths:
+      - app/**
+      - components/**
+      - lib/**
+      - db/**
+      - drizzle/**
+      - vendor/**
+      - scripts/validate-browser-runtime.mjs
+      - vite.config.ts
+      - package.json
+      - pnpm-lock.yaml
+      - .github/workflows/browser-runtime-smoke.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - app/**
+      - components/**
+      - lib/**
+      - db/**
+      - drizzle/**
+      - vendor/**
+      - scripts/validate-browser-runtime.mjs
+      - vite.config.ts
+      - package.json
+      - pnpm-lock.yaml
+      - .github/workflows/browser-runtime-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-runtime-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Worker
+        run: pnpm run build
+
+      - name: Apply local D1 migrations
+        run: |
+          mkdir -p .wrangler/state
+          for file in $(find drizzle -maxdepth 1 -name '*.sql' -type f | sort); do
+            echo "Applying $file"
+            pnpm exec wrangler d1 execute site-creator-d1 \
+              --local \
+              --persist-to .wrangler/state \
+              --config dist/server/wrangler.json \
+              --file "$file"
+          done
+
+      - name: Start local Worker
+        run: |
+          node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev \
+            --config dist/server/wrangler.json \
+            --local \
+            --persist-to .wrangler/state \
+            --ip 127.0.0.1 \
+            --port 8787 \
+            --inspector-port 0 > /tmp/marketmate-worker.log 2>&1 &
+          echo $! > /tmp/marketmate-worker.pid
+
+      - name: Show browser version
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            google-chrome --version
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            google-chrome-stable --version
+          elif command -v chromium >/dev/null 2>&1; then
+            chromium --version
+          else
+            echo "Chrome/Chromium is unavailable on this runner"
+            exit 1
+          fi
+
+      - name: Run desktop/mobile browser smoke
+        run: node scripts/validate-browser-runtime.mjs
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-runtime-screenshots
+          path: artifacts/browser-smoke/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Print Worker log on failure
+        if: failure()
+        run: cat /tmp/marketmate-worker.log || true
+
+      - name: Stop local Worker
+        if: always()
+        run: |
+          if [ -f /tmp/marketmate-worker.pid ]; then
+            kill "$(cat /tmp/marketmate-worker.pid)" || true
+          fi
