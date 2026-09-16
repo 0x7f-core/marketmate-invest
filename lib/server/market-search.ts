@@ -1,5 +1,5 @@
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
-import { normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
+import { looksLikeCaseSensitiveReutersCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
 
 function text(record: Record<string, unknown>, keys: string[]) {
@@ -44,7 +44,8 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const fqnf = text(record, ["fqnfTicker", "fqnf_ticker"]);
   let symbol = text(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
 
-  if (market === "US" && !symbol && reuters) symbol = reuters.split(".")[0];
+  if (market === "US" && reuters && looksLikeCaseSensitiveReutersCode(reuters)) symbol = reuters;
+  else if (market === "US" && !symbol && reuters) symbol = reuters.split(".")[0];
   if (market === "CRYPTO") {
     const ticker = (symbol || fqnf.split("_")[0]).replace(/^KRW-/, "");
     symbol = ticker ? `KRW-${ticker}` : "";
