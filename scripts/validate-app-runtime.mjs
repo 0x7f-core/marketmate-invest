@@ -60,20 +60,21 @@ const search = await jsonRequest(`/api/instruments/search?q=${encodeURIComponent
 assert(search.response.status === 200, `instrument search expected 200, got ${search.response.status}: ${JSON.stringify(search.data)}`);
 assert(Array.isArray(search.data?.instruments), "instrument search did not return instruments[]");
 assert(
-  search.data.instruments.some(item => item?.market === "KR" && item?.symbol === "005930"),
+  search.data.instruments.some(item => item?.market === "KR" && item?.symbol === "005930" && item?.name === "삼성전자"),
   `Samsung 005930 missing from Naver-backed name search: ${JSON.stringify(search.data?.instruments)}`,
 );
 assert(search.data?.source === "NAVER", "instrument search source is not NAVER");
 console.log("PASS authenticated Naver instrument name search");
 
 const codeSearch = await jsonRequest("/api/instruments/search?q=005930&market=KR", { headers: authHeaders, cache: "no-store" });
-assert(codeSearch.response.status === 200, `numeric instrument search expected 200, got ${codeSearch.response.status}`);
+assert(codeSearch.response.status === 200, `numeric instrument search expected 200, got ${codeSearch.response.status}: ${JSON.stringify(codeSearch.data)}`);
 assert(Array.isArray(codeSearch.data?.instruments), "numeric instrument search did not return instruments[]");
-if (codeSearch.data.instruments.some(item => item?.market === "KR" && item?.symbol === "005930")) {
-  console.log("PASS Naver numeric-code instrument search");
-} else {
-  console.warn(`WARN Naver autocomplete did not return 005930 for exact numeric query: ${JSON.stringify(codeSearch.data.instruments)}`);
-}
+assert(
+  codeSearch.data.instruments.some(item => item?.market === "KR" && item?.symbol === "005930" && item?.name === "삼성전자"),
+  `Samsung 005930 missing from exact numeric search: ${JSON.stringify(codeSearch.data?.instruments)}`,
+);
+assert(codeSearch.data?.source === "NAVER", "numeric instrument search source is not NAVER");
+console.log("PASS Naver numeric-code instrument search");
 
 const marketStatus = await jsonRequest("/api/market-status?market=KR", { headers: authHeaders, cache: "no-store" });
 assert(marketStatus.response.status === 200, `market status expected 200, got ${marketStatus.response.status}: ${JSON.stringify(marketStatus.data)}`);
