@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getLiveQuote, persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
+import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 type OrderBody = {
@@ -9,6 +10,10 @@ type OrderBody = {
   name?: string; exchange?: string; side?: "buy" | "sell"; orderType?: "market" | "limit";
   quantity?: number; limitPrice?: number;
 };
+
+function isQuoteUnavailable(error: unknown) {
+  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE"].includes(error.message));
+}
 
 export async function GET(request: Request) {
   try {
@@ -70,9 +75,9 @@ export async function POST(request: Request) {
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
     const quote = await getLiveQuote(body.market, body.symbol.toUpperCase(), body.exchange);
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
-    if (Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
+    if (quote.stale || Math.abs(now - sourceTime) > 60_000) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
-    if (!Number.isFinite(fxRate) || fxRate <= 0) return Response.json({ error: "한국투자증권 환율을 확인할 수 없어 미국주식 주문을 중단했습니다." }, { status: 503 });
+    if (!Number.isFinite(fxRate) || fxRate <= 0) return Response.json({ error: "네이버증권 환율을 확인할 수 없어 미국주식 주문을 중단했습니다." }, { status: 503 });
 
     const quantityMicros = Math.round(Number(body.quantity) * 1_000_000);
     const nativePriceMicros = Math.round(quote.price * 1_000_000);
@@ -149,8 +154,8 @@ export async function POST(request: Request) {
     await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol: body.symbol, side: body.side, orderType: body.orderType, quantity: body.quantity }).catch(() => undefined);
     return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && ["KIS_NOT_CONFIGURED", "KIS_AUTH_FAILED", "KIS_AUTH_BUSY", "KIS_QUOTE_FAILED", "UPBIT_QUOTE_FAILED"].includes(error.message)) {
-      return Response.json({ error: "실시간 시세 제공자에 연결할 수 없어 주문을 중단했습니다." }, { status: 503 });
+    if (isQuoteUnavailable(error)) {
+      return Response.json({ error: "네이버증권 실시간 시세를 확인할 수 없어 주문을 중단했습니다." }, { status: 503, headers: { "retry-after": "30" } });
     }
     return apiError(error);
   }
