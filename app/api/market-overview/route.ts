@@ -6,8 +6,12 @@ export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
     await enforceRateLimit(request, "market_overview", 60, 60_000, user.id);
-    const quotes = await getMarketOverview();
-    return Response.json({ quotes, timestamp: Date.now() }, { headers: { "cache-control": "private, max-age=2" } });
+    const resolved = await getMarketOverview();
+    const quotes = resolved.filter(quote => !quote.stale);
+    return Response.json(
+      { quotes, partial: quotes.length !== resolved.length, staleOmitted: resolved.length !== quotes.length, timestamp: Date.now() },
+      { headers: { "cache-control": "private, max-age=2" } },
+    );
   } catch (error) {
     return apiError(error);
   }
