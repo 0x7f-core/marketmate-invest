@@ -44,8 +44,8 @@ export async function getTradingQuote(
   if (market === "US") {
     const fx = await getNaverUsdKrwRate();
     if (fx.stale) throw new Error("NAVER_FX_UNAVAILABLE");
-    const quote = await getLiveQuote(market, symbol, exchange);
-    return normalizeTradingTimestamp({ ...quote, exchangeRate: fx.rate });
+    const quote = await getLiveQuote(market, symbol, exchange, fx.rate);
+    return normalizeTradingTimestamp(quote);
   }
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
