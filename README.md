@@ -48,6 +48,8 @@
 
 현재가 polling 응답의 `pollingInterval`을 다음 네이버 upstream 호출까지의 최소 서버 캐시 시간으로 사용합니다. 같은 URL에 대한 동시 요청은 하나로 합치며, 403·429·timeout·빈 응답·비정상 JSON이 발생하면 허용된 짧은 기간 동안 마지막 네이버 응답만 stale cache로 사용할 수 있습니다. 다른 시세 공급자로 자동 전환하지 않습니다.
 
+시장 개요(KOSPI·KOSDAQ·S&P 500·나스닥·BTC)도 고정 주기로 Worker를 호출하지 않습니다. fresh 응답의 `pollingInterval` 중 가장 빠른 값을 기준으로 다음 호출을 예약하며, 과도한 호출을 막기 위해 2~120초 범위로 제한합니다. 더 느린 upstream은 서버 캐시가 각자 자신의 `pollingInterval`을 계속 존중합니다.
+
 네이버 upstream 응답은 최대 5 MiB로 제한하며 `Content-Length`가 없더라도 스트림을 읽는 도중 제한을 넘으면 즉시 중단합니다. 요청 timeout은 응답 헤더 수신까지만이 아니라 본문 수신·JSON 처리까지 유지합니다.
 
 ## 모의주문 체결 안전장치
@@ -58,13 +60,14 @@
 - 네이버 polling 응답에서 실제 거래시각이 확인되지 않은 시세는 화면 표시에는 사용할 수 있지만 모의체결에는 사용하지 않습니다.
 - 검증된 source timestamp의 허용 범위는 `max(60초, pollingInterval + 15초)`로 계산하고 최대 180초로 제한하며, 이를 넘으면 체결을 중단합니다.
 - NXT 시세에 실제 체결시각이 없으면 체결을 중단합니다.
-- 미국주식 원화 환산은 네이버증권 `FX_USDKRW`만 사용하며, 환율 응답이 stale이면 주가가 최신이어도 미국 거래용 quote를 중단합니다.
+- 미국 프리마켓·애프터마켓 역시 market-status가 OPEN인 것만으로 체결하지 않습니다. Naver worldstock polling 시세에서 실제 거래시각이 확인되고 freshness window 안에 있을 때만 체결합니다. 따라서 정규장 종가와 오래된 거래시각만 남아 있으면 주문은 fail-closed 됩니다.
+- 미국주식 원화 환산은 네이버증권 `FX_USDKRW`만 사용하며, 환율 응답이 stale이면 주가가 최신이어도 미국 거래용 quote를 중단합니다. 표시/거래 경로는 같은 `naver-fx.ts` 파서를 사용하고 거래 경로는 이미 검증한 fresh FX 값을 재사용합니다.
 - 국내/미국주식은 네이버 market-status가 최신 상태로 확인될 때만 체결합니다.
 - 지정가 대기 주문도 미검증 timestamp, stale/freshness window 초과 시세 또는 stale 장 상태로는 자동 체결하지 않습니다.
 - 지정가 자동체결 시 국내 현재 거래소와 quote venue가 다르면 체결하지 않습니다.
 - 네이버증권 장애 시 다른 공급자 가격으로 우회 체결하지 않습니다.
 
-국내 종목 메타데이터에는 현재 선택된 실제 quote venue(`KRX` 또는 `NXT`)를 저장합니다. 화면도 quote 응답의 venue를 따라가므로 KRX 우선 구간과 KRX 종료 후 NXT 단독 구간의 표시가 서버 체결 정책과 일치합니다.
+국내 종목 메타데이터에는 현재 선택된 실제 quote venue(`KRX` 또는 `NXT`)를 저장합니다. 화면도 quote 응답의 venue를 따라가므로 KRX 우선 구간과 KRX 종료 후 NXT 단독 구간의 표시가 서버 체결 정책과 일치합니다. KRX에서 접수한 지정가 주문이 이후 NXT 단독 구간에서 실제 체결되는 경우에도 성공한 fill의 venue로 종목 메타데이터를 갱신합니다. 포트폴리오와 참가자 공개 투자현황은 저장된 실제 exchange를 그대로 사용합니다.
 
 ## 차트
 
@@ -87,6 +90,8 @@ PC와 모바일 모두 동일한 차트 컴포넌트와 기간 선택 방식을 
 - `closeTimeKst`
 
 국내는 KRX/NXT 두 상태를 함께 확인하며 **동시 개장 시 KRX를 우선**합니다. KRX가 거래 가능하지 않고 NXT만 열려 있을 때에만 NXT를 선택합니다. 미국주식은 네이버 market-status가 OPEN으로 확인한 프리마켓·정규장·애프터마켓 세션에서 주문할 수 있으며, closing 세션은 제외합니다. `marketState`가 OPEN이어도 세션 타입을 확인할 수 없으면 안전을 위해 주문을 중단합니다. 시장상태 API를 확인할 수 없거나 stale cache만 남아 있는 경우에도 주식 주문을 중단합니다. 가상자산은 24시간 시장으로 처리합니다.
+
+시장/종목을 전환하면 새 `market-status`가 도착하기 전까지 UI도 즉시 `확인 중`·주문 불가 상태로 초기화해 이전 시장의 OPEN 상태를 잠깐 재사용하지 않습니다.
 
 ## 네이버 시장 상세 API
 
@@ -163,6 +168,6 @@ pnpm run lint
 pnpm run build
 ```
 
-`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, active venue 저장/표시, 시세·환율 freshness guard, 네이버 응답 크기·timeout guard 같은 핵심 전환 조건을 빠르게 점검합니다.
+`validate:migration`은 실행 코드에서 KIS OpenAPI host, 직접 `api.upbit.com` 호출, TradingView Embed iframe이 다시 유입되지 않았는지와 KRX→NXT 우선순위, 미국 애프터마켓 허용, 거래·평가 라우트의 `getTradingQuote()` 강제, active venue 저장/표시, 공통 FX 파서, 시세·환율 freshness guard, 시장개요 pollingInterval, 네이버 응답 크기·timeout guard 같은 핵심 전환 조건을 빠르게 점검합니다.
 
 ChatGPT Sites가 `.openai/hosting.json`의 `DB` 바인딩을 실제 D1에 연결하고 배포 시 Drizzle 마이그레이션을 적용합니다.
