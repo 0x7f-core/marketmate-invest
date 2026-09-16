@@ -24,6 +24,19 @@ function collectRows(payload: unknown) {
   return [];
 }
 
+function collectRecords(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
+  if (depth > 5 || output.length >= 200 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) collectRecords(item, depth + 1, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).some(key => /(?:reuters|ticker|symbol|code|name)/i.test(key))) output.push(record);
+  for (const child of Object.values(record)) if (child && typeof child === "object") collectRecords(child, depth + 1, output);
+  return output;
+}
+
 function publishedAt(record: Record<string, unknown>, index: number) {
   for (const key of ["publishedAt", "publishDateTime", "releasedAt", "datetime", "dateTime", "createdAt", "date"]) {
     const value = record[key];
@@ -68,19 +81,53 @@ function normalizeNews(payload: unknown) {
     .slice(0, 20);
 }
 
-async function fetchNaverNews(market: string, symbol: string, name: string) {
+function codeKey(value: string) {
+  return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+async function resolveReutersCode(symbol: string, exchange: string) {
+  if (/^[A-Za-z0-9._-]+\.[A-Za-z]{1,4}$/.test(symbol)) return symbol;
+  try {
+    const query = symbol.replaceAll("_", ".");
+    const result = await naverJson<unknown>(
+      buildNaverPath("/api/autocomplete/search/autoComplete", { query, target: "stock" }),
+      { ttlMs: 24 * 60 * 60_000, staleMs: 7 * 24 * 60 * 60_000 },
+    );
+    const wanted = codeKey(query);
+    const matches = collectRecords(result.data).map(record => ({
+      reuters: stringValue(record, ["reutersCode", "reuterscode"]),
+      ticker: stringValue(record, ["ticker", "symbol", "itemCode", "stockCode", "code"]),
+      nation: stringValue(record, ["nationType", "nation", "country", "marketType"]),
+    })).filter(item => item.reuters.includes("."));
+    const found = matches.find(item => codeKey(item.ticker) === wanted || codeKey(item.reuters.split(".")[0]) === wanted)
+      ?? matches.find(item => /USA|US|미국/i.test(item.nation))
+      ?? matches[0];
+    if (found?.reuters) return found.reuters;
+  } catch {
+    // Use the known exchange suffix only as an identifier fallback; no provider fallback is used.
+  }
+  const venue = exchange.toUpperCase();
+  const suffix = venue.includes("NYS") || venue.includes("NYSE") ? ".N" : venue.includes("AMS") || venue.includes("AMEX") ? ".A" : ".O";
+  return `${symbol.replaceAll("_", ".")}${suffix}`;
+}
+
+async function fetchNaverNews(market: string, symbol: string, name: string, exchange: string) {
   if (market === "CRYPTO") {
     const ticker = symbol.replace(/^KRW-/, "").split("_")[0] || "BTC";
     return naverJson<unknown>(buildNaverPath(`/api/coin/globalNews/${encodeURIComponent(ticker)}`, { pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
   }
-  if (name) {
-    return naverJson<unknown>(buildNaverPath("/api/domestic/news/search", { query: name, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
-  }
   if (market === "US") {
+    if (symbol) {
+      const reutersCode = await resolveReutersCode(symbol, exchange);
+      return naverJson<unknown>(buildNaverPath("/api/foreign/worldStock/list", { reutersCode, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+    }
     return naverJson<unknown>(buildNaverPath("/api/foreign/news/worldNews", { page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
   }
   if (symbol) {
     return naverJson<unknown>(buildNaverPath("/api/domestic/detail/news", { itemCode: symbol, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
+  }
+  if (name) {
+    return naverJson<unknown>(buildNaverPath("/api/domestic/news/search", { query: name, page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
   }
   return naverJson<unknown>(buildNaverPath("/api/domestic/news/list", { category: "MAINNEWS", page: 1, pageSize: 20 }), { ttlMs: 90_000, staleMs: 15 * 60_000 });
 }
@@ -93,8 +140,10 @@ export async function GET(request: Request) {
     const market = url.searchParams.get("market") ?? "KR";
     const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase().slice(0, 32);
     const name = (url.searchParams.get("name") ?? "").slice(0, 80);
+    const exchange = (url.searchParams.get("exchange") ?? "").slice(0, 20);
     if (!["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "시장을 확인해주세요." }, { status: 400 });
-    const result = await fetchNaverNews(market, symbol, name);
+    if (symbol && !/^[A-Z0-9._-]{1,32}$/.test(symbol)) return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+    const result = await fetchNaverNews(market, symbol, name, exchange);
     const items = normalizeNews(result.data);
     return Response.json({ items, source: "NAVER", stale: result.stale }, { headers: { "cache-control": "private, max-age=60" } });
   } catch (error) {
