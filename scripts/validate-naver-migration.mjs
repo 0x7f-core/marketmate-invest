@@ -124,11 +124,16 @@ if (!orders.includes("quote.venue ?? body.exchange ?? body.market")) {
 }
 
 const quotesRoute = await source("app/api/quotes/route.ts");
-if (!quotesRoute.includes("quote.venue ?? exchange ?? quote.market")) {
-  failures.push("quote refreshes must persist the actual active KR venue when available");
+if (!quotesRoute.includes("const resolvedExchange = quote.venue") || !quotesRoute.includes("ELSE instruments.exchange END")) {
+  failures.push("quote refreshes must persist active KR venues without overwriting known US exchanges");
 }
 if (!quotesRoute.includes("new Set(symbols.map")) {
   failures.push("quote refreshes must deduplicate normalized symbols");
+}
+
+for (const path of ["app/api/portfolio/route.ts", "app/api/participants/activity/route.ts"]) {
+  const text = await source(path);
+  if (!text.includes("i.exchange")) failures.push(`instrument exchange must be exposed to portfolio/activity clients: ${path}`);
 }
 
 const dashboard = await source("app/trading-dashboard.tsx");
