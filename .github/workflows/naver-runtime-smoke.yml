@@ -34,3 +34,44 @@ jobs:
 
       - name: Validate live Naver Stock endpoints
         run: node scripts/validate-naver-runtime.mjs
+
+      - name: Diagnose live US logo assets
+        run: |
+          node <<'NODE'
+          const urls = [
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQ.O.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockGEV.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockGEV.N.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSOXL.O.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockSPY.P.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/stock/StockQQQ.O.png',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/etf/QQQ.O.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/etf/EtfQQQ.O.svg',
+            'https://ssl.pstatic.net/imgstock/fn/real/logo/etf/ETFQQQ.O.svg',
+          ];
+          for (const url of urls) {
+            try {
+              const response = await fetch(url, { headers: { 'user-agent':'Mozilla/5.0', referer:'https://stock.naver.com/' }, redirect:'manual' });
+              const body = await response.text();
+              console.log('LOGO_ASSET', response.status, response.headers.get('content-type'), body.length, url, body.slice(0, 220).replace(/\s+/g,' '));
+            } catch (error) {
+              console.log('LOGO_ASSET_ERROR', url, String(error));
+            }
+          }
+
+          const page = await fetch('https://stock.naver.com/market/stock/usa/stocklist/priceTop', { headers: { 'user-agent':'Mozilla/5.0' } });
+          const html = await page.text();
+          const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(match => new URL(match[1], 'https://stock.naver.com').href);
+          console.log('PAGE_SCRIPTS', scripts.length);
+          for (const script of scripts.slice(-30)) {
+            try {
+              const js = await (await fetch(script, { headers: { 'user-agent':'Mozilla/5.0', referer:'https://stock.naver.com/' } })).text();
+              const hits = [];
+              for (const token of ['imgstock/fn/real/logo', 'Stock${', '/logo/stock/', 'worldstock/etf']) {
+                const i = js.indexOf(token);
+                if (i >= 0) hits.push(js.slice(Math.max(0,i-350), i+650));
+              }
+              if (hits.length) console.log('JS_LOGO_MATCH', script, hits.join('\n---\n').slice(0,8000));
+            } catch {}
+          }
+          NODE
