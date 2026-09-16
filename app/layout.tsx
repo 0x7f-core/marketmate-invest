@@ -15,18 +15,21 @@ export const metadata: Metadata = {
 
 // The React renderer currently builds a fallback venue suffix from the simplified
 // exchange label. Naver autocomplete already returns Reuters-coded US symbols
-// such as GEV.N, SOXL.O and SPY.K, so the old renderer can temporarily request
-// invalid paths such as StockGEV.N.K.svg or StockSOXL.O.O.svg. Repair those
-// paths proactively and, for genuinely missing venue mappings, retry Naver's
-// Reuters venue suffixes before the React letter fallback is allowed to run.
+// such as GEV.N, SOXL.O and NYSE Arca ETF codes ending in .P, so the old renderer
+// can temporarily request invalid paths such as StockGEV.N.K.svg or
+// StockSPY.P.O.svg. Repair those paths proactively and, for genuinely missing
+// venue mappings, retry Naver's common US Reuters venue suffixes before the React
+// letter fallback is allowed to run. Keeping the Reuters code intact also keeps
+// Naver's native ETF artwork, including issuer CI and leverage badges.
 const NAVER_US_LOGO_RECOVERY = String.raw`(() => {
   const prefix = "https://ssl.pstatic.net/imgstock/fn/real/logo/stock/Stock";
-  const venueSuffixes = ["N", "O", "K", "A"];
+  const venueSuffixes = ["N", "O", "P", "K", "A"];
+  const venueClass = "ONPKA";
 
   const parseLogo = (source) => {
     if (!source || !source.startsWith(prefix)) return null;
     const clean = source.split("?")[0].split("#")[0];
-    const match = clean.match(/\/Stock(.+)\.([ONKA])\.svg$/i);
+    const match = clean.match(new RegExp("/Stock(.+)\\.([" + venueClass + "])\\.svg$", "i"));
     if (!match) return null;
     return { base: match[1], suffix: match[2].toUpperCase() };
   };
@@ -35,7 +38,7 @@ const NAVER_US_LOGO_RECOVERY = String.raw`(() => {
     const source = image.currentSrc || image.src || "";
     if (!source.startsWith(prefix)) return false;
     const clean = source.split("?")[0].split("#")[0];
-    const duplicate = clean.match(/\/Stock(.+)\.([ONKA])\.([ONKA])\.svg$/i);
+    const duplicate = clean.match(new RegExp("/Stock(.+)\\.([" + venueClass + "])\\.([" + venueClass + "])\\.svg$", "i"));
     if (!duplicate) return false;
 
     const base = duplicate[1];
@@ -74,7 +77,7 @@ const NAVER_US_LOGO_RECOVERY = String.raw`(() => {
 
     let base = parsed.base;
     let preferredSuffix = "";
-    const embedded = base.match(/^(.*)\.([ONKA])$/i);
+    const embedded = base.match(new RegExp("^(.*)\\.([" + venueClass + "])$", "i"));
     if (embedded) {
       base = embedded[1];
       preferredSuffix = embedded[2].toUpperCase();
