@@ -12,6 +12,7 @@ on:
       - db/**
       - drizzle/**
       - scripts/validate-app-runtime.mjs
+      - scripts/validate-us-app-runtime.mjs
       - vite.config.ts
       - .github/workflows/app-runtime-smoke.yml
 
@@ -74,6 +75,9 @@ jobs:
 
       - name: Run app-level smoke
         run: node scripts/validate-app-runtime.mjs
+
+      - name: Run US ETF app smoke
+        run: node scripts/validate-us-app-runtime.mjs
 
       - name: Print Worker log on failure
         if: failure()
