@@ -26,9 +26,9 @@ function collect(value: unknown, depth = 0, output: Array<Record<string, unknown
 
 function marketOf(record: Record<string, unknown>): Market | null {
   const reuters = text(record, ["reutersCode", "reuterscode"]);
-  const exchange = text(record, ["exchangeType", "exchange", "marketType", "nationType", "nation", "country"]);
+  const exchange = text(record, ["exchangeType", "exchange", "marketType", "typeCode", "typeName", "nationType", "nation", "country"]);
   const fqnf = text(record, ["fqnfTicker", "fqnf_ticker"]);
-  const type = text(record, ["type", "category", "targetType", "assetType"]);
+  const type = text(record, ["type", "category", "targetType", "assetType", "typeCode", "typeName"]);
   if (fqnf || /UPBIT|BITHUMB|COIN|CRYPTO|가상자산/i.test(`${exchange} ${type}`)) return "CRYPTO";
   if (reuters || /USA|NASDAQ|NYSE|AMEX|미국/i.test(exchange)) return "US";
   const code = text(record, ["itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
@@ -53,7 +53,7 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   if (!name || !symbol) return null;
 
   const normalizedSymbol = market === "US" ? normalizeNaverReutersCode(symbol) : symbol.toUpperCase();
-  const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "nationType"]);
+  const exchangeRaw = text(record, ["exchangeName", "exchangeType", "exchange", "marketName", "marketType", "typeCode", "typeName", "nationType"]);
   const exchange = market === "KR" ? (exchangeRaw || "KRX") : market === "US" ? (exchangeRaw || "USA") : "NAVER";
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
