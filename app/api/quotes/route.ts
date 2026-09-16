@@ -2,6 +2,7 @@ import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { matchPendingOrders } from "@/lib/server/pending-orders";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
+import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote } from "@/lib/server/trading-quote";
 import { enforceRateLimit } from "@/lib/server/safety";
 import { env } from "cloudflare:workers";
@@ -24,7 +25,11 @@ export async function GET(request: Request) {
       return Response.json({ error: "market과 symbols가 필요합니다." }, { status: 400 });
     }
 
-    const results = await Promise.allSettled(symbols.map(symbol => getTradingQuote(market, symbol.toUpperCase(), symbols.length === 1 ? exchange : undefined)));
+    const normalizedSymbols = symbols.map(symbol => normalizeNaverMarketSymbol(market, symbol));
+    if (normalizedSymbols.some(symbol => !/^[A-Za-z0-9._-]{1,32}$/.test(symbol))) {
+      return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
+    }
+    const results = await Promise.allSettled(normalizedSymbols.map(symbol => getTradingQuote(market, symbol, normalizedSymbols.length === 1 ? exchange : undefined)));
     const resolved = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     const quotes = resolved.filter(quote => !quote.stale);
 
@@ -43,7 +48,7 @@ export async function GET(request: Request) {
     await Promise.allSettled(quotes.map(persistQuoteSnapshot));
     await Promise.allSettled(quotes.map(matchPendingOrders));
     return Response.json(
-      { quotes, partial: quotes.length !== symbols.length, staleOmitted: resolved.length !== quotes.length, source: "NAVER" },
+      { quotes, partial: quotes.length !== normalizedSymbols.length, staleOmitted: resolved.length !== quotes.length, source: "NAVER" },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
