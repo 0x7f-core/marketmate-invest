@@ -38,8 +38,8 @@ function marketOf(record: Record<string, unknown>): Market | null {
 
 function normalizeUsExchange(value: string) {
   const upper = value.toUpperCase();
+  if (upper.includes("NYSE AMERICAN") || upper.includes("AMEX") || upper === "AMS" || upper === "ASE") return "AMS";
   if (upper.includes("NYSE") || upper === "NYS" || upper === "NYQ") return "NYS";
-  if (upper.includes("AMEX") || upper === "AMS" || upper === "ASE") return "AMS";
   if (upper.includes("NASDAQ") || upper === "NAS" || upper === "NSQ" || upper === "NMS") return "NAS";
   return value || "USA";
 }
