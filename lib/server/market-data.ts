@@ -11,6 +11,7 @@ export type LiveQuote = {
   currency: "KRW" | "USD";
   exchangeRate: number;
   timestamp: number;
+  timestampVerified?: boolean;
   source: "NAVER";
   stale?: boolean;
   pollingInterval?: number;
@@ -87,10 +88,30 @@ function normalizeTimestamp(value: unknown, fallback: number) {
   return fallback;
 }
 
+function verifiedQuoteTimestamp(record: Record<string, unknown>) {
+  for (const key of [
+    "localTradedAt",
+    "tradeDateTime",
+    "tradedAt",
+    "tradeBaseAt",
+    "dateTime",
+    "datetime",
+    "timestamp",
+    "tradeTimestamp",
+    "candleDateTimeKst",
+    "candleDateTimeUtc",
+  ]) {
+    const parsed = normalizeTimestamp(record[key], 0);
+    if (parsed > 0) return parsed;
+  }
+  return 0;
+}
+
 function recordTimestamp(record: Record<string, unknown>, fallback: number) {
-  for (const key of ["localTradedAt", "tradeDateTime", "tradeBaseAt", "dateTime", "timestamp", "datetime", "date", "businessDate", "baseDate", "xymd"]) {
-    const value = record[key];
-    const parsed = normalizeTimestamp(value, 0);
+  const verified = verifiedQuoteTimestamp(record);
+  if (verified > 0) return verified;
+  for (const key of ["date", "localDate", "tradeDate", "bizDate", "businessDate", "baseDate", "xymd"]) {
+    const parsed = normalizeTimestamp(record[key], 0);
     if (parsed > 0) return parsed;
   }
   return fallback;
@@ -185,7 +206,8 @@ async function domesticQuote(symbol: string): Promise<LiveQuote> {
   if (!row) throw new Error("NAVER_EMPTY_QUOTE");
   const values = quoteValues(row);
   if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
-  return { market: "KR", symbol, ...values, currency: "KRW", exchangeRate: 1, timestamp: recordTimestamp(row, result.fetchedAt), source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
+  const sourceTimestamp = verifiedQuoteTimestamp(row);
+  return { market: "KR", symbol, ...values, currency: "KRW", exchangeRate: 1, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
 async function foreignQuote(symbol: string, exchange?: string): Promise<LiveQuote> {
@@ -195,7 +217,8 @@ async function foreignQuote(symbol: string, exchange?: string): Promise<LiveQuot
   if (!row) throw new Error("NAVER_EMPTY_QUOTE");
   const values = quoteValues(row);
   if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
-  return { market: "US", symbol, ...values, currency: "USD", exchangeRate: await usdKrwRate(), timestamp: recordTimestamp(row, result.fetchedAt), source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
+  const sourceTimestamp = verifiedQuoteTimestamp(row);
+  return { market: "US", symbol, ...values, currency: "USD", exchangeRate: await usdKrwRate(), timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
 function cryptoTicker(symbol: string) {
@@ -210,7 +233,8 @@ async function cryptoQuote(symbol: string): Promise<LiveQuote> {
   if (!row) throw new Error("NAVER_EMPTY_QUOTE");
   const values = quoteValues(row);
   if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
-  return { market: "CRYPTO", symbol: `KRW-${ticker}`, ...values, currency: "KRW", exchangeRate: 1, timestamp: recordTimestamp(row, result.fetchedAt), source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
+  const sourceTimestamp = verifiedQuoteTimestamp(row);
+  return { market: "CRYPTO", symbol: `KRW-${ticker}`, ...values, currency: "KRW", exchangeRate: 1, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
 export async function getLiveQuote(market: Market, symbol: string, exchange?: string) {
