@@ -154,7 +154,7 @@ function pollingRow(payload: unknown) {
 
 function quoteValues(row: Record<string, unknown>) {
   const price = asNumber(row.closePrice, row.currentPrice, row.nowPrice, row.tradePrice, row.price, row.lastPrice, row.last);
-  const change = asNumber(row.compareToPreviousClosePrice, row.changePrice, row.change, row.netChange, row.prevChange);
+  const change = asNumber(row.compareToPreviousClosePrice, row.changePrice, row.changeValue, row.change, row.netChange, row.prevChange);
   const changeRate = asNumber(row.fluctuationsRatio, row.changeRate, row.changeRatio, row.rate, row.prevChangeRate);
   return {
     price,
