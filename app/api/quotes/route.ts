@@ -10,6 +10,8 @@ import { env } from "cloudflare:workers";
 
 export const dynamic = "force-dynamic";
 
+const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
+
 function isQuoteUnavailable(error: unknown) {
   return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
 }
@@ -21,7 +23,11 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const market = url.searchParams.get("market") as Market | null;
     const exchange = url.searchParams.get("exchange") ?? undefined;
-    const symbols = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean).slice(0, 20);
+    const symbolsRaw = url.searchParams.get("symbols") ?? "";
+    if (symbolsRaw.length > 700 || (exchange !== undefined && !EXCHANGE.test(exchange))) {
+      return Response.json({ error: "시세 요청값을 확인해주세요." }, { status: 400 });
+    }
+    const symbols = symbolsRaw.split(",").filter(Boolean).slice(0, 20);
     if (!market || !["KR", "US", "CRYPTO"].includes(market) || symbols.length === 0) {
       return Response.json({ error: "market과 symbols가 필요합니다." }, { status: 400 });
     }
