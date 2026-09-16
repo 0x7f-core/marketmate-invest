@@ -8,8 +8,12 @@ export async function GET(request: Request) {
     await enforceRateLimit(request, "market_overview", 60, 60_000, user.id);
     const resolved = await getMarketOverview();
     const quotes = resolved.filter(quote => !quote.stale);
+    const intervals = quotes
+      .map(quote => Number(quote.pollingInterval))
+      .filter(interval => Number.isFinite(interval) && interval > 0);
+    const pollingInterval = Math.max(2_000, Math.min(120_000, intervals.length ? Math.min(...intervals) : 10_000));
     return Response.json(
-      { quotes, partial: quotes.length !== resolved.length, staleOmitted: resolved.length !== quotes.length, timestamp: Date.now() },
+      { quotes, pollingInterval, partial: quotes.length !== resolved.length, staleOmitted: resolved.length !== quotes.length, timestamp: Date.now() },
       { headers: { "cache-control": "private, max-age=2" } },
     );
   } catch (error) {
