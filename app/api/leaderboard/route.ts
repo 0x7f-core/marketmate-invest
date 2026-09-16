@@ -23,9 +23,13 @@ export async function GET(request: Request) {
         .bind(refreshStartedAt, instrument.id, instrument.receivedAt).run();
       if ((claim.meta.changes ?? 0) !== 1) continue;
       try {
-        await persistQuoteSnapshot(await getLiveQuote(instrument.market, instrument.symbol, instrument.exchange));
+        const quote = await getLiveQuote(instrument.market, instrument.symbol, instrument.exchange);
+        if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
+        await persistQuoteSnapshot(quote);
       } catch {
-        // The existing validated price remains available; the next refresh can retry after the lease expires.
+        await env.DB!.prepare("UPDATE quote_snapshots SET received_at=? WHERE instrument_id=? AND received_at=?")
+          .bind(instrument.receivedAt, instrument.id, refreshStartedAt).run().catch(() => undefined);
+        // The previous validated price stays in the ranking until Naver returns a fresh quote.
       }
     }
     const rows = await env.DB!.prepare(
