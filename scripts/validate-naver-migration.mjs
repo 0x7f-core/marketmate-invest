@@ -240,6 +240,9 @@ const marketInsights = await source("lib/server/naver-market-insights.ts");
 if (!marketInsights.includes('buildNaverPath("/api/stockSecurity/etfs/v2/foreign"') || !marketInsights.includes('sortType: "tradingValue"') || !marketInsights.includes('sortDirection: "desc"')) {
   failures.push("foreign ETF list must use the verified Naver v2 ETF contract");
 }
+if (!marketInsights.includes('case "foreign-etf-components"') || !marketInsights.includes('const code = await resolveForeignCode(params.symbol ?? params.code, params.exchange);') || marketInsights.includes("foreignEtfTicker")) {
+  failures.push("foreign ETF composition must resolve and preserve the verified Naver Reuters code");
+}
 const marketInsightsRoute = await source("app/api/market-insights/route.ts");
 if (!marketInsightsRoute.includes("const EXCHANGE") || !marketInsightsRoute.includes("!EXCHANGE.test(exchange)")) {
   failures.push("market insight exchange identifiers must remain bounded and validated");

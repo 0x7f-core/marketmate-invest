@@ -44,7 +44,7 @@
 - ETF: 국내 ETF v2 목록/상세/구성종목, 미국 ETF v2 목록/구성종목
 - 시장 랭킹: 국내 업종·테마·그룹, 미국 섹터, 가상자산 랭킹
 
-미국 ETF 목록은 `/api/stockSecurity/etfs/v2/foreign`의 `tradingValue desc` 계약을 사용하고, 구성종목은 Reuters 코드가 아니라 Naver가 요구하는 ETF ticker를 사용합니다. 국내 ETF 목록은 `/api/stockSecurity/etfs/v2/domestic`의 `listingType=tradingValueDesc` 계약을 사용합니다.
+미국 ETF 목록은 `/api/stockSecurity/etfs/v2/foreign`의 `tradingValue desc` 계약을 사용하고, 구성종목은 `/api/stockSecurity/etfs/v2/foreign/{reutersCode}/composition`처럼 Reuters 코드를 사용합니다. 2026-09-16 live smoke에서 `QQQ` ticker-only 경로는 404, `QQQ.O` Reuters 경로는 200으로 확인했습니다. 국내 ETF 목록은 `/api/stockSecurity/etfs/v2/domestic`의 `listingType=tradingValueDesc` 계약을 사용합니다.
 
 네이버증권의 가상자산 endpoint와 ticker에는 거래소 식별자로 `UPBIT` 문자열이 포함됩니다. 이는 네이버 upstream의 공개 경로/식별자에만 사용하며 사용자 화면의 공급자 표시는 `NAVER`로 통일합니다. 사이트가 `api.upbit.com`을 직접 호출하거나 Upbit API 키를 사용하지는 않습니다. 내부 가상자산 종목 ID도 `KRW-{ticker}`로 통일해 `BTC_KRW_UPBIT` 같은 upstream 식별자가 관심종목·포트폴리오 키로 새지 않게 합니다.
 
