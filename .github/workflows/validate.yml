@@ -40,7 +40,7 @@ jobs:
         run: pnpm run validate:migration
 
       - name: validate:legacy-config
-        run: node scripts/validate-legacy-config.mjs
+        run: pnpm run validate:legacy-config
 
       - name: typecheck
         run: pnpm run typecheck
