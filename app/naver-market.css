@@ -1,5 +1,4 @@
-/* Unified Naver-style chart surface. TradingView Embed styles are intentionally not used. */
-.tradingview-frame{display:none!important}
+/* Unified Naver-style Lightweight Charts surface. */
 .naver-light-chart{background:#fff;border:0;overflow:hidden;min-width:0;width:100%}
 .naver-light-chart-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 2px 8px;border-bottom:1px solid #f1f3f5}
 .naver-light-chart-toolbar>div:first-child{display:flex;align-items:baseline;gap:8px}
