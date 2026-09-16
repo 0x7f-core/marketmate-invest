@@ -167,6 +167,9 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
         {loading && <div className="naver-light-chart-state">네이버증권 차트를 불러오는 중...</div>}
         {!loading && errorMessage && <div className="naver-light-chart-state error"><b>차트를 표시할 수 없습니다.</b><span>{errorMessage}</span><button onClick={() => setRetryToken(value => value + 1)}>다시 시도</button></div>}
       </div>
+      <a className="naver-light-chart-attribution" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">
+        TradingView Lightweight Charts™ © 2025 TradingView, Inc.
+      </a>
     </section>
   );
 }
