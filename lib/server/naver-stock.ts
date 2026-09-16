@@ -17,11 +17,13 @@ const PUBLIC_PREFIXES = [
 ];
 
 const DENIED_SEGMENTS = new Set([
-  "account", "accounts", "auth", "authorization", "bookmark", "cancel", "create", "delete",
-  "favorite", "favorites", "follow", "holding", "holdings", "login", "logout", "member", "members",
-  "notification", "notifications", "order", "orders", "personal", "portfolio", "profile", "profiles",
-  "reaction", "register", "session", "settings", "subscribe", "unsubscribe", "update", "user", "users",
+  "account", "accounts", "auth", "authorization", "block", "bookmark", "cancel", "create", "delete",
+  "favorite", "favorites", "follow", "holding", "holdings", "like", "login", "logout", "member", "members",
+  "myasset", "mystock", "notification", "notification-settings", "notifications", "order", "orders", "personal",
+  "portfolio", "profile", "profiles", "reaction", "register", "report", "session", "settings", "subscribe",
+  "unsubscribe", "update", "user", "users",
 ]);
+const ENCODED_PATH_CONTROL = /%(?:00|0a|0d|2e|2f|5c)/i;
 
 export class NaverStockError extends Error {
   statusCode?: number;
@@ -77,7 +79,8 @@ export function buildNaverPath(path: string, params?: Record<string, string | nu
 }
 
 function validatePath(path: string) {
-  if (!path.startsWith("/api/") || path.includes("\\") || path.includes("\n") || path.includes("\r")) {
+  const rawPathname = path.split("?", 1)[0];
+  if (!path.startsWith("/api/") || path.includes("\\") || path.includes("\n") || path.includes("\r") || ENCODED_PATH_CONTROL.test(rawPathname)) {
     throw new NaverStockError("네이버증권 API 경로가 올바르지 않습니다.", { path, kind: "validation" });
   }
   const url = new URL(path, NAVER_STOCK_BASE_URL);
