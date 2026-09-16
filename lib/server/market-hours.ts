@@ -51,7 +51,7 @@ function sessionDetails(status: NaverStatus) {
   const current = asRecord(status.currentSession);
   const sessions = Array.isArray(status.sessions) ? status.sessions.map(asRecord).filter((item): item is NaverStatus => Boolean(item)) : [];
   const currentType = stringValue(current, ["marketSessionType", "sessionType", "type"]);
-  const state = stringValue(current, ["marketState", "state", "status"]).toUpperCase();
+  const state = stringValue(current, ["marketState", "legacyState", "state", "status"]).toUpperCase();
   const explicitOpen = ["OPEN", "OPENED", "TRADING", "TRADE", "RUNNING"].includes(state);
   const holiday = booleanValue(status, ["isHoliday", "holiday"]) ?? false;
   const matchingSession = sessions.find(item => stringValue(item, ["marketSessionType", "sessionType", "type"]) === currentType) ?? sessions[0] ?? null;
