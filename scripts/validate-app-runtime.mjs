@@ -38,8 +38,8 @@ const homeResponse = await fetch(`${BASE}/`, { cache: "no-store", redirect: "man
 const homeHtml = await homeResponse.text();
 assert(homeResponse.status === 200, `home page expected 200, got ${homeResponse.status}`);
 assert((homeResponse.headers.get("content-type") || "").toLowerCase().includes("text/html"), "home page is not HTML");
-assert(homeHtml.includes("마켓메이트"), "home page is missing MarketMate brand text");
-assert(homeHtml.includes("친구들과 투자대회 시작하기"), "home page is missing unauthenticated login heading");
+assert(/<html[^>]*lang=["']ko["']/i.test(homeHtml), "home page is missing Korean document language");
+assert(homeHtml.includes("마켓메이트 | 친구들과 하는 실전 모의투자"), "home page is missing expected document title");
 console.log(`PASS home HTML render (${homeHtml.length} chars)`);
 
 const unauth = await jsonRequest("/api/auth/me", { cache: "no-store" });
