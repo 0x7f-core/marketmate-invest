@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit",
     "validate:migration": "node scripts/validate-naver-migration.mjs",
+    "validate:legacy-config": "node scripts/validate-legacy-config.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
