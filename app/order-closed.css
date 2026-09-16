@@ -1,0 +1,8 @@
+/* Closed stock-market orders use one neutral black action state for both buy and sell. */
+.order-buy:disabled,
+.order-sell:disabled {
+  background: #17191c !important;
+  border-color: #17191c !important;
+  color: #fff !important;
+  opacity: 1 !important;
+}
