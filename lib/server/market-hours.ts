@@ -63,10 +63,15 @@ function sessionDetails(status: NaverStatus) {
 
 function sessionLabel(type: string, market: Market) {
   const normalized = type.toLocaleLowerCase("en-US");
+  if (normalized.includes("closing")) {
+    if (normalized.includes("after")) return "애프터마켓 마감";
+    if (normalized.includes("regular") || normalized.includes("main") || normalized.includes("normal")) return "정규장 마감";
+    if (normalized.includes("pre")) return "프리마켓 마감";
+    return "마감 세션";
+  }
   if (normalized.includes("pre")) return "프리마켓";
   if (normalized.includes("after")) return "애프터마켓";
   if (normalized.includes("regular") || normalized.includes("main") || normalized.includes("normal")) return "정규장";
-  if (normalized.includes("closing")) return "종가매매";
   return type || (market === "US" ? "미국장" : "국내장");
 }
 
