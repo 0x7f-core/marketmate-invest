@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       return Response.json({ error: "market과 symbols가 필요합니다." }, { status: 400 });
     }
 
-    const normalizedSymbols = symbols.map(symbol => normalizeNaverMarketSymbol(market, symbol));
+    const normalizedSymbols = [...new Set(symbols.map(symbol => normalizeNaverMarketSymbol(market, symbol)))];
     if (normalizedSymbols.some(symbol => !/^[A-Za-z0-9._-]{1,32}$/.test(symbol))) {
       return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     }
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
 
     await env.DB!.batch(quotes.map(quote => env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active)
       VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,exchange=excluded.exchange,is_active=1`)
-      .bind(`${quote.market}:${quote.symbol}`, quote.market, quote.symbol, quote.symbol, quote.currency, exchange ?? quote.market)));
+      .bind(`${quote.market}:${quote.symbol}`, quote.market, quote.symbol, quote.symbol, quote.currency, quote.venue ?? exchange ?? quote.market)));
     await Promise.allSettled(quotes.map(persistQuoteSnapshot));
     await Promise.allSettled(quotes.map(matchPendingOrders));
     return Response.json(
