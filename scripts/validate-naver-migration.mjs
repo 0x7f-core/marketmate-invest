@@ -66,6 +66,14 @@ for (const file of files) {
   }
 }
 
+const naverStock = await source("lib/server/naver-stock.ts");
+if (!naverStock.includes("MAX_RESPONSE_BYTES") || !naverStock.includes("response.body.getReader()") || !naverStock.includes("bytesRead > MAX_RESPONSE_BYTES")) {
+  failures.push("Naver responses must remain size-bounded while streaming");
+}
+if (!naverStock.includes("setTimeout(() => controller.abort(), timeoutMs)") || !naverStock.includes("finally {\n    clearTimeout(timer);\n  }")) {
+  failures.push("Naver request timeout must remain active through response-body processing");
+}
+
 const marketHours = await source("lib/server/market-hours.ts");
 const krxPriority = marketHours.indexOf('item.exchange === "krx" && item.tradable');
 const nxtPriority = marketHours.indexOf('item.exchange === "nxt" && item.tradable');
