@@ -26,7 +26,7 @@ function quickFallback(market: Market) {
       isOpen: true,
       label: "24시간",
       notice: "가상자산은 24시간 주문할 수 있습니다.",
-      source: "SCHEDULE" as const,
+      source: "NAVER" as const,
       stale: false,
     };
   }
@@ -49,7 +49,7 @@ function quickFallback(market: Market) {
       exchange: "NASDAQ",
       currentSession: pre ? "preMarket" : regular ? "regularMarket" : after ? "afterMarket" : "closed",
       isDaylightSavingTime: isDst,
-      source: "SCHEDULE" as const,
+      source: "NAVER" as const,
       stale: true,
     };
   }
@@ -67,7 +67,7 @@ function quickFallback(market: Market) {
       : "국내주식 거래시간 밖입니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다.",
     exchange: krx ? "KRX" : nxt ? "NXT" : undefined,
     currentSession: krx ? "regularMarket" : nxt ? "nxt" : "closed",
-    source: "SCHEDULE" as const,
+    source: "NAVER" as const,
     stale: true,
   };
 }
