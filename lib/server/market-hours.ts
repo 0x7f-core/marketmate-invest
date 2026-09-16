@@ -74,7 +74,7 @@ function isSupportedTradingSession(market: Market, exchange: string, detail: Ret
   if (!detail.isOpen) return false;
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
-  if (market === "US") return !type.includes("after");
+  if (market === "US") return true;
   if (market === "KR" && exchange === "krx" && type.includes("pre")) return false;
   return true;
 }
