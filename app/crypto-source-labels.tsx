@@ -135,6 +135,46 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
   };
 }
 
+function patchCompetitionTradingGuide() {
+  const guide = document.querySelector(".trading-guide");
+  if (!guide) return;
+
+  const descriptions = guide.querySelectorAll("dd");
+  const tradingHours = [
+    "평일 NXT 08:00~20:00 · KRX 정규장 09:00~15:30 (KST)",
+    "서머타임 17:00~08:50 · 표준시 18:00~09:50 (KST, 프리·정규·애프터 포함)",
+    "UPBIT 시세 기준 24시간 365일 주문 가능",
+  ];
+  descriptions.forEach((element, index) => {
+    if (tradingHours[index]) element.textContent = tradingHours[index];
+  });
+
+  const notices = [
+    "모든 주문은 모의체결이며 실제 증권계좌나 거래소로 전송되지 않습니다.",
+    "국내·미국주식은 네이버증권 장 상태가 거래 가능으로 확인될 때만 주문할 수 있으며, 휴장·시세 지연·장 상태 확인 실패 시 주문이 차단됩니다.",
+    "시장가는 주문 시점의 최신 유효 시세로 체결되며, 지정가는 조건을 충족하면 체결되고 충족하지 않으면 미체결 주문으로 남습니다.",
+    "미체결 지정가 매수는 주문 가능 현금을, 지정가 매도는 보유수량을 예약하며 체결 전에는 취소할 수 있습니다.",
+    "미국주식은 주문 시점의 원/달러 환율을 적용해 원화로 계산되며 시세·환율 변동에 따라 체결금액과 평가금액이 달라질 수 있습니다.",
+    "현재 모의체결 수수료는 0원이며, 대회 기간이 끝나면 신규 주문과 대기 주문 체결이 제한됩니다.",
+    "대회에서 나가면 해당 대회의 보유자산·주문·체결 등 투자 기록이 삭제됩니다.",
+  ];
+  const items = guide.querySelectorAll("ul li");
+  items.forEach((element, index) => {
+    if (notices[index]) element.textContent = notices[index];
+  });
+  const list = guide.querySelector("ul");
+  if (list) {
+    while (list.children.length < notices.length) {
+      const item = document.createElement("li");
+      item.textContent = notices[list.children.length];
+      list.appendChild(item);
+    }
+    while (list.children.length > notices.length) {
+      list.lastElementChild?.remove();
+    }
+  }
+}
+
 function patchCryptoSourceLabels(fx: FxQuote | null) {
   document.querySelectorAll(".np-market-status span").forEach(element => {
     if (element.textContent?.includes("가상자산 · 네이버증권 24시간 시세")) {
@@ -220,6 +260,7 @@ export default function CryptoSourceLabels() {
         scheduled = false;
         patchCryptoSourceLabels(latestFx);
         patchCompetitionInviteCode(competitions);
+        patchCompetitionTradingGuide();
       });
     };
 
