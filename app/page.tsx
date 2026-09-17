@@ -5,6 +5,7 @@ import HomeMarketNews from "./home-market-news";
 import HomeMarketRankingLogos from "./home-market-ranking-logos";
 import HomeMarketRankings from "./home-market-rankings";
 import MarketStatusClosedTime from "./market-status-closed-time";
+import PortfolioBulkSell from "./portfolio-bulk-sell";
 import TradingFeeGuide from "./trading-fee-guide";
 import TradingDashboard from "./trading-dashboard";
 
@@ -16,6 +17,7 @@ export default function Home() {
       <ActivityQuantityUnits />
       <CryptoSourceLabels />
       <MarketStatusClosedTime />
+      <PortfolioBulkSell />
       <TradingFeeGuide />
       <HomeMarketNews />
       <HomeMarketRankingLogos />
