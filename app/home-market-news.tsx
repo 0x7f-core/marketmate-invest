@@ -10,6 +10,7 @@ type NewsItem = {
 };
 
 // Home and the dedicated News tab intentionally share one market-wide feed.
+// Home stays compact at 10 items, while the News tab exposes the latest 30.
 // The single-stock market view remains owned by TradingDashboard and keeps its own symbol news.
 const MARKET_NEWS_SELECTOR = ".np-home .np-news, .marketmate-v2 > main.np-single > .np-news";
 const SYNCED_SELECTOR = "[data-market-news-synced=\"true\"]";
@@ -34,6 +35,10 @@ function normalizedLink(value: string) {
 
 function marketNewsPanels() {
   return Array.from(document.querySelectorAll<HTMLElement>(MARKET_NEWS_SELECTOR));
+}
+
+function panelLimit(panel: HTMLElement) {
+  return panel.closest(".np-home") ? 10 : 30;
 }
 
 function markSynced<T extends HTMLElement>(element: T) {
@@ -69,12 +74,13 @@ function renderLoading(panel: HTMLElement) {
 }
 
 function renderPanel(panel: HTMLElement, items: NewsItem[]) {
+  const limit = panelLimit(panel);
   const sorted = [...items]
     .sort((a, b) => b.publishedAt - a.publishedAt)
     .filter((item, index, all) => all.findIndex(other => other.title === item.title) === index)
-    .slice(0, 10);
+    .slice(0, limit);
 
-  const signature = sorted.map(item => `${normalizedLink(item.link)}:${item.publishedAt}:${item.source}`).join("|");
+  const signature = `${limit}|${sorted.map(item => `${normalizedLink(item.link)}:${item.publishedAt}:${item.source}`).join("|")}`;
   if (panel.dataset.marketNewsSignature === signature && panel.querySelector(`:scope > ${SYNCED_SELECTOR}`)) return;
 
   clearSynced(panel);
