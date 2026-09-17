@@ -26,7 +26,11 @@ export function normalizeSupportedExchange(market: SupportedMarket, value: strin
   if (!raw) return "";
   const compact = raw.replace(/[\s._-]+/g, "");
 
-  if (market === "CRYPTO") return ["NAVER", "CRYPTO"].includes(compact) ? "NAVER" : "";
+  // Naver's crypto search rows identify KRW markets as UPBIT, while older UI
+  // state used NAVER/CRYPTO as source-like exchange labels. Accept those legacy
+  // aliases but canonicalize executable crypto orders to UPBIT. The actual quote
+  // data still comes from Naver's /api/polling/coin/price endpoint.
+  if (market === "CRYPTO") return ["UPBIT", "NAVER", "CRYPTO"].includes(compact) ? "UPBIT" : "";
 
   if (market === "KR") {
     if (compact === "KR" || compact === "KRX" || compact.includes("한국거래소")) return "KRX";
