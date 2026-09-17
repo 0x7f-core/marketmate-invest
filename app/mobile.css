@@ -58,6 +58,39 @@
     width:15px!important;
     height:15px!important;
   }
+
+  /* Keep the mobile portfolio summary balanced instead of stacking
+     three metrics on the left and two on the far right. */
+  .holdings>.asset-summary{
+    display:grid!important;
+    grid-template-columns:repeat(2,minmax(0,1fr))!important;
+    grid-auto-flow:row!important;
+    width:100%!important;
+  }
+  .holdings>.asset-summary>span{
+    min-width:0!important;
+    min-height:78px!important;
+    padding:14px 16px!important;
+    justify-content:center!important;
+    border-right:1px solid #edf0f2!important;
+    border-bottom:1px solid #edf0f2!important;
+  }
+  .holdings>.asset-summary>span:nth-child(1){
+    grid-column:1/-1!important;
+    grid-row:1!important;
+    min-height:86px!important;
+    border-right:0!important;
+  }
+  .holdings>.asset-summary>span:nth-child(2){grid-column:1!important;grid-row:2!important;}
+  .holdings>.asset-summary>span:nth-child(3){grid-column:2!important;grid-row:2!important;border-right:0!important;}
+  .holdings>.asset-summary>span:nth-child(4){grid-column:1!important;grid-row:3!important;border-bottom:0!important;}
+  .holdings>.asset-summary>span:nth-child(5){grid-column:2!important;grid-row:3!important;border-right:0!important;border-bottom:0!important;}
+  .holdings>.asset-summary strong{
+    max-width:100%!important;
+    overflow:hidden!important;
+    text-overflow:ellipsis!important;
+    white-space:nowrap!important;
+  }
 }
 
 /* Mobile navigation is intentionally consolidated into the fixed bottom bar. */
