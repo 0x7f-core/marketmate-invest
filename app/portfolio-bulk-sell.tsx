@@ -71,10 +71,10 @@ function removePortfolioRefreshButton(title: HTMLElement) {
 function styleBulkSellButton(button: HTMLButtonElement) {
   const important = (property: string, value: string) => button.style.setProperty(property, value, "important");
 
-  important("width", "96px");
-  important("min-width", "96px");
-  important("height", "36px");
-  important("min-height", "36px");
+  important("width", "88px");
+  important("min-width", "88px");
+  important("height", "34px");
+  important("min-height", "34px");
   important("padding", "0");
   important("margin", "0");
   important("border", `1px solid ${SELL_BLUE}`);
