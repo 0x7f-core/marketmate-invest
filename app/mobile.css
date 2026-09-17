@@ -9,6 +9,55 @@
   .mobile-contest-entry b{font-size:13px}
   .mobile-contest-entry small{font-size:10px;color:#7d858d}
   .mobile-contest-entry .contest-button{height:34px;font-size:12px}
+
+  /* Keep the portfolio header controls inside the mobile viewport.
+     Row 1: title + refresh, Row 2: sort key + direction. */
+  .holdings>.np-section-title{
+    height:auto!important;
+    min-height:0!important;
+    display:grid!important;
+    grid-template-columns:minmax(0,1fr) auto!important;
+    grid-template-rows:auto auto!important;
+    align-items:center!important;
+    gap:10px 8px!important;
+    padding:12px 14px!important;
+    overflow:visible!important;
+  }
+  .holdings>.np-section-title>h2{
+    grid-column:1!important;
+    grid-row:1!important;
+    min-width:0!important;
+    margin:0!important;
+  }
+  .holdings>.np-section-title>div{
+    display:contents!important;
+  }
+  .holdings>.np-section-title select[aria-label="보유종목 정렬 기준"]{
+    grid-column:1!important;
+    grid-row:2!important;
+    width:100%!important;
+    min-width:0!important;
+    max-width:none!important;
+  }
+  .holdings>.np-section-title>div>button:nth-of-type(1){
+    grid-column:2!important;
+    grid-row:2!important;
+    white-space:nowrap!important;
+  }
+  .holdings>.np-section-title>div>button:nth-of-type(2){
+    grid-column:2!important;
+    grid-row:1!important;
+    display:inline-flex!important;
+    align-items:center!important;
+    justify-content:flex-end!important;
+    gap:4px!important;
+    white-space:nowrap!important;
+    padding:4px 0 4px 8px!important;
+  }
+  .holdings>.np-section-title>div>button:nth-of-type(2) svg{
+    width:15px!important;
+    height:15px!important;
+  }
 }
 
 /* Mobile navigation is intentionally consolidated into the fixed bottom bar. */
