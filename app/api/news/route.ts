@@ -1,7 +1,5 @@
-import { apiError, requireUser } from "@/lib/server/auth";
 import { getNaverMarketNews } from "@/lib/server/market-news";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
-import { enforceRateLimit } from "@/lib/server/safety";
 
 const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
 
@@ -9,8 +7,9 @@ type Market = "KR" | "US" | "CRYPTO";
 
 export async function GET(request: Request) {
   try {
-    const user = await requireUser(request);
-    await enforceRateLimit(request, "news", 40, 5 * 60_000, user.id);
+    // News is public read-only market data. Avoid user-session and D1 rate-limit
+    // lookups on page load; getNaverMarketNews already applies upstream timeout,
+    // deduplication and bounded caching.
     const url = new URL(request.url);
     const market = (url.searchParams.get("market") ?? "KR") as Market;
     const rawSymbol = (url.searchParams.get("symbol") ?? "").trim();
@@ -40,7 +39,10 @@ export async function GET(request: Request) {
         },
       },
     );
-  } catch (error) {
-    return apiError(error);
+  } catch {
+    return Response.json(
+      { error: "뉴스를 불러오지 못했습니다." },
+      { status: 503, headers: { "cache-control": "no-store", "retry-after": "10" } },
+    );
   }
 }
