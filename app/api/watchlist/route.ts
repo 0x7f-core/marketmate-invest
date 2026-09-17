@@ -11,24 +11,60 @@ const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency
   FROM watchlist_items w JOIN instruments i ON i.id=w.instrument_id LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
   WHERE w.user_id=? AND i.is_active=1 ORDER BY w.sort_order,w.created_at LIMIT 50`;
 
+type WatchlistRow = {
+  id: string;
+  market: Market;
+  symbol: string;
+  name: string;
+  exchange: string;
+  currency: "KRW" | "USD";
+  priceKrwMicros?: number | null;
+  changeRatePpm?: number | null;
+  fxRateMicros?: number | null;
+  receivedAt?: number | null;
+};
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
     await enforceRateLimit(request, "watchlist_read", 20, 60_000, user.id);
-    const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<{id:string;market:Market;symbol:string;exchange:string;receivedAt?:number}>();
-    const stale = result.results.filter(item => !item.receivedAt || item.receivedAt < Date.now()-15_000).slice(0,6);
-    if (stale.length) {
-      await Promise.allSettled(stale.map(async item => {
-        const quote = await getTradingQuote(item.market,item.symbol,item.exchange);
-        if (quote.stale) return;
-        if (item.market === "KR" && quote.venue) {
-          await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, item.id).run();
-        }
-        await persistQuoteSnapshot(quote);
-      }));
+    const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<WatchlistRow>();
+    const rows = result.results;
+    const stale = rows.filter(item => !item.receivedAt || item.receivedAt < Date.now() - 15_000).slice(0, 6);
+
+    if (!stale.length) {
+      return Response.json({ items: rows }, { headers: { "cache-control": "no-store" } });
     }
-    const fresh = stale.length ? await env.DB!.prepare(watchlistSql).bind(user.id).all() : result;
-    return Response.json({ items:fresh.results }, { headers:{"cache-control":"no-store"} });
+
+    const refreshed = await Promise.allSettled(stale.map(async item => {
+      const quote = await getTradingQuote(item.market, item.symbol, item.exchange);
+      if (quote.stale) return null;
+      if (item.market === "KR" && quote.venue) {
+        await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, item.id).run().catch(() => undefined);
+      }
+      await persistQuoteSnapshot(quote).catch(() => undefined);
+      return { id: item.id, quote };
+    }));
+
+    const latestById = new Map(refreshed.flatMap(entry => {
+      if (entry.status !== "fulfilled" || !entry.value) return [];
+      return [[entry.value.id, entry.value.quote] as const];
+    }));
+
+    const items = rows.map(item => {
+      const quote = latestById.get(item.id);
+      if (!quote) return item;
+      return {
+        ...item,
+        exchange: quote.venue ?? item.exchange,
+        priceKrwMicros: Math.round(quote.price * quote.exchangeRate * 1_000_000),
+        changeRatePpm: Math.round(quote.changeRate * 10_000),
+        fxRateMicros: Math.round(quote.exchangeRate * 1_000_000),
+        receivedAt: quote.timestamp,
+      };
+    });
+
+    return Response.json({ items }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
 
