@@ -1,0 +1,23 @@
+name: Production ranking parity smoke
+on:
+  push:
+    paths:
+      - .github/workflows/production-ranking-parity-smoke.yml
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          base='https://marketmate-invest.0x7f-core.workers.dev/api/market-rankings?market=KR&category='
+          for category in tradingValue volume up down marketCap; do
+            echo "===== $category ====="
+            status=$(curl -sS --max-time 20 -o /tmp/b -w '%{http_code}' "$base$category")
+            echo "HTTP $status"
+            test "$status" = "200"
+            node -e 'const fs=require("fs"); const j=JSON.parse(fs.readFileSync("/tmp/b","utf8")); if(!Array.isArray(j.items)||!j.items.length) process.exit(2); console.log(JSON.stringify({category:j.category,count:j.items.length,top:j.items.slice(0,3)}));'
+          done
