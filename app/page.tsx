@@ -1,3 +1,4 @@
+import ActivityQuantityUnits from "./activity-quantity-units";
 import CryptoSourceLabels from "./crypto-source-labels";
 import HomeDashboardOrder from "./home-dashboard-order";
 import HomeMarketNews from "./home-market-news";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   return (
     <>
+      <ActivityQuantityUnits />
       <CryptoSourceLabels />
       <MarketStatusClosedTime />
       <TradingFeeGuide />
