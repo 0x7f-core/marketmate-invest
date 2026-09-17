@@ -6,15 +6,7 @@ type Row = Record<string, unknown>;
 type SparkPoint = { time: number; value: number };
 type SparkSeries = { points: SparkPoint[]; stale: boolean };
 
-const PRICE_KEYS = [
-  "closePrice", "close", "currentPrice", "tradePrice", "price", "value", "nowPrice",
-  "basePrice", "dealBasR", "exchangeRate", "rate", "y",
-] as const;
-const TIME_KEYS = [
-  "localTradedAt", "koreaTradedAt", "tradeDateTime", "tradedAt", "dateTime", "datetime",
-  "candleDateTimeKst", "candleDateTimeUtc", "timestamp", "time", "date", "localDate",
-  "tradeDate", "businessDate", "bizDate", "baseDate", "xymd", "x",
-] as const;
+const MAX_POINTS = 500;
 
 function numberValue(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -23,100 +15,30 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function compactTimestamp(value: string) {
-  if (/^(?:19|20)\d{12}$/.test(value)) {
-    const parsed = Date.parse(`${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T${value.slice(8, 10)}:${value.slice(10, 12)}:${value.slice(12, 14)}+09:00`);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  if (/^(?:19|20)\d{6}$/.test(value)) {
-    const parsed = Date.parse(`${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T00:00:00+09:00`);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
+function rowValue(value: unknown): Row | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Row : null;
 }
 
-function parseTime(value: unknown, fallback: number) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const compact = compactTimestamp(String(Math.trunc(value)));
-    if (compact) return compact;
-    return value < 1_000_000_000_000 ? value * 1_000 : value;
-  }
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  const clean = value.trim();
-  const compact = compactTimestamp(clean);
-  if (compact) return compact;
-  const numeric = Number(clean);
-  if (Number.isFinite(numeric) && clean.length >= 10) return numeric < 1_000_000_000_000 ? numeric * 1_000 : numeric;
-  const parsed = Date.parse(clean);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function compactKstTimestamp(value: unknown) {
+  const clean = String(value ?? "").trim();
+  if (!/^(?:19|20)\d{12}$/.test(clean)) return 0;
+  const parsed = Date.parse(`${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}T${clean.slice(8, 10)}:${clean.slice(10, 12)}:${clean.slice(12, 14)}+09:00`);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function collectRows(value: unknown, depth = 0, output: Row[] = []) {
-  if (depth > 7 || output.length >= 2_500 || value === null || value === undefined) return output;
-  if (Array.isArray(value)) {
-    for (const item of value) collectRows(item, depth + 1, output);
-    return output;
-  }
-  if (typeof value !== "object") return output;
-  const row = value as Row;
-  if (Object.keys(row).some(key => PRICE_KEYS.includes(key as (typeof PRICE_KEYS)[number]) || TIME_KEYS.includes(key as (typeof TIME_KEYS)[number]))) {
-    output.push(row);
-  }
-  for (const child of Object.values(row)) if (child && typeof child === "object") collectRows(child, depth + 1, output);
-  return output;
-}
-
-function pointFromRow(row: Row, fallback: number): SparkPoint | null {
-  let value = 0;
-  for (const key of PRICE_KEYS) {
-    value = numberValue(row[key]);
-    if (value > 0) break;
-  }
-  if (value <= 0) return null;
-  let rawTime: unknown;
-  for (const key of TIME_KEYS) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      rawTime = row[key];
-      break;
-    }
-  }
-  if (rawTime === undefined) return null;
-  const time = parseTime(rawTime, fallback);
-  return time > 0 ? { time, value } : null;
-}
-
-function pairPoints(value: unknown, fallback: number, output: SparkPoint[] = [], depth = 0) {
-  if (depth > 7 || output.length >= 2_500 || value === null || value === undefined) return output;
-  if (Array.isArray(value)) {
-    if (value.length >= 2 && (typeof value[0] === "string" || typeof value[0] === "number") && (typeof value[1] === "string" || typeof value[1] === "number")) {
-      const time = parseTime(value[0], fallback);
-      const price = numberValue(value[1]);
-      if (time > 0 && price > 0) output.push({ time, value: price });
-    }
-    for (const child of value) pairPoints(child, fallback, output, depth + 1);
-    return output;
-  }
-  if (typeof value === "object") {
-    for (const child of Object.values(value as Row)) if (child && typeof child === "object") pairPoints(child, fallback, output, depth + 1);
-  }
-  return output;
-}
-
-function normalizePoints(payloads: Array<{ data: unknown; fetchedAt: number }>) {
-  const points: SparkPoint[] = [];
-  for (const payload of payloads) {
-    points.push(...collectRows(payload.data).map((row, index) => pointFromRow(row, payload.fetchedAt - index * 60_000)).filter((point): point is SparkPoint => Boolean(point)));
-    points.push(...pairPoints(payload.data, payload.fetchedAt));
-  }
-  return points
-    .filter(point => Number.isFinite(point.time) && Number.isFinite(point.value) && point.value > 0)
-    .sort((a, b) => a.time - b.time)
-    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time || point.value !== all[index - 1].value)
-    .slice(-500);
+function isoTimestamp(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return 0;
+  const parsed = Date.parse(value.trim());
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function dateKey(timestamp: number, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(timestamp));
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp));
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
@@ -125,11 +47,48 @@ function compactDate(timestamp: number, timeZone: string) {
   return dateKey(timestamp, timeZone).replaceAll("-", "");
 }
 
+function localClockMinutes(timestamp: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? "0";
+  return Number(part("hour")) * 60 + Number(part("minute"));
+}
+
+function normalize(points: SparkPoint[]) {
+  const byTime = new Map<number, SparkPoint>();
+  for (const point of points) {
+    if (!Number.isFinite(point.time) || !Number.isFinite(point.value) || point.time <= 0 || point.value <= 0) continue;
+    byTime.set(point.time, point);
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 function latestTradingDay(points: SparkPoint[], timeZone: string) {
-  if (!points.length) return points;
-  const latest = dateKey(points[points.length - 1].time, timeZone);
-  const sameDay = points.filter(point => dateKey(point.time, timeZone) === latest);
-  return sameDay.length >= 2 ? sameDay : points;
+  const sorted = normalize(points);
+  if (!sorted.length) return sorted;
+  const latest = dateKey(sorted[sorted.length - 1].time, timeZone);
+  const sameDay = sorted.filter(point => dateKey(point.time, timeZone) === latest);
+  return sameDay.length >= 2 ? sameDay : sorted;
+}
+
+function downsample(points: SparkPoint[], maxPoints = MAX_POINTS) {
+  if (points.length <= maxPoints) return points;
+  const result: SparkPoint[] = [];
+  const lastIndex = points.length - 1;
+  for (let index = 0; index < maxPoints; index += 1) {
+    const sourceIndex = Math.round((index / (maxPoints - 1)) * lastIndex);
+    const point = points[sourceIndex];
+    if (!result.length || result[result.length - 1].time !== point.time) result.push(point);
+  }
+  return result;
+}
+
+function finalPoints(points: SparkPoint[], timeZone: string) {
+  return downsample(latestTradingDay(points, timeZone));
 }
 
 function compactUtc(timestamp: number) {
@@ -138,14 +97,78 @@ function compactUtc(timestamp: number) {
   return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
 }
 
+function localIso(timestamp: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(timestamp));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? "00";
+  return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part("second")}`;
+}
+
 function quoteById(quotes: MarketIndexQuote[], id: string) {
   return quotes.find(quote => quote.id === id);
 }
 
-function fallbackSeries(price: number, timestamp: number): SparkSeries {
-  if (!Number.isFinite(price) || price <= 0) return { points: [], stale: true };
-  const anchor = Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now();
-  return { points: [{ time: anchor - 60 * 60_000, value: price }, { time: anchor, value: price }], stale: true };
+function domesticPoints(data: unknown) {
+  if (!Array.isArray(data)) return [];
+  return data.flatMap(item => {
+    const row = rowValue(item);
+    if (!row) return [];
+    const time = compactKstTimestamp(row.thistime);
+    const value = numberValue(row.nowVal);
+    return time > 0 && value > 0 ? [{ time, value }] : [];
+  });
+}
+
+function foreignPoints(data: unknown) {
+  const payload = rowValue(data);
+  const candles = payload && Array.isArray(payload.candleList) ? payload.candleList : [];
+  return candles.flatMap(item => {
+    const row = rowValue(item);
+    if (!row) return [];
+    const time = isoTimestamp(row.tradeAt);
+    const value = numberValue(row.closePrice);
+    if (time <= 0 || value <= 0) return [];
+    const minute = localClockMinutes(time, "America/New_York");
+    return minute >= 9 * 60 + 30 && minute <= 16 * 60 ? [{ time, value }] : [];
+  });
+}
+
+function bitcoinPoints(data: unknown) {
+  const payload = rowValue(data);
+  const priceInfos = payload && Array.isArray(payload.priceInfos)
+    ? payload.priceInfos
+    : Array.isArray(data) ? data : [];
+  return priceInfos.flatMap(item => {
+    const row = rowValue(item);
+    if (!row) return [];
+    const time = isoTimestamp(row.tradeBaseAt);
+    const value = numberValue(row.closePrice);
+    return time > 0 && value > 0 ? [{ time, value }] : [];
+  });
+}
+
+function fxPoints(data: unknown) {
+  const payload = rowValue(data);
+  const priceInfos = payload && Array.isArray(payload.priceInfos) ? payload.priceInfos : [];
+  return priceInfos.flatMap(item => {
+    const row = rowValue(item);
+    if (!row) return [];
+    const time = compactKstTimestamp(row.tradeBaseAt ?? row.announcedAt);
+    const value = numberValue(row.currentPrice);
+    return time > 0 && value > 0 ? [{ time, value }] : [];
+  });
+}
+
+function fallbackSeries(): SparkSeries {
+  return { points: [], stale: true };
 }
 
 async function domesticIndexSeries(code: "KOSPI" | "KOSDAQ", anchor: number) {
@@ -156,9 +179,11 @@ async function domesticIndexSeries(code: "KOSPI" | "KOSDAQ", anchor: number) {
       { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_000 },
     )),
   );
-  const payloads = attempts.flatMap(attempt => attempt.status === "fulfilled" ? [{ data: attempt.value.data, fetchedAt: attempt.value.fetchedAt }] : []);
-  const points = latestTradingDay(normalizePoints(payloads), "Asia/Seoul");
-  return { points, stale: attempts.some(attempt => attempt.status === "fulfilled" && attempt.value.stale) } satisfies SparkSeries;
+  const points = attempts.flatMap(attempt => attempt.status === "fulfilled" ? domesticPoints(attempt.value.data) : []);
+  return {
+    points: finalPoints(points, "Asia/Seoul"),
+    stale: attempts.some(attempt => attempt.status === "rejected" || attempt.value.stale),
+  } satisfies SparkSeries;
 }
 
 async function foreignIndexSeries(code: ".INX" | ".IXIC", exchange: "NYSE" | "NASDAQ", anchor: number) {
@@ -171,17 +196,25 @@ async function foreignIndexSeries(code: ".INX" | ".IXIC", exchange: "NYSE" | "NA
     }),
     { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_500 },
   );
-  return { points: latestTradingDay(normalizePoints([{ data: result.data, fetchedAt: result.fetchedAt }]), "America/New_York"), stale: result.stale } satisfies SparkSeries;
+  return {
+    points: finalPoints(foreignPoints(result.data), "America/New_York"),
+    stale: result.stale,
+  } satisfies SparkSeries;
 }
 
 async function bitcoinSeries(anchor: number) {
-  const end = new Date((anchor || Date.now()) + 5 * 60_000);
-  const start = new Date(end.getTime() - 26 * 60 * 60_000);
+  const center = anchor || Date.now();
   const result = await naverJson<unknown>(
-    buildNaverPath("/api/coin/candle/UPBIT/KRW/BTC/minutes/5", { from: start.toISOString(), to: end.toISOString() }),
+    buildNaverPath("/api/coin/candle/UPBIT/KRW/BTC/minutes/5/marketInfo", {
+      from: localIso(center - 26 * 60 * 60_000, "Asia/Seoul"),
+      to: localIso(center + 5 * 60_000, "Asia/Seoul"),
+    }),
     { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_500 },
   );
-  return { points: latestTradingDay(normalizePoints([{ data: result.data, fetchedAt: result.fetchedAt }]), "Asia/Seoul"), stale: result.stale } satisfies SparkSeries;
+  return {
+    points: finalPoints(bitcoinPoints(result.data), "Asia/Seoul"),
+    stale: result.stale,
+  } satisfies SparkSeries;
 }
 
 async function usdKrwSeries() {
@@ -189,7 +222,10 @@ async function usdKrwSeries() {
     buildNaverPath("/api/stockSecurity/exchange-rates/v2/USD/charts/round", { bankType: "hana" }),
     { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 3_500 },
   );
-  return { points: latestTradingDay(normalizePoints([{ data: result.data, fetchedAt: result.fetchedAt }]), "Asia/Seoul"), stale: result.stale } satisfies SparkSeries;
+  return {
+    points: finalPoints(fxPoints(result.data), "Asia/Seoul"),
+    stale: result.stale,
+  } satisfies SparkSeries;
 }
 
 export async function GET() {
@@ -214,23 +250,15 @@ export async function GET() {
     usdKrwSeries(),
   ]);
 
-  const fallback = [
-    fallbackSeries(kospi?.price ?? 0, kospi?.timestamp ?? Date.now()),
-    fallbackSeries(kosdaq?.price ?? 0, kosdaq?.timestamp ?? Date.now()),
-    fallbackSeries(spx?.price ?? 0, spx?.timestamp ?? Date.now()),
-    fallbackSeries(comp?.price ?? 0, comp?.timestamp ?? Date.now()),
-    fallbackSeries(btc?.price ?? 0, btc?.timestamp ?? Date.now()),
-    fallbackSeries(fx?.rate ?? 0, fx?.fetchedAt ?? Date.now()),
-  ];
   const ids = ["KOSPI", "KOSDAQ", "SPX", "COMP", "BTC", "USDKRW"] as const;
   const series = Object.fromEntries(ids.map((id, index) => {
     const job = jobs[index];
-    const value = job.status === "fulfilled" && job.value.points.length >= 2 ? job.value : fallback[index];
+    const value = job.status === "fulfilled" && job.value.points.length >= 2 ? job.value : fallbackSeries();
     return [id, value];
   }));
 
   return Response.json(
-    { series, pollingInterval: 60_000, timestamp: Date.now() },
+    { series, pollingInterval: 60_000, timestamp: Date.now(), fxTimestamp: fx?.fetchedAt ?? null },
     { headers: { "cache-control": "public, max-age=15, s-maxage=30, stale-while-revalidate=30" } },
   );
 }
