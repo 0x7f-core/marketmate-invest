@@ -3,6 +3,7 @@ import ActivityQuantityUnits from "./activity-quantity-units";
 import CryptoSourceLabels from "./crypto-source-labels";
 import DesktopNavLabel from "./desktop-nav-label";
 import HomeDashboardOrder from "./home-dashboard-order";
+import HomeIndexBoard from "./home-index-board";
 import HomeMarketNews from "./home-market-news";
 import HomeMarketRankingLogos from "./home-market-ranking-logos";
 import HomeMarketRankings from "./home-market-rankings";
@@ -29,6 +30,7 @@ export default function Home() {
       <PortfolioBulkSell />
       <QuoteIdentityGuard />
       <TradingFeeGuide />
+      <HomeIndexBoard />
       <HomeMarketNews />
       <HomeMarketRankingLogos />
       <HomeMarketRankings />
