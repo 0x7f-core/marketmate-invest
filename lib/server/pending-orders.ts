@@ -7,11 +7,21 @@ type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; q
 export async function matchPendingOrders(quote: TradingQuote) {
   if (!env.DB || !isExecutableTradingQuote(quote)) return;
 
+  const instrumentId = `${quote.market}:${quote.symbol}`;
+  const nativePriceMicros = Math.round(quote.price * 1_000_000);
+
+  // Most quote refreshes have no executable pending order. Check D1 first so
+  // normal price rendering does not pay for an additional market-session lookup.
+  const candidate = await env.DB.prepare(`SELECT id FROM orders
+    WHERE instrument_id=? AND status='pending'
+      AND ((side='buy' AND limit_price_micros>=?) OR (side='sell' AND limit_price_micros<=?))
+    LIMIT 1`).bind(instrumentId, nativePriceMicros, nativePriceMicros).first<{ id: string }>();
+  if (!candidate) return;
+
   const session = await getCheckedMarketSession(quote.market);
   if (!session.isOpen || session.stale || !isExecutableTradingQuote(quote)) return;
   if (quote.market === "KR" && quote.venue && session.exchange && quote.venue !== session.exchange) return;
-  const instrumentId = `${quote.market}:${quote.symbol}`;
-  const nativePriceMicros = Math.round(quote.price * 1_000_000);
+
   const rows = await env.DB.prepare(`SELECT id,participant_id AS participantId,side,quantity_micros AS quantityMicros,limit_price_micros AS limitPriceMicros
     FROM orders WHERE instrument_id=? AND status='pending' AND ((side='buy' AND limit_price_micros>=?) OR (side='sell' AND limit_price_micros<=?))
     ORDER BY created_at LIMIT 20`).bind(instrumentId, nativePriceMicros, nativePriceMicros).all<PendingOrder>();
