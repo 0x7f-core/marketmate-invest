@@ -1,3 +1,4 @@
+import { getDomesticListingMarket, normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 
 export type RankingMarket = "KR" | "US" | "CRYPTO";
@@ -105,6 +106,14 @@ function normalizeName(row: Row, symbol: string) {
   ]) || symbol;
 }
 
+function domesticExchange(row: Row) {
+  for (const key of ["marketType", "marketName", "typeCode", "typeName", "stockExchangeType", "exchangeType", "exchange", "tradeType"]) {
+    const listing = normalizeDomesticListingMarket(textValue(row, [key]));
+    if (listing) return listing;
+  }
+  return textValue(row, ["marketType", "exchange", "tradeType", "marketName"]) || "KRX";
+}
+
 function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, "rank"> | null {
   const symbol = normalizeSymbol(market, row);
   if (!symbol) return null;
@@ -112,7 +121,7 @@ function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, 
   const price = numberValue(row, ["closePrice", "currentPrice", "tradePrice", "nowPrice", "price", "lastPrice", "last"]);
   if (price <= 0) return null;
   const exchange = market === "KR"
-    ? textValue(row, ["marketType", "exchange", "tradeType", "marketName"]) || "KRX"
+    ? domesticExchange(row)
     : market === "US"
       ? textValue(row, ["exchangeName", "exchange", "exchangeCode", "tradeType", "marketType"]) || "USA"
       : textValue(row, ["exchangeType", "exchange", "market"]) || "UPBIT";
@@ -188,6 +197,14 @@ async function enrichUsNames(items: MarketRankingItem[]) {
   }));
 }
 
+async function enrichDomesticMarkets(items: MarketRankingItem[]) {
+  return Promise.all(items.map(async item => {
+    if (item.market !== "KR" || normalizeDomesticListingMarket(item.exchange)) return item;
+    const exchange = await getDomesticListingMarket(item.symbol, item.exchange);
+    return exchange ? { ...item, exchange } : item;
+  }));
+}
+
 function domesticOrder(category: RankingCategory) {
   return category === "tradingValue" ? "priceTop"
     : category === "volume" ? "quantTop"
@@ -228,5 +245,6 @@ export async function getMarketRanking(market: RankingMarket, categoryInput: str
   let items = rank(normalized, category, market !== "CRYPTO" || category !== "volume");
   if (!items.length) throw new Error("NAVER_RANKING_EMPTY");
   if (market === "US") items = await enrichUsNames(items);
+  if (market === "KR") items = await enrichDomesticMarkets(items);
   return { market, category, items, source: "NAVER", fetchedAt: result.fetchedAt, stale: result.stale, pollingInterval: 15_000 };
 }
