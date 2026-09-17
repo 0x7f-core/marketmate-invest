@@ -67,22 +67,20 @@ console.log("PASS session readback");
 const search = await jsonRequest(`/api/instruments/search?q=${encodeURIComponent("삼성전자")}&market=KR`, { headers: authHeaders, cache: "no-store" });
 assert(search.response.status === 200, `instrument search expected 200, got ${search.response.status}: ${JSON.stringify(search.data)}`);
 assert(Array.isArray(search.data?.instruments), "instrument search did not return instruments[]");
-assert(
-  search.data.instruments.some(item => item?.market === "KR" && item?.symbol === "005930" && item?.name === "삼성전자"),
-  `Samsung 005930 missing from Naver-backed name search: ${JSON.stringify(search.data?.instruments)}`,
-);
+const samsungByName = search.data.instruments.find(item => item?.market === "KR" && item?.symbol === "005930" && item?.name === "삼성전자");
+assert(samsungByName, `Samsung 005930 missing from Naver-backed name search: ${JSON.stringify(search.data?.instruments)}`);
+assert(samsungByName.exchange === "KOSPI", `Samsung search exchange expected KOSPI, got ${samsungByName.exchange}`);
 assert(search.data?.source === "NAVER", "instrument search source is not NAVER");
-console.log("PASS authenticated Naver instrument name search");
+console.log("PASS authenticated Naver instrument name search + KOSPI label");
 
 const codeSearch = await jsonRequest("/api/instruments/search?q=005930&market=KR", { headers: authHeaders, cache: "no-store" });
 assert(codeSearch.response.status === 200, `numeric instrument search expected 200, got ${codeSearch.response.status}: ${JSON.stringify(codeSearch.data)}`);
 assert(Array.isArray(codeSearch.data?.instruments), "numeric instrument search did not return instruments[]");
-assert(
-  codeSearch.data.instruments.some(item => item?.market === "KR" && item?.symbol === "005930" && item?.name === "삼성전자"),
-  `Samsung 005930 missing from exact numeric search: ${JSON.stringify(codeSearch.data?.instruments)}`,
-);
+const samsungByCode = codeSearch.data.instruments.find(item => item?.market === "KR" && item?.symbol === "005930" && item?.name === "삼성전자");
+assert(samsungByCode, `Samsung 005930 missing from exact numeric search: ${JSON.stringify(codeSearch.data?.instruments)}`);
+assert(samsungByCode.exchange === "KOSPI", `Samsung numeric search exchange expected KOSPI, got ${samsungByCode.exchange}`);
 assert(codeSearch.data?.source === "NAVER", "numeric instrument search source is not NAVER");
-console.log("PASS Naver numeric-code instrument search");
+console.log("PASS Naver numeric-code instrument search + KOSPI label");
 
 const marketStatus = await jsonRequest("/api/market-status?market=KR", { headers: authHeaders, cache: "no-store" });
 assert(marketStatus.response.status === 200, `market status expected 200, got ${marketStatus.response.status}: ${JSON.stringify(marketStatus.data)}`);
@@ -94,8 +92,9 @@ const quote = await jsonRequest("/api/quotes?market=KR&symbols=005930&exchange=K
 assert(quote.response.status === 200, `quote expected 200, got ${quote.response.status}: ${JSON.stringify(quote.data)}`);
 assert(Array.isArray(quote.data?.quotes) && quote.data.quotes.length > 0, "quote response missing quotes[]");
 assert(Number(quote.data.quotes[0]?.price) > 0, "Samsung quote has no positive price");
+assert(quote.data.quotes[0]?.venue === "KOSPI", `Samsung client listing label expected KOSPI, got ${quote.data.quotes[0]?.venue}`);
 assert(quote.data?.source === "NAVER", "quote source is not NAVER");
-console.log(`PASS KR quote through app route (${quote.data.quotes[0].price})`);
+console.log(`PASS KR quote through app route (${quote.data.quotes[0].price}, KOSPI)`);
 
 const chart = await jsonRequest("/api/chart?market=KR&symbol=005930&exchange=KRX&range=1M", { headers: authHeaders, cache: "no-store" });
 assert(chart.response.status === 200, `chart expected 200, got ${chart.response.status}: ${JSON.stringify(chart.data)}`);
@@ -125,6 +124,9 @@ for (const market of ["KR", "US", "CRYPTO"]) {
     assert(Array.isArray(ranking.data?.items), `${market}/${category} ranking missing items[]`);
     assert(ranking.data.items.length > 0 && ranking.data.items.length <= 10, `${market}/${category} ranking must contain 1-10 items`);
     assert(ranking.data.items.every((item, index) => item?.rank === index + 1 && Number(item?.price) > 0), `${market}/${category} ranking has invalid rank/price data`);
+    if (market === "KR") {
+      assert(ranking.data.items.every(item => ["KOSPI", "KOSDAQ", "KONEX"].includes(item?.exchange)), `${market}/${category} ranking has non-listing exchange labels: ${JSON.stringify(ranking.data.items.map(item => item?.exchange))}`);
+    }
   }
   console.log(`PASS ${market} Naver realtime rankings (5 categories)`);
 }
