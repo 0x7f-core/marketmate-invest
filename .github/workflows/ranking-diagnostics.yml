@@ -1,0 +1,36 @@
+name: Ranking diagnostics
+
+on:
+  push:
+    paths:
+      - .github/workflows/ranking-diagnostics.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe Naver domestic ranking endpoints
+        shell: bash
+        run: |
+          set -u
+          for order in priceTop quantTop up down marketSum; do
+            echo "===== default orderType=$order ====="
+            url="https://stock.naver.com/api/domestic/market/stock/default?tradeType=KRX&marketType=ALL&orderType=$order&startIdx=0&pageSize=3"
+            curl -sS --max-time 15 -D /tmp/h -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-Ranking-Diagnostic/1.0' "$url" -o /tmp/b || true
+            head -n 1 /tmp/h || true
+            head -c 5000 /tmp/b || true
+            echo
+          done
+          for listing in tradingValueDesc tradingVolumeDesc changeRateDescUpAll changeRateDescDownAll marketCapDesc; do
+            echo "===== v3 listingType=$listing ====="
+            url="https://stock.naver.com/api/stockSecurity/individual-stocks/v3/domestic?listingType=$listing&exchangeType=consolidated&index=0&size=3"
+            curl -sS --max-time 15 -D /tmp/h -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-Ranking-Diagnostic/1.0' "$url" -o /tmp/b || true
+            head -n 1 /tmp/h || true
+            head -c 5000 /tmp/b || true
+            echo
+          done
