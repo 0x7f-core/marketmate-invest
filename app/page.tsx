@@ -4,6 +4,7 @@ import HomeMarketNews from "./home-market-news";
 import HomeMarketRankingLogos from "./home-market-ranking-logos";
 import HomeMarketRankings from "./home-market-rankings";
 import MarketStatusClosedTime from "./market-status-closed-time";
+import TradingFeeGuide from "./trading-fee-guide";
 import TradingDashboard from "./trading-dashboard";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ export default function Home() {
     <>
       <CryptoSourceLabels />
       <MarketStatusClosedTime />
+      <TradingFeeGuide />
       <HomeMarketNews />
       <HomeMarketRankingLogos />
       <HomeMarketRankings />
