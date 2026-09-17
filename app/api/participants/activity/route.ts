@@ -1,5 +1,26 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
+
+type ActivityPosition = {
+  market: "KR" | "US" | "CRYPTO";
+  symbol: string;
+  name: string;
+  currency: string;
+  exchange: string;
+  quantityMicros: number;
+  averagePriceKrwMicros: number;
+  currentPriceKrwMicros?: number | null;
+  unrealizedPnlKrw?: number | null;
+};
+
+async function repairDomesticListings(items: ActivityPosition[]) {
+  return Promise.all(items.map(async item => {
+    if (item.market !== "KR") return item;
+    const listing = await getDomesticListingMarket(item.symbol, item.exchange);
+    return listing ? { ...item, exchange: listing } : item;
+  }));
+}
 
 export async function GET(request: Request) {
   try {
@@ -24,7 +45,8 @@ export async function GET(request: Request) {
        FROM positions pos JOIN instruments i ON i.id=pos.instrument_id
        LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
        WHERE pos.participant_id=? AND pos.quantity_micros>0 ORDER BY i.market,i.name`,
-    ).bind(participantId).all();
+    ).bind(participantId).all<ActivityPosition>();
+    const repairedPositions = await repairDomesticListings(positions.results);
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.executed_at AS executedAt,
@@ -32,6 +54,6 @@ export async function GET(request: Request) {
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
        WHERE f.participant_id=? ORDER BY f.executed_at DESC LIMIT 100`,
     ).bind(participantId).all();
-    return Response.json({ participant, positions: positions.results, fills: fills.results }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ participant, positions: repairedPositions, fills: fills.results }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
