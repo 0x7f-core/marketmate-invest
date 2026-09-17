@@ -34,7 +34,7 @@ export function annotateFillReturns<T extends FillReturnInput>(fills: T[]) {
     const previous = positions.get(fill.instrumentId) ?? { quantityMicros: 0, averagePriceKrwMicros: 0 };
 
     let returnRate: number | null = null;
-    let returnRateKind: FillReturnKind = fill.side === "buy" ? "current" : "realized";
+    const returnRateKind: FillReturnKind = fill.side === "buy" ? "current" : "realized";
 
     if (fill.side === "buy") {
       const buyCostPriceKrwMicros = priceKrwMicros + feePerUnitKrwMicros(feeKrw, quantityMicros);
