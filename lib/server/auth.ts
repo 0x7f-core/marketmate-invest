@@ -76,16 +76,22 @@ export async function getSessionUser(request: Request): Promise<RequestUser | nu
   const tokenHash = await sha256(token);
   const now = Date.now();
   const user = await env.DB!.prepare(
-    `SELECT u.id,u.nickname,u.role,u.is_active AS isActive,s.expires_at AS expiresAt
+    `SELECT u.id,u.nickname,u.role,u.is_active AS isActive,s.expires_at AS expiresAt,s.last_seen_at AS lastSeenAt
      FROM sessions s JOIN users u ON u.id=s.user_id
      WHERE s.token_hash=?`,
-  ).bind(tokenHash).first<{ id: string; nickname: string; role: "member" | "admin"; isActive: number; expiresAt: number }>();
+  ).bind(tokenHash).first<{ id: string; nickname: string; role: "member" | "admin"; isActive: number; expiresAt: number; lastSeenAt: number }>();
   if (!user || !user.isActive || user.expiresAt <= now) {
     await env.DB!.prepare("DELETE FROM sessions WHERE token_hash=?").bind(tokenHash).run();
     return null;
   }
-  await env.DB!.prepare("UPDATE sessions SET last_seen_at=? WHERE token_hash=? AND last_seen_at<?")
-    .bind(now, tokenHash, now - 60 * 60 * 1000).run();
+
+  // A session lookup happens on nearly every live-data request. Do not send a
+  // no-op UPDATE to D1 each time; refresh the heartbeat only when it is actually
+  // older than one hour.
+  if (!user.lastSeenAt || user.lastSeenAt < now - 60 * 60 * 1000) {
+    await env.DB!.prepare("UPDATE sessions SET last_seen_at=? WHERE token_hash=?")
+      .bind(now, tokenHash).run();
+  }
   return { id: user.id, nickname: user.nickname, role: user.role };
 }
 
