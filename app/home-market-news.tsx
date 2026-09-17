@@ -62,7 +62,10 @@ function makeNewsIcon() {
   line2.setAttribute("d", "M8 12h8");
   const line3 = document.createElementNS("http://www.w3.org/2000/svg", "path");
   line3.setAttribute("d", "M8 16h5");
-  svg.append(outline, line1, line2, line3);
+  svg.appendChild(outline);
+  svg.appendChild(line1);
+  svg.appendChild(line2);
+  svg.appendChild(line3);
   return svg;
 }
 
