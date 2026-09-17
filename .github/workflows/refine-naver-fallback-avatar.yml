@@ -53,3 +53,5 @@ function instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"n
           git add app/trading-dashboard.tsx app/globals.css .github/workflows/refine-naver-fallback-avatar.yml
           git commit -m "fix: align fallback avatar colors with Naver"
           git push
+
+# one-time trigger
