@@ -10,3 +10,5 @@
   .mobile-contest-entry small{font-size:10px;color:#7d858d}
   .mobile-contest-entry .contest-button{height:34px;font-size:12px}
 }
+
+/* Mobile navigation is intentionally consolidated into the fixed bottom bar. */
