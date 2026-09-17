@@ -58,6 +58,14 @@ function localClockMinutes(timestamp: number, timeZone: string) {
   return Number(part("hour")) * 60 + Number(part("minute"));
 }
 
+function kstWeekday(timestamp: number) {
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    weekday: "short",
+  }).format(new Date(timestamp));
+  return ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
+}
+
 function normalize(points: SparkPoint[]) {
   const byTime = new Map<number, SparkPoint>();
   for (const point of points) {
@@ -255,7 +263,22 @@ export async function GET() {
     const job = jobs[index];
     const value = job.status === "fulfilled" && job.value.points.length >= 2 ? job.value : fallbackSeries();
     return [id, value];
-  }));
+  })) as Record<(typeof ids)[number], SparkSeries>;
+
+  // The bank round chart can stop publishing fresh timestamps at night even while
+  // the live USD/KRW indicator is still updating. Feed the successful live quote
+  // into the sparkline so the UI status follows the live quote rather than the
+  // older bank-announcement timestamp. Korea's USD/KRW market is 24-hour on
+  // business days from July 2026, so only suppress this outside KST weekdays.
+  if (fx && !fx.stale && fx.rate > 0 && kstWeekday(fx.fetchedAt)) {
+    series.USDKRW = {
+      points: downsample(normalize([
+        ...series.USDKRW.points,
+        { time: fx.fetchedAt, value: fx.rate },
+      ])),
+      stale: false,
+    };
+  }
 
   return Response.json(
     { series, pollingInterval: 60_000, timestamp: Date.now(), fxTimestamp: fx?.fetchedAt ?? null },
