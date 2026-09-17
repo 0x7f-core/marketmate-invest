@@ -150,8 +150,8 @@ function patchCompetitionTradingGuide() {
 }
 
 function patchCryptoSourceLabels() {
-  document.querySelectorAll<HTMLSelectElement>('select[aria-label="보유종목 정렬 기준"] option').forEach(option => {
-    if (option.textContent === "종목 이름") option.textContent = "종목명";
+  document.querySelectorAll('select[aria-label="보유종목 정렬 기준"] option').forEach(option => {
+    if (option instanceof HTMLOptionElement && option.textContent === "종목 이름") option.textContent = "종목명";
   });
 
   document.querySelectorAll(".np-market-status span").forEach(element => {
