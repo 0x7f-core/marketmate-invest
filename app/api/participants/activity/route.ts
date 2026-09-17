@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
+import { annotateFillReturns } from "@/lib/server/fill-returns";
 
 type ActivityPosition = {
   market: "KR" | "US" | "CRYPTO";
@@ -12,6 +13,22 @@ type ActivityPosition = {
   averagePriceKrwMicros: number;
   currentPriceKrwMicros?: number | null;
   unrealizedPnlKrw?: number | null;
+};
+
+type ActivityFill = {
+  id: string;
+  instrumentId: string;
+  side: "buy" | "sell";
+  quantityMicros: number;
+  priceMicros: number;
+  fxRateMicros: number;
+  feeKrw: number;
+  executedAt: number;
+  market: "KR" | "US" | "CRYPTO";
+  symbol: string;
+  name: string;
+  currency: string;
+  currentPriceKrwMicros?: number | null;
 };
 
 async function repairDomesticListings(items: ActivityPosition[]) {
@@ -48,12 +65,16 @@ export async function GET(request: Request) {
     ).bind(participantId).all<ActivityPosition>();
     const repairedPositions = await repairDomesticListings(positions.results);
     const fills = await env.DB!.prepare(
-      `SELECT f.id,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
-              f.fx_rate_micros AS fxRateMicros,f.executed_at AS executedAt,
-              i.market,i.symbol,i.name,i.currency
+      `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
+              f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,f.executed_at AS executedAt,
+              i.market,i.symbol,i.name,i.currency,q.price_micros AS currentPriceKrwMicros
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
-       WHERE f.participant_id=? ORDER BY f.executed_at DESC LIMIT 100`,
-    ).bind(participantId).all();
-    return Response.json({ participant, positions: repairedPositions, fills: fills.results }, { headers: { "cache-control": "no-store" } });
+       LEFT JOIN quote_snapshots q ON q.instrument_id=f.instrument_id
+       WHERE f.participant_id=? ORDER BY f.executed_at ASC,f.id ASC`,
+    ).bind(participantId).all<ActivityFill>();
+    const fillsWithReturns = annotateFillReturns(fills.results)
+      .sort((a, b) => b.executedAt - a.executedAt)
+      .slice(0, 100);
+    return Response.json({ participant, positions: repairedPositions, fills: fillsWithReturns }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
