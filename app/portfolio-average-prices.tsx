@@ -50,7 +50,8 @@ function enhanceDesktopAverage(cell: HTMLTableCellElement, averageKrw: number, u
     sub.style.fontWeight = "500";
     sub.style.color = "#8a949e";
 
-    display.append(main, sub);
+    display.appendChild(main);
+    display.appendChild(sub);
     cell.replaceChildren(display);
   }
 
@@ -86,7 +87,9 @@ function enhanceMobileAverage(target: HTMLElement, averageKrw: number, isUs: boo
     sub.style.fontWeight = "500";
     sub.style.color = "#9aa2aa";
 
-    line.append(label, main, sub);
+    line.appendChild(label);
+    line.appendChild(main);
+    line.appendChild(sub);
     target.appendChild(line);
   }
 
