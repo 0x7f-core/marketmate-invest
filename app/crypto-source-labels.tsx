@@ -215,6 +215,8 @@ export default function CryptoSourceLabels() {
     let active = true;
     let competitions: CompetitionInvite[] = [];
     let competitionTimer: ReturnType<typeof setTimeout> | undefined;
+    let competitionLoading = false;
+    let lastCompetitionLoadAt = 0;
     let scheduled = false;
 
     const schedulePatch = () => {
@@ -228,27 +230,39 @@ export default function CryptoSourceLabels() {
       });
     };
 
-    const loadCompetitionInvites = async () => {
-      if (!document.querySelector(".contest-overview")) {
-        if (active) competitionTimer = setTimeout(loadCompetitionInvites, 5_000);
+    const loadCompetitionInvites = async (force = false) => {
+      if (!active || !document.querySelector(".contest-overview") || competitionLoading) return;
+      if (!force && competitions.length && Date.now() - lastCompetitionLoadAt < 60_000) {
+        schedulePatch();
         return;
       }
+
+      competitionLoading = true;
       try {
         const response = await fetch("/api/competitions", { cache: "no-store" });
         const data = response.ok ? await response.json() as { competitions?: CompetitionInvite[] } : null;
         if (!active) return;
         competitions = data?.competitions ?? [];
+        lastCompetitionLoadAt = Date.now();
         schedulePatch();
       } catch {
         // Keep the last known invite codes if the request temporarily fails.
       } finally {
-        if (active) competitionTimer = setTimeout(loadCompetitionInvites, 60_000);
+        competitionLoading = false;
+        if (competitionTimer) clearTimeout(competitionTimer);
+        if (active && document.querySelector(".contest-overview")) {
+          competitionTimer = setTimeout(() => void loadCompetitionInvites(true), 60_000);
+        }
       }
     };
 
-    schedulePatch();
-    void loadCompetitionInvites();
-    const observer = new MutationObserver(schedulePatch);
+    const sync = () => {
+      schedulePatch();
+      if (document.querySelector(".contest-overview")) void loadCompetitionInvites();
+    };
+
+    sync();
+    const observer = new MutationObserver(sync);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       active = false;
