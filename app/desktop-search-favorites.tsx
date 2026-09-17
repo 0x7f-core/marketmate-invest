@@ -104,10 +104,11 @@ export default function DesktopSearchFavorites() {
     document.addEventListener("focusin", onFocus);
     document.addEventListener("pointerdown", onFocus);
     locate();
-    void loadWatchlist();
+    const initialWatchlistTimer = window.setTimeout(() => void loadWatchlist(), 0);
     return () => {
       observer.disconnect();
       cancelAnimationFrame(frame);
+      window.clearTimeout(initialWatchlistTimer);
       document.removeEventListener("focusin", onFocus);
       document.removeEventListener("pointerdown", onFocus);
     };
