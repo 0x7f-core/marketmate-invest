@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
+import { annotateFillReturns } from "@/lib/server/fill-returns";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getTradingQuote } from "@/lib/server/trading-quote";
 
@@ -25,6 +26,22 @@ type PositionRow = {
   quoteReceivedAt?: number | null;
   marketValueKrw?: number | null;
   unrealizedPnlKrw?: number | null;
+};
+
+type FillRow = {
+  id: string;
+  instrumentId: string;
+  side: "buy" | "sell";
+  quantityMicros: number;
+  priceMicros: number;
+  fxRateMicros: number;
+  feeKrw: number;
+  executedAt: number;
+  market: Market;
+  symbol: string;
+  name: string;
+  currency: string;
+  currentPriceKrwMicros?: number | null;
 };
 
 async function refreshPortfolioQuote(instrument: StalePositionQuote, refreshStartedAt: number) {
@@ -95,12 +112,17 @@ export async function GET(request: Request) {
     ).bind(participantId).all<PositionRow>();
     const repairedPositions = await repairDomesticListings(positions.results);
     const fills = await env.DB!.prepare(
-      `SELECT f.id,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
+      `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,
-              f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency
+              f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency,
+              q.price_micros AS currentPriceKrwMicros
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
-       WHERE f.participant_id=? ORDER BY f.executed_at DESC LIMIT 100`
-    ).bind(participantId).all();
+       LEFT JOIN quote_snapshots q ON q.instrument_id=f.instrument_id
+       WHERE f.participant_id=? ORDER BY f.executed_at ASC,f.id ASC`
+    ).bind(participantId).all<FillRow>();
+    const fillsWithReturns = annotateFillReturns(fills.results)
+      .sort((a, b) => b.executedAt - a.executedAt)
+      .slice(0, 100);
     const reserved = await env.DB!.prepare(`SELECT COALESCE(SUM(
         (o.quantity_micros/1000000.0)*(o.limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0) *
         CASE
@@ -118,7 +140,7 @@ export async function GET(request: Request) {
     return Response.json({
       account: { ...account, reservedCashKrw, availableCashKrw: Math.max(0, Number(account.cashKrw ?? 0) - reservedCashKrw), marketValueKrw, totalAssetKrw: Number(account.cashKrw ?? 0) + marketValueKrw },
       positions: repairedPositions,
-      fills: fills.results,
+      fills: fillsWithReturns,
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
