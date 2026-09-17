@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   fix:
-    if: github.event.head_commit.message == 'chore: add one-time Naver-style logo fallback fix'
+    if: github.event.head_commit.message == 'chore: run one-time Naver-style logo fallback fix'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,31 +26,27 @@ jobs:
           dashboard = Path('app/trading-dashboard.tsx')
           source = dashboard.read_text()
 
-          old = '''const NAVER_STOCK_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
-          function normalizeNaverLogoCode(symbol:string){let clean=String(symbol??"").trim().replaceAll("\\\\","/");const tail=clean.split("/").filter(Boolean).pop()??"";clean=tail.replace(/\\.svg$/i,"").replace(/^(?:Stock)+/i,"");return clean.replace(/[^A-Za-z0-9._-]/g,"");}
-          function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([resolver,`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}
-          function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}`}>{failed?instrument.name.slice(0,1):<img src={src} alt={`${instrument.name} 로고`} onError={()=>setAttempt(value=>value+1)}/>}</span>;}
-          '''
-
-          new = '''const NAVER_STOCK_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
-          const INSTRUMENT_FALLBACK_COLORS=["#8b4fa4","#4f8a69","#4778ad","#d89a24","#bc3f7a","#ce6530","#6b79a8","#3f8f8a"] as const;
-          function normalizeNaverLogoCode(symbol:string){let clean=String(symbol??"").trim().replaceAll("\\\\","/");const tail=clean.split("/").filter(Boolean).pop()??"";clean=tail.replace(/\\.svg$/i,"").replace(/^(?:Stock)+/i,"");return clean.replace(/[^A-Za-z0-9._-]/g,"");}
-          function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([resolver,`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}
+          anchor = 'function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([resolver,`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}'
+          helpers = '''\nconst INSTRUMENT_FALLBACK_COLORS=["#8b4fa4","#4f8a69","#4778ad","#d89a24","#bc3f7a","#ce6530","#6b79a8","#3f8f8a"] as const;
           function instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"name">){const seed=`${instrument.market}:${instrument.symbol}:${instrument.name}`;let hash=2166136261;for(let i=0;i<seed.length;i+=1){hash^=seed.charCodeAt(i);hash=Math.imul(hash,16777619);}return INSTRUMENT_FALLBACK_COLORS[(hash>>>0)%INSTRUMENT_FALLBACK_COLORS.length];}
-          function instrumentFallbackLetter(name:string,symbol:string){const clean=(name||symbol||"?").trim();const first=Array.from(clean)[0]??Array.from(symbol.trim())[0]??"?";return /[A-Za-z]/.test(first)?first.toUpperCase():first;}
-          function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}${failed?" fallback":""}`} style={failed?{backgroundColor:instrumentFallbackColor(instrument)}:undefined}>{failed?<span aria-hidden="true">{instrumentFallbackLetter(instrument.name,instrument.symbol)}</span>:<img src={src} alt={`${instrument.name} 로고`} onError={()=>setAttempt(value=>value+1)}/>}</span>;}
-          '''
+          function instrumentFallbackLetter(name:string,symbol:string){const clean=(name||symbol||"?").trim();const first=Array.from(clean)[0]??Array.from(symbol.trim())[0]??"?";return /[A-Za-z]/.test(first)?first.toUpperCase():first;}'''
+          if 'INSTRUMENT_FALLBACK_COLORS' not in source:
+              if anchor not in source:
+                  raise SystemExit('instrument logo candidate anchor not found')
+              source = source.replace(anchor, anchor + helpers)
 
-          if old not in source:
-              raise SystemExit('expected InstrumentLogo block not found')
-          dashboard.write_text(source.replace(old, new))
+          old_logo = 'function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}`}>{failed?instrument.name.slice(0,1):<img src={src} alt={`${instrument.name} 로고`} onError={()=>setAttempt(value=>value+1)}/>}</span>;}'
+          new_logo = 'function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}${failed?" fallback":""}`} style={failed?{backgroundColor:instrumentFallbackColor(instrument)}:undefined}>{failed?<span aria-hidden="true">{instrumentFallbackLetter(instrument.name,instrument.symbol)}</span>:<img src={src} alt={`${instrument.name} 로고`} onError={()=>setAttempt(value=>value+1)}/>}</span>;}'
+          if old_logo not in source:
+              raise SystemExit('InstrumentLogo function not found')
+          dashboard.write_text(source.replace(old_logo, new_logo))
 
           css = Path('app/globals.css')
           styles = css.read_text()
           old_css = '.instrument-logo{display:grid;place-items:center;flex:none;overflow:hidden;border:1px solid #edf0f2;border-radius:50%;background:#f5f7f8;color:#68717a;font-weight:900}.instrument-logo img{width:100%;height:100%;object-fit:contain}.instrument-logo.sm{width:30px;height:30px;font-size:11px}.instrument-logo.md{width:40px;height:40px;font-size:13px}.instrument-logo.lg{width:52px;height:52px;font-size:17px}'
           new_css = '.instrument-logo{display:grid;place-items:center;flex:none;overflow:hidden;border:1px solid #edf0f2;border-radius:50%;background:#fff;color:#68717a;font-weight:800;line-height:1}.instrument-logo.fallback{border-color:transparent;color:#fff;font-weight:750;text-align:center;box-shadow:inset 0 0 0 1px #00000008}.instrument-logo.fallback>span{display:grid;width:100%;height:100%;place-items:center;line-height:1;transform:translateY(-.01em)}.instrument-logo img{width:100%;height:100%;object-fit:contain}.instrument-logo.sm{width:30px;height:30px;font-size:12px}.instrument-logo.md{width:40px;height:40px;font-size:15px}.instrument-logo.lg{width:52px;height:52px;font-size:19px}'
           if old_css not in styles:
-              raise SystemExit('expected instrument-logo CSS block not found')
+              raise SystemExit('instrument-logo CSS block not found')
           css.write_text(styles.replace(old_css, new_css))
           PY
 
