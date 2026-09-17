@@ -88,7 +88,7 @@ export default function HomeMarketRankingLogos() {
     };
 
     const observer = new MutationObserver(schedule);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
     schedule();
     return () => {
       observer.disconnect();
