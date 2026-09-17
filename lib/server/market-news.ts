@@ -206,23 +206,63 @@ async function resolveReutersCode(symbol: string, exchange: string) {
   return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
-function parsePublishedAt(record: Record<string, unknown>) {
-  for (const key of [
-    "publishedAt", "publishDateTime", "publishedDate", "publishDate", "releasedAt", "writeDate",
-    "createdAt", "createdDate", "regDate", "datetime", "dateTime", "date",
-  ]) {
-    const value = record[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value < 1_000_000_000_000 ? value * 1_000 : value;
-    if (typeof value !== "string" || !value.trim()) continue;
-    const clean = value.trim();
-    const parsed = Date.parse(clean);
-    if (Number.isFinite(parsed)) return parsed;
-    const digits = clean.replace(/\D/g, "");
+function parseKstDateTime(value: string, timeValue = "") {
+  const clean = value.trim();
+  if (!clean) return 0;
+  const combined = timeValue.trim() ? `${clean} ${timeValue.trim()}` : clean;
+
+  // Naver Stock commonly returns Korean local wall-clock time without an offset.
+  // Cloudflare Workers run in UTC, so Date.parse() on those strings makes them
+  // appear about nine hours in the future and the UI collapses them to "방금 전".
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(combined)) {
+    const explicit = Date.parse(combined);
+    if (Number.isFinite(explicit)) return explicit;
+  }
+
+  if (/^\d{4}(?:[-./]?\d{1,2}){2}/.test(combined)) {
+    const digits = combined.replace(/\D/g, "");
     if (digits.length >= 8) {
-      const hhmmss = digits.slice(8, 14).padEnd(6, "0");
-      const normalized = Date.parse(`${digits.slice(0,4)}-${digits.slice(4,6)}-${digits.slice(6,8)}T${hhmmss.slice(0,2)}:${hhmmss.slice(2,4)}:${hhmmss.slice(4,6)}+09:00`);
+      const dateDigits = digits.slice(0, 8);
+      const timeDigits = timeValue.trim()
+        ? timeValue.replace(/\D/g, "").slice(0, 6).padEnd(6, "0")
+        : digits.slice(8, 14).padEnd(6, "0");
+      const normalized = Date.parse(
+        `${dateDigits.slice(0,4)}-${dateDigits.slice(4,6)}-${dateDigits.slice(6,8)}T${timeDigits.slice(0,2)}:${timeDigits.slice(2,4)}:${timeDigits.slice(4,6)}+09:00`,
+      );
       if (Number.isFinite(normalized)) return normalized;
     }
+  }
+
+  const parsed = Date.parse(combined);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parsePublishedAt(record: Record<string, unknown>) {
+  const datePart = text(record, ["publishedDate", "publishDate", "writeDate", "createdDate", "regDate", "date"]);
+  const timePart = text(record, ["publishedTime", "publishTime", "writeTime", "createdTime", "regTime", "time"]);
+  if (datePart && timePart) {
+    const paired = parseKstDateTime(datePart, timePart);
+    if (paired) return paired;
+  }
+
+  for (const key of [
+    "publishedAt", "publishDateTime", "publishedDateTime", "publishedDate", "publishDate", "releasedAt", "writeDateTime", "writeDate",
+    "createdAt", "createdDateTime", "createdDate", "regDateTime", "regDate", "datetime", "dateTime", "date",
+  ]) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value >= 1_000_000_000_000) return value;
+      if (value >= 1_000_000_000) return value * 1_000;
+      const compactDate = String(Math.trunc(value));
+      if (/^\d{8}$/.test(compactDate)) {
+        const parsedDate = parseKstDateTime(compactDate, timePart);
+        if (parsedDate) return parsedDate;
+      }
+      continue;
+    }
+    if (typeof value !== "string" || !value.trim()) continue;
+    const parsed = parseKstDateTime(value, key.toLowerCase().endsWith("date") ? timePart : "");
+    if (parsed) return parsed;
   }
   return 0;
 }
