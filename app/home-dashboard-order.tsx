@@ -81,11 +81,17 @@ export default function HomeDashboardOrder() {
   }, [order, ready, storageKey]);
 
   const applyOrder = useCallback(() => {
+    const isMobile = window.matchMedia("(max-width: 760px)").matches;
     for (const [index, id] of order.entries()) {
       const element = document.querySelector<HTMLElement>(DASHBOARDS[id].selector);
       if (!element) continue;
-      element.dataset.homeDashboardCard = id;
-      element.style.order = String(10 + index);
+      if (isMobile) {
+        element.dataset.homeDashboardCard = id;
+        element.style.order = String(10 + index);
+      } else {
+        delete element.dataset.homeDashboardCard;
+        element.style.removeProperty("order");
+      }
     }
   }, [order]);
 
@@ -119,7 +125,13 @@ export default function HomeDashboardOrder() {
     };
   }, [applyOrder]);
 
-  useEffect(() => { applyOrder(); }, [applyOrder]);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 760px)");
+    const onChange = () => applyOrder();
+    media.addEventListener("change", onChange);
+    applyOrder();
+    return () => media.removeEventListener("change", onChange);
+  }, [applyOrder]);
 
   const shift = (id: DashboardId, delta: -1 | 1) => {
     setOrder(current => {
@@ -141,9 +153,9 @@ export default function HomeDashboardOrder() {
   return (
     <>
       {target && target.isConnected ? createPortal(
-        <section className={`home-dashboard-order${editing ? " editing" : ""}`} aria-label="메인 대시보드 순서 설정">
+        <section className={`home-dashboard-order${editing ? " editing" : ""}`} aria-label="모바일 메인 대시보드 순서 설정">
           <div className="home-dashboard-order-head">
-            <span>메인 대시보드</span>
+            <span>모바일 대시보드</span>
             <button type="button" onClick={() => setEditing(value => !value)}>{editing ? "완료" : "순서 변경"}</button>
           </div>
           {editing ? (
@@ -181,41 +193,31 @@ export default function HomeDashboardOrder() {
         target,
       ) : null}
       <style>{`
-        .np-home{display:flex!important;flex-direction:column;gap:16px;align-items:stretch}
-        .np-home-main,.np-home>aside{display:contents!important}
-        .np-home .np-market-status{order:0}
-        .np-home-main>.live-market-strip{order:1}
-        .home-dashboard-order-slot{order:2;width:100%}
-        .np-home .np-market-focus,.np-home .np-my-summary,.np-home .np-watch-preview,.np-home .home-market-ranking-slot,.np-home .np-news{width:100%;min-width:0}
-        .home-dashboard-order{overflow:hidden;border:1px solid #e1e4e7;border-radius:12px;background:#fff}
-        .home-dashboard-order-head{min-height:46px;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
-        .home-dashboard-order-head>span{color:#626b73;font-size:12px;font-weight:700}
-        .home-dashboard-order-head>button,.home-dashboard-reset{height:30px;padding:0 11px;border:1px solid #dfe3e6;border-radius:7px;background:#fff;color:#4f5962;font-size:11px;font-weight:700}
-        .home-dashboard-order.editing .home-dashboard-order-head{border-bottom:1px solid #eef0f2}
-        .home-dashboard-order-editor{padding:12px 14px 14px;background:#fafbfb}
-        .home-dashboard-order-editor>p{margin:0 0 9px;color:#8b9299;font-size:11px}
-        .home-dashboard-order-editor ol{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin:0;padding:0;list-style:none}
-        .home-dashboard-order-editor li{min-width:0;height:44px;padding:0 7px;display:flex;align-items:center;gap:6px;border:1px solid #e2e6e8;border-radius:8px;background:#fff;cursor:grab;user-select:none}
-        .home-dashboard-order-editor li.dragging{opacity:.55}
-        .home-dashboard-drag{color:#a0a7ad;font-size:13px;line-height:1;transform:rotate(90deg)}
-        .home-dashboard-order-editor li>b{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:50%;background:#17191c;color:#fff;font-size:10px}
-        .home-dashboard-order-editor li>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
-        .home-dashboard-arrows{display:flex;margin-left:auto;gap:2px}
-        .home-dashboard-arrows button{width:23px;height:26px;padding:0;border:0;border-radius:5px;background:#f1f3f4;color:#59636c;font-size:13px;font-weight:800}
-        .home-dashboard-arrows button:disabled{opacity:.25;cursor:default}
-        .home-dashboard-reset{margin-top:10px}
-        @media(min-width:761px){.np-home-main>.live-market-strip{display:none!important}}
+        .home-dashboard-order-slot{display:none!important}
         @media(max-width:760px){
-          .np-home{gap:0}
-          .home-dashboard-order-slot{background:#f0f2f3;padding-bottom:9px}
-          .home-dashboard-order{border-width:0;border-radius:0}
-          .home-dashboard-order-head{min-height:48px;padding:0 16px}
-          .home-dashboard-order-editor{padding:10px 12px 12px}
-          .home-dashboard-order-editor ol{grid-template-columns:1fr}
-          .home-dashboard-order-editor li{height:46px;padding:0 10px}
-          .home-dashboard-order-editor li>strong{font-size:13px}
-          .home-dashboard-arrows button{width:34px;height:30px}
-          .home-dashboard-reset{width:100%;height:34px}
+          .np-home{display:flex!important;flex-direction:column;gap:0!important;align-items:stretch}
+          .np-home-main,.np-home>aside{display:contents!important}
+          .np-home .np-market-status{order:0}
+          .np-home-main>.live-market-strip{order:1}
+          .home-dashboard-order-slot{display:block!important;order:2;width:100%;background:#f0f2f3;padding-bottom:9px}
+          .np-home .np-market-focus,.np-home .np-my-summary,.np-home .np-watch-preview,.np-home .home-market-ranking-slot,.np-home .np-news{width:100%;min-width:0}
+          .home-dashboard-order{overflow:hidden;border-width:0;border-radius:0;background:#fff}
+          .home-dashboard-order-head{min-height:48px;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
+          .home-dashboard-order-head>span{color:#626b73;font-size:12px;font-weight:700}
+          .home-dashboard-order-head>button,.home-dashboard-reset{height:30px;padding:0 11px;border:1px solid #dfe3e6;border-radius:7px;background:#fff;color:#4f5962;font-size:11px;font-weight:700}
+          .home-dashboard-order.editing .home-dashboard-order-head{border-bottom:1px solid #eef0f2}
+          .home-dashboard-order-editor{padding:10px 12px 12px;background:#fafbfb}
+          .home-dashboard-order-editor>p{margin:0 0 9px;color:#8b9299;font-size:11px}
+          .home-dashboard-order-editor ol{display:grid;grid-template-columns:1fr;gap:7px;margin:0;padding:0;list-style:none}
+          .home-dashboard-order-editor li{min-width:0;height:46px;padding:0 10px;display:flex;align-items:center;gap:6px;border:1px solid #e2e6e8;border-radius:8px;background:#fff;cursor:grab;user-select:none}
+          .home-dashboard-order-editor li.dragging{opacity:.55}
+          .home-dashboard-drag{color:#a0a7ad;font-size:13px;line-height:1;transform:rotate(90deg)}
+          .home-dashboard-order-editor li>b{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:50%;background:#17191c;color:#fff;font-size:10px}
+          .home-dashboard-order-editor li>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+          .home-dashboard-arrows{display:flex;margin-left:auto;gap:2px}
+          .home-dashboard-arrows button{width:34px;height:30px;padding:0;border:0;border-radius:5px;background:#f1f3f4;color:#59636c;font-size:13px;font-weight:800}
+          .home-dashboard-arrows button:disabled{opacity:.25;cursor:default}
+          .home-dashboard-reset{width:100%;height:34px;margin-top:10px}
         }
       `}</style>
     </>
