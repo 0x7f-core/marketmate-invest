@@ -67,20 +67,26 @@ function quickFallback(market: Market) {
 
   const now = localClock("Asia/Seoul");
   const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(now.weekday);
+  const nxtPre = weekday && now.minutes >= 8 * 60 && now.minutes < 8 * 60 + 50;
+  const morningBreak = weekday && now.minutes >= 8 * 60 + 50 && now.minutes < 9 * 60;
   const krx = weekday && now.minutes >= 9 * 60 && now.minutes < 15 * 60 + 30;
-  const nxt = weekday && now.minutes >= 8 * 60 && now.minutes < 20 * 60;
-  const isOpen = krx || nxt;
-  const exchange = krx ? "KRX" : nxt ? "NXT" : "KRX";
-  const openTimeKst = krx ? "09:00" : nxt ? "08:00" : "09:00";
-  const closeTimeKst = krx ? "15:30" : nxt ? "20:00" : "15:30";
+  const nxtAfternoon = weekday && now.minutes >= 15 * 60 + 30 && now.minutes < 20 * 60;
+  const isOpen = nxtPre || krx || nxtAfternoon;
+  const exchange = krx ? "KRX" : (nxtPre || nxtAfternoon) ? "NXT" : "KRX";
+  const currentSession = nxtPre ? "preMarket" : krx ? "regularMarket" : nxtAfternoon ? "afterMarket" : morningBreak ? "morningBreak" : "closed";
+  const session = nxtPre ? "NXT 프리마켓" : krx ? "KRX 정규장" : nxtAfternoon ? "NXT 오후 거래" : morningBreak ? "거래 준비시간" : "장 마감";
+  const openTimeKst = nxtPre ? "08:00" : krx ? "09:00" : nxtAfternoon ? "15:30" : morningBreak ? "09:00" : "09:00";
+  const closeTimeKst = nxtPre ? "08:50" : krx ? "15:30" : nxtAfternoon ? "20:00" : morningBreak ? "09:00" : "15:30";
   return {
     isOpen,
-    label: isOpen ? `${krx ? "정규장 · KRX" : "NXT 거래시간"}` : "장 마감 · KRX",
-    notice: isOpen
-      ? `${krx ? "KRX 정규장" : "NXT 거래시간"} 빠른 시간 판정입니다 · ${openTimeKst}~${closeTimeKst} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-      : `국내주식 거래시간 밖입니다 · KRX 09:00~15:30 KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`,
+    label: isOpen ? `${session} · ${exchange}` : session,
+    notice: morningBreak
+      ? "국내주식은 08:50~09:00 KST에는 주문할 수 없습니다. KRX 정규장은 09:00 KST에 시작합니다."
+      : isOpen
+        ? `${session} 빠른 시간 판정입니다 · ${openTimeKst}~${closeTimeKst} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+        : "국내주식 거래시간 밖입니다 · NXT 프리마켓 08:00~08:50 / KRX 정규장 09:00~15:30 / NXT 오후 거래 15:30~20:00 KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.",
     exchange,
-    currentSession: krx ? "regularMarket" : nxt ? "nxt" : "closed",
+    currentSession,
     openTimeKst,
     closeTimeKst,
     source: "NAVER" as const,
