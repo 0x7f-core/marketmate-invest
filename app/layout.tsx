@@ -80,26 +80,55 @@ const NAVER_CRYPTO_LOGO = String.raw`(() => {
   else start();
 })();`;
 
+// U.S. ETF/ETN names are often much wider than the order card. The old enhancer
+// depended entirely on the quote header meta text (symbol · exchange), so a
+// transient stale header during instrument switching could leave the full fund
+// name on the buy/sell buttons. Resolve the ticker from several independent
+// signals and cache the Naver-search fallback so the action label stays stable.
 const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
   const etfNamePattern = /(?:\bETF\b|\bETN\b|SPDR|iShares|Vanguard|Invesco|ProShares|Direxion|VanEck|Global X|ARK(?:K|W|G|F|Q)?\b|WisdomTree|Schwab|First Trust|Pacer|GraniteShares|YieldMax|Roundhill|Simplify|Defiance|REX Shares|T-REX|MicroSectors|Amplify|Innovator|Avantis)/i;
   const usExchangePattern = /^(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)$/i;
+  const tickerCache = new Map();
+  const tickerRequests = new Map();
 
-  const apply = () => {
-    const quoteHead = document.querySelector(".np-quote-head");
-    if (!quoteHead) return;
+  const cleanTicker = (value) => String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\.(?:O|K|N|P|A)$/i, "")
+    .split(/[._]/)[0]
+    .replace(/[^A-Z0-9-]/g, "");
 
-    const name = quoteHead.querySelector(".stock-title h1")?.textContent?.trim() || "";
-    if (!etfNamePattern.test(name)) return;
+  const tickerFromLogo = (quoteHead) => {
+    const image = quoteHead.querySelector(".instrument-logo img");
+    if (!(image instanceof HTMLImageElement)) return "";
+    const sources = [image.currentSrc, image.src].filter(Boolean);
+    for (const source of sources) {
+      try {
+        const url = new URL(source, window.location.href);
+        const symbol = url.searchParams.get("symbol");
+        const fromQuery = cleanTicker(symbol);
+        if (fromQuery) return fromQuery;
+      } catch {}
+      const decoded = decodeURIComponent(String(source));
+      const stockLogo = decoded.match(/\/Stock([A-Z0-9._-]+)\.svg(?:[?#]|$)/i);
+      const fromLogo = cleanTicker(stockLogo?.[1]);
+      if (fromLogo) return fromLogo;
+    }
+    return "";
+  };
 
-    const meta = quoteHead.querySelector(".stock-title small")?.textContent || "";
-    const parts = meta.split("·").map((value) => value.trim());
-    const rawSymbol = parts[0] || "";
-    const exchange = parts[1] || "";
-    if (!rawSymbol || !usExchangePattern.test(exchange)) return;
+  const isUsContext = (exchange) => {
+    if (usExchangePattern.test(exchange)) return true;
+    const activeTab = Array.from(document.querySelectorAll(".np-market-tabs button")).some((button) =>
+      button.classList.contains("active") && /미국|글로벌/.test(button.textContent || ""),
+    );
+    if (activeTab) return true;
+    const session = document.querySelector(".order-panel .session")?.textContent || "";
+    return /NASDAQ|NYSE|AMEX|미국/i.test(session);
+  };
 
-    const ticker = rawSymbol.split(/[._]/)[0].toUpperCase();
+  const applyTicker = (ticker) => {
     if (!ticker) return;
-
     document.querySelectorAll("button.order-buy, button.order-sell").forEach((node) => {
       if (!(node instanceof HTMLButtonElement) || node.disabled) return;
       const side = node.classList.contains("order-buy") ? "매수" : "매도";
@@ -108,10 +137,70 @@ const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
     });
   };
 
+  const searchTicker = (name) => {
+    if (tickerCache.has(name)) return Promise.resolve(tickerCache.get(name) || "");
+    if (tickerRequests.has(name)) return tickerRequests.get(name);
+    const request = fetch("/api/instruments/search?q=" + encodeURIComponent(name) + "&market=US", { cache: "force-cache" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload) => {
+        const instruments = Array.isArray(payload?.instruments) ? payload.instruments : [];
+        const exact = instruments.find((item) => item?.market === "US" && String(item?.name || "").trim().toLowerCase() === name.toLowerCase());
+        const candidate = exact || instruments.find((item) => item?.market === "US");
+        const ticker = cleanTicker(candidate?.symbol);
+        if (ticker) tickerCache.set(name, ticker);
+        return ticker;
+      })
+      .catch(() => "")
+      .finally(() => tickerRequests.delete(name));
+    tickerRequests.set(name, request);
+    return request;
+  };
+
+  const apply = () => {
+    const quoteHead = document.querySelector(".np-quote-head");
+    if (!quoteHead) return;
+
+    const name = quoteHead.querySelector(".stock-title h1")?.textContent?.trim() || "";
+    if (!name || !etfNamePattern.test(name)) return;
+
+    const meta = quoteHead.querySelector(".stock-title small")?.textContent || "";
+    const parts = meta.split("·").map((value) => value.trim());
+    const rawSymbol = parts[0] || "";
+    const exchange = parts[1] || "";
+    if (!isUsContext(exchange)) return;
+
+    const metaTicker = usExchangePattern.test(exchange) ? cleanTicker(rawSymbol) : "";
+    const ticker = metaTicker || tickerFromLogo(quoteHead) || tickerCache.get(name) || "";
+    if (ticker) {
+      applyTicker(ticker);
+      return;
+    }
+
+    void searchTicker(name).then((resolved) => {
+      const currentName = document.querySelector(".np-quote-head .stock-title h1")?.textContent?.trim() || "";
+      if (resolved && currentName === name) applyTicker(resolved);
+    });
+  };
+
   const start = () => {
+    let scheduled = false;
+    const schedule = () => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => {
+        scheduled = false;
+        apply();
+      });
+    };
     apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const observer = new MutationObserver(schedule);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "src"],
+    });
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
