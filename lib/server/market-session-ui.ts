@@ -69,23 +69,25 @@ function quickFallback(market: Market) {
   const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(now.weekday);
   const nxtPre = weekday && now.minutes >= 8 * 60 && now.minutes < 8 * 60 + 50;
   const morningBreak = weekday && now.minutes >= 8 * 60 + 50 && now.minutes < 9 * 60;
-  const krx = weekday && now.minutes >= 9 * 60 && now.minutes < 15 * 60 + 30;
-  const nxtClosing = weekday && now.minutes >= 15 * 60 + 30 && now.minutes < 15 * 60 + 40;
-  const nxtAfter = weekday && now.minutes >= 15 * 60 + 40 && now.minutes < 20 * 60;
-  const isOpen = nxtPre || krx || nxtClosing || nxtAfter;
-  const exchange = krx ? "KRX" : (nxtPre || nxtClosing || nxtAfter) ? "NXT" : "KRX";
-  const currentSession = nxtPre ? "preMarket" : krx ? "regularMarket" : nxtClosing ? "closingMarket" : nxtAfter ? "afterMarket" : morningBreak ? "morningBreak" : "closed";
-  const session = nxtPre ? "NXT 프리마켓" : krx ? "KRX 정규장" : nxtClosing ? "NXT 종가매매" : nxtAfter ? "NXT 애프터마켓" : morningBreak ? "거래 준비시간" : "장 마감";
-  const openTimeKst = nxtPre ? "08:00" : krx ? "09:00" : nxtClosing ? "15:30" : nxtAfter ? "15:40" : morningBreak ? "09:00" : "09:00";
-  const closeTimeKst = nxtPre ? "08:50" : krx ? "15:30" : nxtClosing ? "16:00" : nxtAfter ? "20:00" : morningBreak ? "09:00" : "15:30";
+  const regular = weekday && now.minutes >= 9 * 60 && now.minutes < 15 * 60 + 20;
+  const closingAuction = weekday && now.minutes >= 15 * 60 + 20 && now.minutes < 15 * 60 + 30;
+  const nxtAfternoon = weekday && now.minutes >= 15 * 60 + 30 && now.minutes < 20 * 60;
+  const isOpen = nxtPre || regular || nxtAfternoon;
+  const exchange = regular ? "KRX" : (nxtPre || nxtAfternoon) ? "NXT" : "KRX";
+  const currentSession = nxtPre ? "preMarket" : regular ? "regularMarket" : nxtAfternoon ? "afterMarket" : morningBreak ? "morningBreak" : closingAuction ? "closingAuction" : "closed";
+  const session = nxtPre ? "NXT 프리마켓" : regular ? "KRX 정규장" : nxtAfternoon ? "NXT 오후 거래" : morningBreak ? "거래 준비시간" : closingAuction ? "동시호가" : "장 마감";
+  const openTimeKst = nxtPre ? "08:00" : regular ? "09:00" : nxtAfternoon ? "15:30" : morningBreak ? "09:00" : closingAuction ? "15:30" : "09:00";
+  const closeTimeKst = nxtPre ? "08:50" : regular ? "15:20" : nxtAfternoon ? "20:00" : morningBreak ? "09:00" : closingAuction ? "15:30" : "15:20";
   return {
     isOpen,
     label: isOpen ? `${session} · ${exchange}` : session,
     notice: morningBreak
-      ? "국내주식은 08:50~09:00 KST에는 주문할 수 없습니다. KRX 정규장은 09:00 KST에 시작합니다."
-      : isOpen
-        ? `${session} 빠른 시간 판정입니다 · ${openTimeKst}~${closeTimeKst} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-        : "국내주식 거래시간 밖입니다 · NXT 프리마켓 08:00~08:50 / KRX 정규장 09:00~15:30 / NXT 종가매매 15:30~16:00 / NXT 애프터마켓 15:40~20:00 KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.",
+      ? "국내주식은 08:50~09:00 KST에는 주문할 수 없습니다. 09:00 KST부터 다시 주문할 수 있습니다."
+      : closingAuction
+        ? "국내주식은 15:20~15:30 KST 동시호가 시간에는 주문할 수 없습니다. 15:30 KST부터 다시 주문할 수 있습니다."
+        : isOpen
+          ? `${session} 빠른 시간 판정입니다 · ${openTimeKst}~${closeTimeKst} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+          : "국내주식 거래시간 밖입니다 · NXT 프리마켓 08:00~08:50 / 08:50~09:00 주문 불가 / 09:00~15:20 주문 가능 / 15:20~15:30 동시호가 주문 불가 / NXT 오후 거래 15:30~20:00 KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.",
     exchange,
     currentSession,
     openTimeKst,
