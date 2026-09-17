@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - .github/workflows/ranking-diagnostics.yml
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,17 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe Naver domestic v3 exchange variants
+      - name: Probe NXT ranking fallback
         shell: bash
         run: |
-          set -u
-          for listing in tradingValueDesc tradingVolumeDesc changeRateDescUpAll changeRateDescDownAll marketCapDesc; do
-            for exchange in consolidated KRX NXT; do
-              echo "===== v3 listingType=$listing exchangeType=$exchange ====="
-              url="https://stock.naver.com/api/stockSecurity/individual-stocks/v3/domestic?listingType=$listing&exchangeType=$exchange&index=0&size=3"
-              curl -sS --max-time 15 -D /tmp/h -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-Ranking-Diagnostic/1.0' "$url" -o /tmp/b || true
-              head -n 1 /tmp/h || true
-              head -c 2500 /tmp/b || true
-              echo
-            done
+          for order in up down marketSum quantTop; do
+            echo "===== NXT orderType=$order ====="
+            url="https://stock.naver.com/api/domestic/market/stock/default?tradeType=NXT&marketType=ALL&orderType=$order&startIdx=0&pageSize=3"
+            status=$(curl -sS --max-time 15 -o /tmp/b -w '%{http_code}' -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-Ranking-Diagnostic/1.0' "$url" || true)
+            echo "HTTP $status"
+            head -c 3500 /tmp/b || true
+            echo
           done
