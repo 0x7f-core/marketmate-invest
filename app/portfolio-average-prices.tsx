@@ -3,15 +3,61 @@
 import { useEffect } from "react";
 
 const US_EXCHANGE_PATTERN = /\b(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)\b/i;
+const USD_KRW_CACHE_KEY = "marketmate:usdkrw:last";
+let cachedUsdKrw = 0;
+let usdKrwRequest: Promise<void> | null = null;
 
 function parseKrw(value: string) {
   const parsed = Number(value.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+function rememberUsdKrw(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return;
+  cachedUsdKrw = value;
+  try {
+    window.localStorage.setItem(USD_KRW_CACHE_KEY, String(value));
+  } catch {
+    // localStorage can be unavailable in restricted browser modes.
+  }
+}
+
+function readStoredUsdKrw() {
+  try {
+    const value = Number(window.localStorage.getItem(USD_KRW_CACHE_KEY) ?? 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function readUsdKrw() {
   const node = document.querySelector<HTMLElement>("[data-market-strip-usdkrw-price]");
-  return node ? parseKrw(node.textContent ?? "") : 0;
+  const liveValue = node ? parseKrw(node.textContent ?? "") : 0;
+  if (liveValue) {
+    rememberUsdKrw(liveValue);
+    return liveValue;
+  }
+  if (cachedUsdKrw) return cachedUsdKrw;
+  const storedValue = readStoredUsdKrw();
+  if (storedValue) cachedUsdKrw = storedValue;
+  return storedValue;
+}
+
+function warmUsdKrw() {
+  if (usdKrwRequest) return usdKrwRequest;
+  usdKrwRequest = fetch("/api/market-overview", { cache: "no-store" })
+    .then(async response => {
+      if (!response.ok) return;
+      const payload = await response.json() as { quotes?: Array<{ id?: string; price?: number }> };
+      const quote = payload.quotes?.find(item => item.id === "USDKRW");
+      rememberUsdKrw(Number(quote?.price ?? 0));
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      usdKrwRequest = null;
+    });
+  return usdKrwRequest;
 }
 
 function formatKrw(value: number) {
@@ -141,6 +187,7 @@ function installAveragePrices() {
 
 export default function PortfolioAveragePrices() {
   useEffect(() => {
+    cachedUsdKrw = readStoredUsdKrw();
     let scheduled = false;
     const schedule = () => {
       if (scheduled) return;
@@ -152,6 +199,7 @@ export default function PortfolioAveragePrices() {
     };
 
     schedule();
+    void warmUsdKrw().then(schedule);
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
