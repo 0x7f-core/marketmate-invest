@@ -107,6 +107,10 @@ function normalizeName(row: Row, symbol: string) {
 }
 
 function domesticExchange(row: Row) {
+  const sosok = textValue(row, ["sosok", "sosokCode"]);
+  if (sosok === "0") return "KOSPI";
+  if (sosok === "1") return "KOSDAQ";
+  if (sosok === "2") return "KONEX";
   for (const key of ["marketType", "marketName", "typeCode", "typeName", "stockExchangeType", "exchangeType", "exchange", "tradeType"]) {
     const listing = normalizeDomesticListingMarket(textValue(row, [key]));
     if (listing) return listing;
@@ -244,6 +248,48 @@ async function enrichDomesticMarkets(items: MarketRankingItem[]) {
   }));
 }
 
+function domesticV3ListingType(category: RankingCategory) {
+  return category === "tradingValue" ? "tradingValueDesc"
+    : category === "volume" ? "tradingVolumeDesc"
+      : category === "up" ? "changeRateDescUpAll"
+        : category === "down" ? "changeRateDescDownAll" : "marketCapDesc";
+}
+
+function domesticV3Rows(payload: unknown, category: RankingCategory) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const items = (payload as Row).items;
+  if (!Array.isArray(items)) return [];
+
+  const metric = (venue: Row | undefined) => {
+    if (!venue) return 0;
+    return category === "volume" ? numberValue(venue, ["tradingVolume", "volume"])
+      : category === "tradingValue" ? numberValue(venue, ["tradingValue", "tradeAmount", "amount"])
+        : category === "marketCap" ? numberValue(venue, ["marketCap", "marketValue"])
+          : Math.abs(numberValue(venue, ["changeRate", "rate"]));
+  };
+
+  return items.flatMap(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const row = item as Row;
+    const krx = row.krx && typeof row.krx === "object" && !Array.isArray(row.krx) ? row.krx as Row : undefined;
+    const nxt = row.nxt && typeof row.nxt === "object" && !Array.isArray(row.nxt) ? row.nxt as Row : undefined;
+    const krxMetric = metric(krx);
+    const nxtMetric = metric(nxt);
+    const venue = krxMetric > 0 || nxtMetric <= 0 ? (krx ?? nxt) : (nxt ?? krx);
+    if (!venue) return [];
+
+    return [{
+      ...row,
+      currentPrice: rowValue(venue, ["currentPrice", "price"]),
+      changePrice: rowValue(venue, ["changePrice"]),
+      changeRate: rowValue(venue, ["changeRate"]),
+      tradingVolume: rowValue(venue, ["tradingVolume", "volume"]),
+      tradingValue: rowValue(venue, ["tradingValue", "tradeAmount", "amount"]),
+      marketCap: rowValue(venue, ["marketCap", "marketValue"]),
+    }];
+  });
+}
+
 function domesticOrder(category: RankingCategory) {
   return category === "tradingValue" ? "priceTop"
     : category === "volume" ? "quantTop"
@@ -259,9 +305,27 @@ function foreignOrder(category: RankingCategory) {
 }
 
 async function domesticRanking(category: RankingCategory) {
-  return naverJson<unknown>(buildNaverPath("/api/domestic/market/stock/default", {
+  const primary = await naverJson<unknown>(buildNaverPath("/api/domestic/market/stock/default", {
     tradeType: "KRX", marketType: "ALL", orderType: domesticOrder(category), startIdx: 0, pageSize: 10,
   }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
+  if (uniqueItems("KR", primary.data).length) return primary;
+
+  // Before the KRX regular session Naver's legacy KRX ranking returns HTTP 200 + [] for
+  // trading value/volume/rise/fall, while the public site continues to show live NXT data.
+  if (category === "tradingValue" || category === "volume") {
+    const v3 = await naverJson<unknown>(buildNaverPath("/api/stockSecurity/individual-stocks/v3/domestic", {
+      listingType: domesticV3ListingType(category), exchangeType: "consolidated", index: 0, size: 10,
+    }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
+    const rows = domesticV3Rows(v3.data, category);
+    if (rows.length) return { ...v3, data: rows };
+  }
+
+  const nxt = await naverJson<unknown>(buildNaverPath("/api/domestic/market/stock/default", {
+    tradeType: "NXT", marketType: "ALL", orderType: domesticOrder(category), startIdx: 0, pageSize: 10,
+  }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
+  if (uniqueItems("KR", nxt.data).length) return nxt;
+
+  return primary;
 }
 
 async function foreignRanking(category: RankingCategory) {
