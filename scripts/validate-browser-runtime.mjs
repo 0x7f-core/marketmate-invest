@@ -260,7 +260,7 @@ async function main() {
     }))()`);
     assert(mobileMetrics.innerWidth === 390, `Unexpected mobile viewport width: ${mobileMetrics.innerWidth}`);
     assert(mobileMetrics.rootScrollWidth <= mobileMetrics.rootClientWidth + 1, `Mobile root horizontal overflow: ${mobileMetrics.rootScrollWidth} > ${mobileMetrics.rootClientWidth}`);
-    assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 5, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);
+    assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 6, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);
     console.log("PASS mobile shell + nav + no root overflow");
 
     assert(await client.evaluate(visibleExpression(".np-mobile-header .search-wrap")), "Mobile market search is not visible");
