@@ -66,8 +66,10 @@ export async function GET(request: Request) {
                    SELECT CASE WHEN i2.market='KR' THEN i2.name ELSE i2.symbol END AS label
                    FROM positions pos2
                    JOIN instruments i2 ON i2.id=pos2.instrument_id
+                   LEFT JOIN quote_snapshots q2 ON q2.instrument_id=pos2.instrument_id
                    WHERE pos2.participant_id=p.id AND pos2.quantity_micros>0
-                   ORDER BY pos2.updated_at DESC
+                   ORDER BY (pos2.quantity_micros / 1000000.0) * (COALESCE(q2.price_micros,pos2.average_price_micros) / 1000000.0) DESC,
+                            pos2.updated_at DESC
                    LIMIT 3
                  ) holding
               ) AS recentSymbols,
