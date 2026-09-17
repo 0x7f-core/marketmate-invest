@@ -35,6 +35,9 @@ type MarketStatusResponse = {
   isOpen?: boolean;
   label?: string;
   currentSession?: string;
+  source?: "NAVER";
+  stale?: boolean;
+  isHoliday?: boolean;
 };
 type CacheEntry = { data: RankingResponse; expiresAt: number };
 
@@ -104,33 +107,24 @@ function rateClass(value: number) {
   return value > 0 ? "up" : value < 0 ? "down" : "";
 }
 
-function localMinutes(timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date());
-  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
-  const hour = Number(read("hour"));
-  const minute = Number(read("minute"));
-  return {
-    weekday: read("weekday"),
-    minutes: Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1,
-  };
+function isBeforeRegularOpen(market: Market, status: MarketStatusResponse | null) {
+  if (market === "CRYPTO" || !status) return false;
+  if (status.market !== market || status.source !== "NAVER" || status.stale || status.isHoliday) return false;
+  const session = (status.currentSession ?? "").toLocaleLowerCase("en-US");
+  if (!session) return false;
+  return session.includes("pre") || session.includes("opening");
 }
 
-function isBeforeRegularOpen(market: Market, status: MarketStatusResponse | null) {
-  if (market === "CRYPTO") return false;
-  const session = status?.currentSession ?? "";
-  if (session === "preMarket" || session === "openingAuction") return true;
-  if (["regularMarket", "afterMarket", "closingAuction", "afterMarketClosing"].includes(session)) return false;
-
-  const clock = localMinutes(market === "KR" ? "Asia/Seoul" : "America/New_York");
-  if (!["Mon", "Tue", "Wed", "Thu", "Fri"].includes(clock.weekday)) return false;
-  const regularOpen = market === "KR" ? 9 * 60 : 9 * 60 + 30;
-  return clock.minutes >= 0 && clock.minutes < regularOpen;
+function openRankingInstrument(item: RankingItem) {
+  window.dispatchEvent(new CustomEvent("marketmate:open-instrument", {
+    detail: {
+      market: item.market,
+      symbol: item.symbol,
+      name: item.name,
+      exchange: item.exchange,
+      currency: item.currency,
+    },
+  }));
 }
 
 function RankingLogo({ item }: { item: RankingItem }) {
@@ -215,11 +209,30 @@ function RankingSection() {
       return;
     }
     let active = true;
-    fetch(`/api/market-status?market=${market}`, { cache: "no-store" })
-      .then(response => response.ok ? response.json() as Promise<MarketStatusResponse> : null)
-      .then(result => { if (active) setMarketStatus(result); })
-      .catch(() => { if (active) setMarketStatus(null); });
-    return () => { active = false; };
+    setMarketStatus(null);
+    const loadStatus = () => {
+      const now = Date.now();
+      fetch(`/api/market-status?market=${market}&live=1&_=${now}`, {
+        cache: "no-store",
+        headers: { "cache-control": "no-cache" },
+      })
+        .then(response => response.ok ? response.json() as Promise<MarketStatusResponse> : null)
+        .then(result => { if (active) setMarketStatus(result); })
+        .catch(() => { if (active) setMarketStatus(null); });
+    };
+    void loadStatus();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadStatus();
+    }, DEFAULT_REFRESH_MS);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void loadStatus();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [market]);
 
   useEffect(() => {
@@ -290,7 +303,19 @@ function RankingSection() {
       ) : (
         <ol className="mm-ranking-list" aria-live="polite">
           {items.map(item => (
-            <li key={`${market}:${category}:${item.symbol}`}>
+            <li
+              key={`${market}:${category}:${item.symbol}`}
+              role="button"
+              tabIndex={0}
+              aria-label={`${item.name} 시세 보기`}
+              onClick={() => openRankingInstrument(item)}
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openRankingInstrument(item);
+                }
+              }}
+            >
               <b className="mm-rank-number">{item.rank}</b>
               <span className="mm-rank-stock">
                 <RankingLogo item={item} />
@@ -369,6 +394,9 @@ export default function HomeMarketRankings() {
         .mm-ranking-desktop-head span:nth-child(n+3){text-align:right}
         .mm-ranking-list{list-style:none;margin:0;padding:0}
         .mm-ranking-list li{min-height:61px;padding:8px 20px;border-bottom:1px solid #eef0f2;font-size:12px}
+        .mm-ranking-list li[role="button"]{cursor:pointer;transition:background-color .15s ease}
+        .mm-ranking-list li[role="button"]:hover{background:#fafbfb}
+        .mm-ranking-list li[role="button"]:focus-visible{outline:2px solid #dfe3e6;outline-offset:-2px}
         .mm-ranking-list li:last-child{border-bottom:0}
         .mm-rank-number{color:#4c555d;font-size:13px;font-variant-numeric:tabular-nums}
         .mm-rank-stock{display:flex;min-width:0;align-items:center;gap:10px}
