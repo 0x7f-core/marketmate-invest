@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 const US_EXCHANGE_PATTERN = /\b(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)\b/i;
 const USD_KRW_CACHE_KEY = "marketmate:usdkrw:last";
+const FAST_PRICE_EVENT = "marketmate:fast-price-data";
 let cachedUsdKrw = 0;
 let usdKrwRequest: Promise<void> | null = null;
 
@@ -45,6 +46,7 @@ function readUsdKrw() {
 }
 
 function warmUsdKrw() {
+  if (readUsdKrw()) return Promise.resolve();
   if (usdKrwRequest) return usdKrwRequest;
   usdKrwRequest = fetch("/api/market-overview", { cache: "no-store" })
     .then(async response => {
@@ -192,17 +194,28 @@ export default function PortfolioAveragePrices() {
     const schedule = () => {
       if (scheduled) return;
       scheduled = true;
-      requestAnimationFrame(() => {
+      queueMicrotask(() => {
         scheduled = false;
         installAveragePrices();
       });
     };
 
+    const onFastPriceData = (event: Event) => {
+      const detail = (event as CustomEvent<{ pathname?: string; usdKrw?: number }>).detail;
+      const rate = Number(detail?.usdKrw ?? 0);
+      if (detail?.pathname === "/api/market-overview" && rate > 0) rememberUsdKrw(rate);
+      schedule();
+    };
+
     schedule();
-    void warmUsdKrw().then(schedule);
+    if (!cachedUsdKrw) void warmUsdKrw().then(schedule);
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
+    window.addEventListener(FAST_PRICE_EVENT, onFastPriceData);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener(FAST_PRICE_EVENT, onFastPriceData);
+    };
   }, []);
 
   return null;
