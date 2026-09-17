@@ -110,12 +110,44 @@ function rateClass(value: number) {
 function isBeforeRegularOpen(market: Market, status: MarketStatusResponse | null) {
   if (market === "CRYPTO" || !status) return false;
   if (status.market !== market || status.source !== "NAVER" || status.stale || status.isHoliday) return false;
+  if (status.isOpen !== false) return false;
   const session = (status.currentSession ?? "").toLocaleLowerCase("en-US");
   if (!session) return false;
   return session.includes("pre") || session.includes("opening");
 }
 
-function openRankingInstrument(item: RankingItem) {
+function setNativeInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (setter) setter.call(input, value);
+  else input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+async function selectFromExistingSearch(item: RankingItem, query: string, timeoutMs: number) {
+  const input = document.querySelector<HTMLInputElement>('.search-wrap input[aria-label="종목 검색"]');
+  if (!input) return false;
+  setNativeInputValue(input, query);
+
+  const expectedSymbol = displaySymbol(item).toLocaleUpperCase("en-US");
+  const expectedName = item.name.trim();
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(".search-results button"));
+    const match = buttons.find(button => {
+      const text = (button.textContent ?? "").trim();
+      const upper = text.toLocaleUpperCase("en-US");
+      return (expectedSymbol && upper.includes(expectedSymbol)) || (expectedName && text.includes(expectedName));
+    });
+    if (match) {
+      match.click();
+      return true;
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 80));
+  }
+  return false;
+}
+
+async function openRankingInstrument(item: RankingItem) {
   window.dispatchEvent(new CustomEvent("marketmate:open-instrument", {
     detail: {
       market: item.market,
@@ -125,6 +157,11 @@ function openRankingInstrument(item: RankingItem) {
       currency: item.currency,
     },
   }));
+
+  await new Promise(resolve => window.setTimeout(resolve, 50));
+  if (!document.querySelector(".np-home")) return;
+  if (await selectFromExistingSearch(item, item.symbol, 1_500)) return;
+  await selectFromExistingSearch(item, item.name, 1_500);
 }
 
 function RankingLogo({ item }: { item: RankingItem }) {
@@ -287,7 +324,7 @@ function RankingSection() {
 
       {preOpen ? (
         <div className="mm-ranking-preopen-notice" role="status">
-          현재 개장 전입니다. 거래대금·거래량·상승·하락 순위는 정규장 개장 후 확인할 수 있습니다.
+          현재 개장 전입니다. 거래대금·거래량·상승·하락 순위는 개장 후 확인할 수 있습니다.
         </div>
       ) : null}
 
@@ -297,7 +334,7 @@ function RankingSection() {
 
       {loading && !items.length ? <RankingSkeleton /> : error && !items.length ? (
         <div className="mm-ranking-error">
-          <p>{preOpen && category !== "marketCap" ? "정규장 개장 후 해당 순위를 확인할 수 있습니다." : error}</p>
+          <p>{preOpen && category !== "marketCap" ? "개장 후 해당 순위를 확인할 수 있습니다." : error}</p>
           {preOpen && category !== "marketCap" ? null : <button type="button" onClick={() => void load(true)}>다시 불러오기</button>}
         </div>
       ) : (
@@ -308,11 +345,11 @@ function RankingSection() {
               role="button"
               tabIndex={0}
               aria-label={`${item.name} 시세 보기`}
-              onClick={() => openRankingInstrument(item)}
+              onClick={() => void openRankingInstrument(item)}
               onKeyDown={event => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
-                  openRankingInstrument(item);
+                  void openRankingInstrument(item);
                 }
               }}
             >
