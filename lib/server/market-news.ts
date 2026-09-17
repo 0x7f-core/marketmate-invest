@@ -306,8 +306,8 @@ async function settled(path: string): Promise<FetchResult | null> {
 async function usNews(symbol: string, exchange: string) {
   const code = await resolveReutersCode(symbol, exchange);
   const paths = [
-    buildNaverPath("/api/foreign/worldStock/list", { reutersCode: code, page: 1, pageSize: 20 }),
-    buildNaverPath("/api/domestic/detail/news", { itemCode: code, page: 1, pageSize: 20 }),
+    buildNaverPath("/api/foreign/worldStock/list", { reutersCode: code, page: 1, pageSize: 30 }),
+    buildNaverPath("/api/domestic/detail/news", { itemCode: code, page: 1, pageSize: 30 }),
   ];
   const related = await Promise.all(paths.map(settled));
   let items = related.flatMap(result => result ? normalize(result.data) : []);
@@ -316,34 +316,34 @@ async function usNews(symbol: string, exchange: string) {
     .sort((a, b) => b.publishedAt - a.publishedAt);
 
   if (!items.length) {
-    const fallback = await settled(buildNaverPath("/api/foreign/news/worldNews", { page: 1, pageSize: 20 }));
+    const fallback = await settled(buildNaverPath("/api/foreign/news/worldNews", { page: 1, pageSize: 30 }));
     if (fallback) {
       items = normalize(fallback.data);
       stale = stale || fallback.stale;
     }
   }
-  return { items: items.slice(0, 20), stale };
+  return { items: items.slice(0, 30), stale };
 }
 
 export async function getNaverMarketNews(market: "KR" | "US" | "CRYPTO", symbol: string, name: string, exchange: string) {
   if (market === "US") return usNews(symbol, exchange);
   if (market === "CRYPTO") {
     const ticker = symbol.replace(/^KRW-/, "").split("_")[0] || "BTC";
-    const result = await settled(buildNaverPath(`/api/coin/globalNews/${encodeURIComponent(ticker)}`, { pageSize: 20 }));
-    return { items: result ? normalize(result.data).slice(0, 20) : [], stale: Boolean(result?.stale) };
+    const result = await settled(buildNaverPath(`/api/coin/globalNews/${encodeURIComponent(ticker)}`, { pageSize: 30 }));
+    return { items: result ? normalize(result.data).slice(0, 30) : [], stale: Boolean(result?.stale) };
   }
 
   const primary = symbol
-    ? await settled(buildNaverPath("/api/domestic/detail/news", { itemCode: symbol, page: 1, pageSize: 20 }))
-    : await settled(buildNaverPath("/api/domestic/news/list", { category: "MAINNEWS", page: 1, pageSize: 20 }));
+    ? await settled(buildNaverPath("/api/domestic/detail/news", { itemCode: symbol, page: 1, pageSize: 30 }))
+    : await settled(buildNaverPath("/api/domestic/news/list", { category: "MAINNEWS", page: 1, pageSize: 30 }));
   let items = primary ? normalize(primary.data) : [];
   let stale = Boolean(primary?.stale);
   if (!items.length && name) {
-    const fallback = await settled(buildNaverPath("/api/domestic/news/search", { query: name, page: 1, pageSize: 20 }));
+    const fallback = await settled(buildNaverPath("/api/domestic/news/search", { query: name, page: 1, pageSize: 30 }));
     if (fallback) {
       items = normalize(fallback.data);
       stale = stale || fallback.stale;
     }
   }
-  return { items: items.slice(0, 20), stale };
+  return { items: items.slice(0, 30), stale };
 }
