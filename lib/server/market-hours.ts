@@ -55,7 +55,6 @@ function statusArray(record: NaverStatus | null) {
 function statusList(payload: unknown) {
   const root = asRecord(payload);
   if (!root) return [] as NaverStatus[];
-
   const direct = statusArray(root);
   if (direct.length) return direct;
   for (const key of ["data", "result", "body", "payload"]) {
@@ -177,10 +176,10 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
   if (market === "KR" && isKrMorningBreak()) {
     return {
       isOpen: false,
-      label: "거래 준비시간",
-      notice: "국내주식은 NXT 프리마켓 종료 후 08:50~09:00 KST에는 주문할 수 없습니다. KRX 정규장은 09:00 KST에 시작합니다.",
+      label: "동시호가",
+      notice: "국내주식은 08:50~09:00 KST 동시호가 시간에는 모의투자 주문을 받지 않습니다. 09:00 KST부터 다시 주문할 수 있습니다.",
       exchange: "NXT",
-      currentSession: "morningBreak",
+      currentSession: "openingAuction",
       openTimeKst: "09:00",
       closeTimeKst: "15:30",
       source: "NAVER",
