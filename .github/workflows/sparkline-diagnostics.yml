@@ -1,0 +1,46 @@
+name: Sparkline diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sparkline-diagnostics.yml'
+      - 'app/api/market-sparklines/route.ts'
+      - 'app/home-index-board.tsx'
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect production sparkline payload
+        env:
+          URL: https://marketmate-invest.0x7f-core.workers.dev/api/market-sparklines
+        run: |
+          node - <<'NODE'
+          const url = process.env.URL;
+          const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+          let payload;
+          for (let attempt = 0; attempt < 12; attempt += 1) {
+            try {
+              const response = await fetch(url, { cache: 'no-store' });
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              payload = await response.json();
+              break;
+            } catch (error) {
+              if (attempt === 11) throw error;
+              await wait(5000);
+            }
+          }
+          for (const id of ['KOSPI','KOSDAQ','SPX','COMP','BTC','USDKRW']) {
+            const item = payload?.series?.[id] ?? {};
+            const points = Array.isArray(item.points) ? item.points : [];
+            const values = points.map(p => Number(p?.value)).filter(Number.isFinite);
+            const unique = new Set(values.map(v => v.toFixed(8))).size;
+            const first = points.slice(0, 5);
+            const last = points.slice(-5);
+            console.log(`SPARK ${id} points=${points.length} unique=${unique} stale=${Boolean(item.stale)}`);
+            console.log(`  first=${JSON.stringify(first)}`);
+            console.log(`  last=${JSON.stringify(last)}`);
+          }
+          NODE
