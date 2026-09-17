@@ -32,24 +32,38 @@ type Row = Record<string, unknown>;
 
 const CATEGORY_SET = new Set<RankingCategory>(["tradingValue", "volume", "up", "down", "marketCap"]);
 
-function numberValue(row: Row, keys: string[]) {
+function rowValue(row: Row, keys: string[]) {
   for (const key of keys) {
     const raw = row[key];
-    if (raw === null || raw === undefined || raw === "") continue;
-    const value = typeof raw === "string"
-      ? Number(raw.replace(/[,%₩원$]/g, "").replaceAll(",", "").trim())
-      : Number(raw);
-    if (Number.isFinite(value)) return value;
+    if (raw !== null && raw !== undefined && raw !== "") return raw;
   }
-  return 0;
+
+  // Naver mixes legacy lowercase fields (itemcode/itemname) with camelCase fields
+  // across domestic, foreign and crypto ranking APIs. Resolve aliases without
+  // rewriting the original payload so future response changes remain isolated here.
+  const actualKeys = new Map(Object.keys(row).map(key => [key.toLowerCase(), key]));
+  for (const key of keys) {
+    const actualKey = actualKeys.get(key.toLowerCase());
+    if (!actualKey) continue;
+    const raw = row[actualKey];
+    if (raw !== null && raw !== undefined && raw !== "") return raw;
+  }
+  return undefined;
+}
+
+function numberValue(row: Row, keys: string[]) {
+  const raw = rowValue(row, keys);
+  if (raw === null || raw === undefined || raw === "") return 0;
+  const value = typeof raw === "string"
+    ? Number(raw.replace(/[,%₩원$]/g, "").replaceAll(",", "").trim())
+    : Number(raw);
+  return Number.isFinite(value) ? value : 0;
 }
 
 function textValue(row: Row, keys: string[]) {
-  for (const key of keys) {
-    const raw = row[key];
-    if (typeof raw === "string" && raw.trim()) return raw.trim();
-    if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
-  }
+  const raw = rowValue(row, keys);
+  if (typeof raw === "string" && raw.trim()) return raw.trim();
+  if (typeof raw === "number" && Number.isFinite(raw)) return String(raw);
   return "";
 }
 
@@ -68,7 +82,7 @@ function candidateRows(payload: unknown) {
     seen.add(value as object);
     const row = value as Row;
     const keys = Object.keys(row);
-    const hasIdentity = keys.some(key => /^(?:itemCode|stockCode|reutersCode|symbol|ticker|code|name|stockName|koreanName|coinName)$/i.test(key));
+    const hasIdentity = keys.some(key => /^(?:itemCode|stockCode|reutersCode|symbol|ticker|code|name|stockName|itemName|koreanName|coinName|nfTicker|fqnfTicker)$/i.test(key));
     const hasPrice = keys.some(key => /(?:price|close|tradePrice|marketPrice)/i.test(key));
     if (hasIdentity && hasPrice) rows.push(row);
     for (const child of Object.values(row)) if (child && typeof child === "object") visit(child, depth + 1);
@@ -118,15 +132,23 @@ function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, 
     exchange,
     currency: market === "US" ? "USD" : "KRW",
     price,
-    change: numberValue(row, ["compareToPreviousClosePrice", "changePrice", "signedChangePrice", "changeValue", "change", "netChange"]),
-    changeRate: numberValue(row, ["fluctuationsRatio", "changeRate", "signedChangeRate", "changeRatio", "rate", "changePercent"]),
+    change: numberValue(row, [
+      "compareToPreviousClosePrice", "changePrice", "signedChangePrice", "changeValue", "change", "netChange", "prevChange",
+    ]),
+    changeRate: numberValue(row, [
+      "fluctuationsRatio", "changeRate", "signedChangeRate", "changeRatio", "rate", "changePercent", "prevChangeRate",
+    ]),
     volume: numberValue(row, [
-      "accumulatedTradingVolume", "accumulatedTradingVolume24H", "accTradeVolume24h", "tradeVolume24h", "tradingVolume", "volume", "accTradeVolume",
+      "accumulatedTradingVolume", "accumulatedTradingVolume24H", "accTradeVolume24h", "tradeVolume24h", "tradingVolume",
+      "volume", "accTradeVolume", "accQuant", "quant", "tradeVolume",
     ]),
     tradingValue: numberValue(row, [
-      "accumulatedTradingValue", "accumulatedTradingValue24H", "accTradePrice24h", "tradePrice24h", "tradingValue", "transactionAmount", "accTradePrice",
+      "accumulatedTradingValue", "accumulatedTradingValue24H", "accTradePrice24h", "tradePrice24h", "tradingValue",
+      "transactionAmount", "accTradePrice", "accAmount", "amount", "tradeValue",
     ]),
-    marketCap: numberValue(row, ["marketValue", "marketCap", "marketCapitalization", "marketSum", "capitalization"]),
+    marketCap: numberValue(row, [
+      "marketValue", "marketCap", "marketCapitalization", "marketSum", "capitalization", "marketCapAmount",
+    ]),
   };
 }
 
@@ -193,9 +215,9 @@ async function foreignRanking(category: RankingCategory) {
 }
 
 async function cryptoRanking(category: RankingCategory) {
-  // Naver's public crypto rank API exposes top/up/down/marketValue. The current
-  // Npay Securities UI labels top as 거래대금 상위. For 거래량 we reuse the
-  // same Naver-only rank payload at a wider page size and sort its 24h volume.
+  // The public crypto rank API exposes top/up/down/marketValue. For 거래량,
+  // keep the data source Naver-only: fetch the wider top list and order it by
+  // the response's 24-hour volume field locally.
   const sortType = category === "up" ? "up" : category === "down" ? "down" : category === "marketCap" ? "marketValue" : "top";
   return naverJson<unknown>(buildNaverPath("/api/coin/rank/UPBIT", {
     sortType,
