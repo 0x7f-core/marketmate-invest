@@ -2,13 +2,6 @@
 
 import { useEffect } from "react";
 
-type FxQuote = {
-  id: string;
-  price: number;
-  rate: number;
-  unit: string;
-};
-
 type CompetitionInvite = {
   id: string;
   name: string;
@@ -19,28 +12,9 @@ function replaceTextNode(element: Element | null, from: string, to: string) {
   if (!element) return;
   for (const node of Array.from(element.childNodes)) {
     if (node.nodeType !== Node.TEXT_NODE || !node.nodeValue?.includes(from)) continue;
-    node.nodeValue = node.nodeValue.replaceAll(from, to);
+    const next = node.nodeValue.replaceAll(from, to);
+    if (next !== node.nodeValue) node.nodeValue = next;
   }
-}
-
-function patchHorizontalFx(fx: FxQuote | null) {
-  if (!fx) return;
-  document.querySelectorAll(".live-market-strip").forEach(strip => {
-    let button = strip.querySelector<HTMLButtonElement>('button[data-market-id="USDKRW"]');
-    if (!button) {
-      button = document.createElement("button");
-      button.dataset.marketId = "USDKRW";
-      button.innerHTML = "<span>원/달러 환율<small>네이버증권</small></span><strong></strong><em></em>";
-      strip.appendChild(button);
-    }
-    const price = button.querySelector("strong");
-    const rate = button.querySelector("em");
-    if (price) price.textContent = `${fx.price.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${fx.unit || "원"}`;
-    if (rate) {
-      rate.className = fx.rate >= 0 ? "up" : "down";
-      rate.textContent = `${fx.rate >= 0 ? "+" : ""}${fx.rate.toFixed(2)}%`;
-    }
-  });
 }
 
 async function copyInviteCode(code: string) {
@@ -97,7 +71,8 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
     value.className = "competition-invite-code-value";
     row.appendChild(value);
   }
-  value.textContent = `참가 코드 ${competition.inviteCode}`;
+  const nextValue = `참가 코드 ${competition.inviteCode}`;
+  if (value.textContent !== nextValue) value.textContent = nextValue;
 
   const existingCopyButton = row.querySelector(".competition-invite-copy");
   let copyButton: HTMLButtonElement | null = existingCopyButton instanceof HTMLButtonElement ? existingCopyButton : null;
@@ -116,6 +91,7 @@ function patchCompetitionInviteCode(competitions: CompetitionInvite[]) {
   }
 
   const activeCopyButton = copyButton;
+  if (activeCopyButton.dataset.inviteCode === competition.inviteCode && activeCopyButton.onclick) return;
   activeCopyButton.dataset.inviteCode = competition.inviteCode;
   activeCopyButton.onclick = async () => {
     const code = activeCopyButton.dataset.inviteCode ?? "";
@@ -146,7 +122,8 @@ function patchCompetitionTradingGuide() {
     "UPBIT 시세 기준 24시간 365일 주문 가능",
   ];
   descriptions.forEach((element, index) => {
-    if (tradingHours[index]) element.textContent = tradingHours[index];
+    const next = tradingHours[index];
+    if (next && element.textContent !== next) element.textContent = next;
   });
 
   const notices = [
@@ -158,24 +135,21 @@ function patchCompetitionTradingGuide() {
     "현재 모의체결 수수료는 0원이며, 대회 기간이 끝나면 신규 주문과 대기 주문 체결이 제한됩니다.",
     "대회에서 나가면 해당 대회의 보유자산·주문·체결 등 투자 기록이 삭제됩니다.",
   ];
-  const items = guide.querySelectorAll("ul li");
-  items.forEach((element, index) => {
-    if (notices[index]) element.textContent = notices[index];
-  });
   const list = guide.querySelector("ul");
-  if (list) {
-    while (list.children.length < notices.length) {
-      const item = document.createElement("li");
-      item.textContent = notices[list.children.length];
-      list.appendChild(item);
-    }
-    while (list.children.length > notices.length) {
-      list.lastElementChild?.remove();
-    }
+  if (!list) return;
+  while (list.children.length < notices.length) {
+    const item = document.createElement("li");
+    item.textContent = notices[list.children.length];
+    list.appendChild(item);
   }
+  while (list.children.length > notices.length) list.lastElementChild?.remove();
+  Array.from(list.children).forEach((element, index) => {
+    const next = notices[index];
+    if (next && element.textContent !== next) element.textContent = next;
+  });
 }
 
-function patchCryptoSourceLabels(fx: FxQuote | null) {
+function patchCryptoSourceLabels() {
   document.querySelectorAll(".np-market-status span").forEach(element => {
     if (element.textContent?.includes("가상자산 · 네이버증권 24시간 시세")) {
       replaceTextNode(element, "가상자산 · 네이버증권 24시간 시세", "가상자산 · UPBIT 24시간 시세");
@@ -207,8 +181,6 @@ function patchCryptoSourceLabels(fx: FxQuote | null) {
     }
   });
 
-  patchHorizontalFx(fx);
-
   const cryptoActive = Array.from(document.querySelectorAll(".np-market-tabs button")).some(button =>
     button.classList.contains("active") && button.textContent?.trim() === "가상자산",
   );
@@ -223,9 +195,7 @@ function patchCryptoSourceLabels(fx: FxQuote | null) {
     replaceTextNode(livePill, "UPBIT 실시간", "네이버 실시간");
     document.querySelectorAll(".order-status").forEach(element => {
       const value = element.textContent ?? "";
-      if (value.includes("UPBIT 최신 시세")) {
-        element.textContent = value.replaceAll("UPBIT 최신 시세", "네이버증권 최신 시세");
-      }
+      if (value.includes("UPBIT 최신 시세")) element.textContent = value.replaceAll("UPBIT 최신 시세", "네이버증권 최신 시세");
     });
     return;
   }
@@ -233,23 +203,17 @@ function patchCryptoSourceLabels(fx: FxQuote | null) {
   if (quoteMeta?.textContent?.includes(" · NAVER")) {
     quoteMeta.textContent = quoteMeta.textContent.replace(/\s·\sNAVER\b/, " · UPBIT");
   }
-
   replaceTextNode(livePill, "네이버 실시간", "UPBIT 실시간");
-
   document.querySelectorAll(".order-status").forEach(element => {
     const value = element.textContent ?? "";
-    if (value.includes("네이버증권 최신 시세")) {
-      element.textContent = value.replaceAll("네이버증권 최신 시세", "UPBIT 최신 시세");
-    }
+    if (value.includes("네이버증권 최신 시세")) element.textContent = value.replaceAll("네이버증권 최신 시세", "UPBIT 최신 시세");
   });
 }
 
 export default function CryptoSourceLabels() {
   useEffect(() => {
     let active = true;
-    let latestFx: FxQuote | null = null;
     let competitions: CompetitionInvite[] = [];
-    let pollTimer: ReturnType<typeof setTimeout> | undefined;
     let competitionTimer: ReturnType<typeof setTimeout> | undefined;
     let scheduled = false;
 
@@ -258,26 +222,17 @@ export default function CryptoSourceLabels() {
       scheduled = true;
       requestAnimationFrame(() => {
         scheduled = false;
-        patchCryptoSourceLabels(latestFx);
+        patchCryptoSourceLabels();
         patchCompetitionInviteCode(competitions);
         patchCompetitionTradingGuide();
       });
     };
 
-    const loadFx = async () => {
-      try {
-        const response = await fetch("/api/market-overview", { cache: "no-store" });
-        const data = response.ok ? await response.json() as { quotes?: FxQuote[]; pollingInterval?: number } : null;
-        if (!active) return;
-        latestFx = data?.quotes?.find(item => item.id === "USDKRW") ?? null;
-        schedulePatch();
-        pollTimer = setTimeout(loadFx, Math.max(5_000, Math.min(120_000, data?.pollingInterval ?? 10_000)));
-      } catch {
-        if (active) pollTimer = setTimeout(loadFx, 10_000);
-      }
-    };
-
     const loadCompetitionInvites = async () => {
+      if (!document.querySelector(".contest-overview")) {
+        if (active) competitionTimer = setTimeout(loadCompetitionInvites, 5_000);
+        return;
+      }
       try {
         const response = await fetch("/api/competitions", { cache: "no-store" });
         const data = response.ok ? await response.json() as { competitions?: CompetitionInvite[] } : null;
@@ -287,19 +242,17 @@ export default function CryptoSourceLabels() {
       } catch {
         // Keep the last known invite codes if the request temporarily fails.
       } finally {
-        if (active) competitionTimer = setTimeout(loadCompetitionInvites, 20_000);
+        if (active) competitionTimer = setTimeout(loadCompetitionInvites, 60_000);
       }
     };
 
     schedulePatch();
-    void loadFx();
     void loadCompetitionInvites();
     const observer = new MutationObserver(schedulePatch);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       active = false;
       observer.disconnect();
-      if (pollTimer) clearTimeout(pollTimer);
       if (competitionTimer) clearTimeout(competitionTimer);
     };
   }, []);
