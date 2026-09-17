@@ -1,3 +1,4 @@
+import ActivityPriceDetails from "./activity-price-details";
 import ActivityQuantityUnits from "./activity-quantity-units";
 import CryptoSourceLabels from "./crypto-source-labels";
 import DesktopNavLabel from "./desktop-nav-label";
@@ -18,6 +19,7 @@ export const dynamic = "force-dynamic";
 export default function Home() {
   return (
     <>
+      <ActivityPriceDetails />
       <ActivityQuantityUnits />
       <CryptoSourceLabels />
       <DesktopNavLabel />
