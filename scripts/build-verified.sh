@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Bounded build entry point shared by CI and production deployment.
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "${SITES_ENV_READY:-}" != "1" ]]; then
