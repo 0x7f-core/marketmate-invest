@@ -1,5 +1,6 @@
 import ActivityQuantityUnits from "./activity-quantity-units";
 import CryptoSourceLabels from "./crypto-source-labels";
+import DesktopNavLabel from "./desktop-nav-label";
 import HomeDashboardOrder from "./home-dashboard-order";
 import HomeMarketNews from "./home-market-news";
 import HomeMarketRankingLogos from "./home-market-ranking-logos";
@@ -16,6 +17,7 @@ export default function Home() {
     <>
       <ActivityQuantityUnits />
       <CryptoSourceLabels />
+      <DesktopNavLabel />
       <MarketStatusClosedTime />
       <PortfolioBulkSell />
       <TradingFeeGuide />
