@@ -70,11 +70,16 @@ function removePortfolioRefreshButton(title: HTMLElement) {
 
 function styleBulkSellButton(button: HTMLButtonElement) {
   const important = (property: string, value: string) => button.style.setProperty(property, value, "important");
+  const isMobile = window.matchMedia("(max-width: 760px)").matches;
+  const width = isMobile ? "78px" : "88px";
+  const height = isMobile ? "32px" : "34px";
 
-  important("width", "88px");
-  important("min-width", "88px");
-  important("height", "34px");
-  important("min-height", "34px");
+  important("width", width);
+  important("min-width", width);
+  important("max-width", width);
+  important("height", height);
+  important("min-height", height);
+  important("max-height", height);
   important("padding", "0");
   important("margin", "0");
   important("border", `1px solid ${SELL_BLUE}`);
@@ -86,6 +91,11 @@ function styleBulkSellButton(button: HTMLButtonElement) {
   important("white-space", "nowrap");
   important("display", "grid");
   important("place-items", "center");
+  important("align-items", "center");
+  important("justify-items", "center");
+  important("align-content", "center");
+  important("justify-content", "center");
+  important("gap", "0");
   important("text-align", "center");
   important("line-height", "1");
   important("text-indent", "0");
@@ -233,7 +243,11 @@ export default function PortfolioBulkSell() {
     scheduleInstall();
     const observer = new MutationObserver(scheduleInstall);
     observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    window.addEventListener("resize", scheduleInstall);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleInstall);
+    };
   }, []);
 
   return null;
