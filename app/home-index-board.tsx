@@ -96,7 +96,8 @@ function statusText(id: string) {
 }
 
 function formatDate(id: string, points: Point[]) {
-  const timestamp = points.at(-1)?.time ?? Date.now();
+  const timestamp = points.at(-1)?.time ?? 0;
+  if (!timestamp) return "-";
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: timezoneFor(id),
     month: "numeric",
@@ -125,7 +126,7 @@ function Sparkline({ card, series }: { card: CardQuote; series?: Series }) {
     if (!marketOpen(card.id) || !card.price) return source;
     const last = source.at(-1);
     if (last && Math.abs(last.value - card.price) < Number.EPSILON) return source;
-    return [...source, { time: Date.now(), value: card.price }].slice(-500);
+    return [...source, { time: (last?.time ?? 0) + 1, value: card.price }].slice(-500);
   }, [card.id, card.price, series]);
 
   if (points.length < 2) return <div className="home-index-sparkline empty" aria-hidden="true" />;
