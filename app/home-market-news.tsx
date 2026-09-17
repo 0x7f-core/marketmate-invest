@@ -50,7 +50,7 @@ function appendTitle(panel: HTMLElement, countText = "") {
   titleWrap.className = "np-section-title";
 
   const title = document.createElement("h2");
-  title.textContent = "주요 시장 뉴스";
+  title.textContent = "주요 뉴스";
   const count = document.createElement("span");
   count.textContent = countText;
 
