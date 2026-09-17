@@ -192,8 +192,8 @@ export default function ActivityPriceDetails() {
     schedulePatch();
 
     const observer = new MutationObserver(schedulePatch);
-    observer.observe(document.body, { childList: true, subtree: true });
-    const interval = window.setInterval(schedulePatch, 2_000);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const interval = window.setInterval(schedulePatch, 15_000);
 
     return () => {
       active = false;
