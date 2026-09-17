@@ -9,7 +9,9 @@ type NewsItem = {
   publishedAt: number;
 };
 
-const MARKET_NEWS_SELECTOR = ".np-home .np-news, .np-single > .np-news";
+// Main/home news must stay separate from the selected-instrument news panel.
+// Only patch the home view; the market/single-stock view is owned by TradingDashboard.
+const MARKET_NEWS_SELECTOR = ".np-home .np-news";
 
 function relativeTime(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "날짜 미상";
@@ -99,6 +101,7 @@ export default function HomeMarketNews() {
       if (!active || loading) return;
       loading = true;
       try {
+        // No symbol on purpose: KR MAINNEWS is the market-wide/home feed.
         const response = await fetch("/api/news?market=KR", { cache: "no-store" });
         const data = response.ok ? await response.json() as { items?: NewsItem[] } : null;
         if (!active) return;
@@ -114,9 +117,6 @@ export default function HomeMarketNews() {
 
     const tick = () => {
       if (!active) return;
-      // Older releases injected a second mobile News button from this component.
-      // Navigation now lives entirely in trading-dashboard.tsx, so clean up only
-      // those legacy DOM nodes and never create navigation controls here.
       removeLegacyMobileNewsTabs();
       if (marketNewsPanels().length === 0) return;
       if (!items.length || Date.now() - lastLoadedAt >= 90_000) {
