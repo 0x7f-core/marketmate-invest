@@ -1,5 +1,6 @@
 import { type Market } from "@/lib/server/market-data";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { getDomesticListingMarket, normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { matchPendingOrders } from "@/lib/server/pending-orders";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
@@ -16,9 +17,12 @@ function isQuoteUnavailable(error: unknown) {
 
 function persistenceStatements(quote: TradingQuote, requestedExchange?: string) {
   const instrumentId = `${quote.market}:${quote.symbol}`;
-  const resolvedExchange = quote.venue
-    ?? requestedExchange
-    ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
+  const domesticListing = quote.market === "KR" ? normalizeDomesticListingMarket(requestedExchange) : "";
+  const resolvedExchange = quote.market === "KR"
+    ? domesticListing || "KRX"
+    : quote.venue
+      ?? requestedExchange
+      ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
   const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
   const receivedAt = Date.now();
   const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
@@ -28,7 +32,10 @@ function persistenceStatements(quote: TradingQuote, requestedExchange?: string) 
   return [
     env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active)
       VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,
-      exchange=CASE WHEN excluded.exchange IN ('KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange ELSE instruments.exchange END,
+      exchange=CASE
+        WHEN instruments.market='KR' AND instruments.exchange IN ('KOSPI','KOSDAQ','KONEX') AND excluded.exchange IN ('KRX','NXT') THEN instruments.exchange
+        WHEN excluded.exchange IN ('KOSPI','KOSDAQ','KONEX','KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange
+        ELSE instruments.exchange END,
       is_active=1`)
       .bind(instrumentId, quote.market, quote.symbol, quote.symbol, quote.currency, resolvedExchange),
     env.DB!.prepare(`INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
@@ -83,7 +90,18 @@ export async function GET(request: Request) {
     }
 
     const requestedExchange = normalizedSymbols.length === 1 ? exchange : undefined;
-    const writes = quotes.flatMap(quote => persistenceStatements(quote, requestedExchange));
+    const domesticListings = new Map<string, string>();
+    if (market === "KR") {
+      await Promise.all(quotes.map(async quote => {
+        const listing = await getDomesticListingMarket(quote.symbol, requestedExchange);
+        if (listing) domesticListings.set(quote.symbol, listing);
+      }));
+    }
+
+    const writes = quotes.flatMap(quote => persistenceStatements(
+      quote,
+      quote.market === "KR" ? domesticListings.get(quote.symbol) || requestedExchange : requestedExchange,
+    ));
     if (crypto.getRandomValues(new Uint8Array(1))[0] === 0) {
       writes.push(env.DB!.prepare("DELETE FROM price_history WHERE recorded_at<?").bind(Date.now() - 400 * 86_400_000));
     }
@@ -94,8 +112,15 @@ export async function GET(request: Request) {
     // now only one lightweight indexed D1 existence check.
     await Promise.allSettled(quotes.map(matchPendingOrders));
 
+    const clientQuotes = quotes.map(quote => {
+      if (quote.market !== "KR") return quote;
+      const listing = domesticListings.get(quote.symbol);
+      const { venue: tradingVenue, ...rest } = quote;
+      return listing ? { ...rest, venue: listing, tradingVenue } : { ...rest, tradingVenue };
+    });
+
     return Response.json(
-      { quotes, partial: quotes.length !== normalizedSymbols.length, staleOmitted: resolved.length !== quotes.length, source: "NAVER" },
+      { quotes: clientQuotes, partial: quotes.length !== normalizedSymbols.length, staleOmitted: resolved.length !== quotes.length, source: "NAVER" },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
