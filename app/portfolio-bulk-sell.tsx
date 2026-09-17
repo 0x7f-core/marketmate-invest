@@ -29,6 +29,8 @@ type OrdersResponse = {
 };
 
 const BUTTON_ID = "portfolio-bulk-sell-button";
+const SELL_BLUE = "#2878d8";
+const SELL_BLUE_HOVER = "#2166b8";
 
 function participantIdFromUrl(value: string) {
   try {
@@ -171,16 +173,32 @@ function installBulkSellButton() {
   button.textContent = "일괄매도";
   button.setAttribute("aria-label", "보유종목 일괄매도");
   Object.assign(button.style, {
-    height: "32px",
-    padding: "0 10px",
-    border: "1px solid #efb4b9",
+    height: "36px",
+    minWidth: "86px",
+    padding: "0 12px",
+    border: `1px solid ${SELL_BLUE}`,
     borderRadius: "6px",
-    background: "#ffffff",
-    color: "#e5484d",
+    background: SELL_BLUE,
+    color: "#ffffff",
     fontSize: "12px",
     fontWeight: "700",
     whiteSpace: "nowrap",
     cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    lineHeight: "1",
+    verticalAlign: "middle",
+    boxSizing: "border-box",
+    appearance: "none",
+    WebkitAppearance: "none",
+  });
+  button.addEventListener("pointerenter", () => {
+    if (!button.disabled) button.style.background = SELL_BLUE_HOVER;
+  });
+  button.addEventListener("pointerleave", () => {
+    button.style.background = SELL_BLUE;
   });
   button.addEventListener("click", () => void bulkSell(button));
 
