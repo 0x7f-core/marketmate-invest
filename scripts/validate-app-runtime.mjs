@@ -115,4 +115,18 @@ assert(Array.isArray(overview.data?.quotes), "market overview missing quotes[]")
 assert(Number(overview.data?.pollingInterval) >= 2_000, "market overview pollingInterval invalid");
 console.log(`PASS market overview through app route (${overview.data.quotes.length} fresh quotes)`);
 
+for (const market of ["KR", "US", "CRYPTO"]) {
+  for (const category of ["tradingValue", "volume", "up", "down", "marketCap"]) {
+    const ranking = await jsonRequest(`/api/market-rankings?market=${market}&category=${category}`, { headers: authHeaders, cache: "no-store" });
+    assert(ranking.response.status === 200, `${market}/${category} ranking expected 200, got ${ranking.response.status}: ${JSON.stringify(ranking.data)}`);
+    assert(ranking.data?.source === "NAVER", `${market}/${category} ranking source is not NAVER`);
+    assert(ranking.data?.market === market, `${market}/${category} ranking market mismatch`);
+    assert(ranking.data?.category === category, `${market}/${category} ranking category mismatch`);
+    assert(Array.isArray(ranking.data?.items), `${market}/${category} ranking missing items[]`);
+    assert(ranking.data.items.length > 0 && ranking.data.items.length <= 10, `${market}/${category} ranking must contain 1-10 items`);
+    assert(ranking.data.items.every((item, index) => item?.rank === index + 1 && Number(item?.price) > 0), `${market}/${category} ranking has invalid rank/price data`);
+  }
+  console.log(`PASS ${market} Naver realtime rankings (5 categories)`);
+}
+
 console.log("All app-level runtime smoke checks passed.");
