@@ -25,8 +25,6 @@ jobs:
             const points = Array.isArray(item.points) ? item.points : [];
             const unique = new Set(points.map(p => Number(p?.value).toFixed(8))).size;
             console.log(`SPARK ${id} points=${points.length} unique=${unique} stale=${Boolean(item.stale)}`);
-            console.log(`  first=${JSON.stringify(points.slice(0,5))}`);
-            console.log(`  last=${JSON.stringify(points.slice(-5))}`);
           }
           NODE
 
@@ -34,12 +32,19 @@ jobs:
         run: |
           node - <<'NODE'
           const base='https://stock.naver.com';
-          const now=new Date();
-          const from=new Date(now.getTime()-26*3600000).toISOString();
-          const to=new Date(now.getTime()+300000).toISOString();
-          const path=`/api/coin/candle/UPBIT/KRW/BTC/minutes/5/marketInfo?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-          const r=await fetch(base+path,{headers:{accept:'application/json, text/plain, */*','accept-language':'ko-KR,ko;q=0.9','user-agent':'Mozilla/5.0','referer':'https://stock.naver.com/'}});
-          const text=await r.text();
-          console.log(`BTC_MARKET_INFO HTTP=${r.status} bytes=${text.length}`);
-          console.log(text.slice(0,6000));
+          const now=Date.now();
+          const local=(timestamp)=>{
+            const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(timestamp));
+            const p=t=>parts.find(x=>x.type===t)?.value||'';
+            return `${p('year')}-${p('month')}-${p('day')}T${p('hour')}:${p('minute')}:${p('second')}`;
+          };
+          const from=local(now-26*3600000);
+          const to=local(now+300000);
+          for(const suffix of ['marketInfo','']){
+            const path=`/api/coin/candle/UPBIT/KRW/BTC/minutes/5${suffix?'/'+suffix:''}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+            const r=await fetch(base+path,{headers:{accept:'application/json, text/plain, */*','accept-language':'ko-KR,ko;q=0.9','user-agent':'Mozilla/5.0','referer':'https://stock.naver.com/'}});
+            const text=await r.text();
+            console.log(`BTC_${suffix||'DETAIL'} HTTP=${r.status} bytes=${text.length}`);
+            console.log(text.slice(0,6000));
+          }
           NODE
