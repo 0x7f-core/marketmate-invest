@@ -2,6 +2,7 @@ import ActivityPriceDetails from "./activity-price-details";
 import ActivityQuantityUnits from "./activity-quantity-units";
 import CryptoSourceLabels from "./crypto-source-labels";
 import DesktopNavLabel from "./desktop-nav-label";
+import DesktopSearchFavorites from "./desktop-search-favorites";
 import HomeDashboardOrder from "./home-dashboard-order";
 import HomeIndexBoard from "./home-index-board";
 import HomeMarketNews from "./home-market-news";
@@ -24,6 +25,7 @@ export default function Home() {
       <ActivityQuantityUnits />
       <CryptoSourceLabels />
       <DesktopNavLabel />
+      <DesktopSearchFavorites />
       <MarketStatusClosedTime />
       <MobileInstrumentSearch />
       <PortfolioAveragePrices />
