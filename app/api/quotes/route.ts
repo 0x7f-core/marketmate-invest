@@ -1,10 +1,9 @@
-import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { type Market } from "@/lib/server/market-data";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { matchPendingOrders } from "@/lib/server/pending-orders";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
-import { getTradingQuote } from "@/lib/server/trading-quote";
-import { enforceRateLimit } from "@/lib/server/safety";
+import { getTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
 import { env } from "cloudflare:workers";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +14,42 @@ function isQuoteUnavailable(error: unknown) {
   return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
 }
 
+function persistenceStatements(quote: TradingQuote, requestedExchange?: string) {
+  const instrumentId = `${quote.market}:${quote.symbol}`;
+  const resolvedExchange = quote.venue
+    ?? requestedExchange
+    ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
+  const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
+  const receivedAt = Date.now();
+  const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
+  const fxRateMicros = Math.round(quote.exchangeRate * 1_000_000);
+  const recordedAt = Math.floor(sourceTimestamp / 60_000) * 60_000;
+
+  return [
+    env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active)
+      VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,
+      exchange=CASE WHEN excluded.exchange IN ('KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange ELSE instruments.exchange END,
+      is_active=1`)
+      .bind(instrumentId, quote.market, quote.symbol, quote.symbol, quote.currency, resolvedExchange),
+    env.DB!.prepare(`INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,
+      change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros,source=excluded.source,
+      source_timestamp=excluded.source_timestamp,received_at=excluded.received_at`)
+      .bind(instrumentId, priceKrwMicros, Math.round(quote.change * quote.exchangeRate * 1_000_000), Math.round(quote.changeRate * 10_000), fxRateMicros, quote.source, sourceTimestamp, receivedAt),
+    env.DB!.prepare(`INSERT INTO price_history (id,instrument_id,price_micros,change_rate_ppm,fx_rate_micros,recorded_at)
+      VALUES (?,?,?,?,?,?)
+      ON CONFLICT(instrument_id,recorded_at) DO UPDATE SET price_micros=excluded.price_micros,change_rate_ppm=excluded.change_rate_ppm,fx_rate_micros=excluded.fx_rate_micros`)
+      .bind(`${instrumentId}:${recordedAt}`, instrumentId, priceKrwMicros, Math.round(quote.changeRate * 10_000), fxRateMicros, recordedAt),
+  ];
+}
+
 export async function GET(request: Request) {
   try {
-    const user = await requireUser(request);
-    await enforceRateLimit(request, "quotes", 180, 60_000, user.id);
+    // Keep authentication, but do not hit the D1-backed generic rate limiter on
+    // every 1-5 second quote poll. Input is bounded below and Naver calls are
+    // deduplicated/cached by the market-data layer.
+    await requireUser(request);
     const url = new URL(request.url);
     const market = url.searchParams.get("market") as Market | null;
     const exchange = url.searchParams.get("exchange") ?? undefined;
@@ -36,9 +67,6 @@ export async function GET(request: Request) {
       return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     }
 
-    // getTradingQuote handles market-session lookup internally. Its Naver request
-    // layer deduplicates the shared market-status request for multi-symbol batches,
-    // while allowing the quote requests themselves to start in parallel.
     const results = await Promise.allSettled(normalizedSymbols.map(symbol =>
       getTradingQuote(market, symbol, normalizedSymbols.length === 1 ? exchange : undefined),
     ));
@@ -54,25 +82,25 @@ export async function GET(request: Request) {
       );
     }
 
-    await env.DB!.batch(quotes.map(quote => {
-      const resolvedExchange = quote.venue
-        ?? (normalizedSymbols.length === 1 ? exchange : undefined)
-        ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
-      return env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active)
-        VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,
-        exchange=CASE WHEN excluded.exchange IN ('KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange ELSE instruments.exchange END,
-        is_active=1`)
-        .bind(`${quote.market}:${quote.symbol}`, quote.market, quote.symbol, quote.symbol, quote.currency, resolvedExchange);
-    }));
-    await Promise.allSettled(quotes.map(persistQuoteSnapshot));
+    const requestedExchange = normalizedSymbols.length === 1 ? exchange : undefined;
+    const writes = quotes.flatMap(quote => persistenceStatements(quote, requestedExchange));
+    if (crypto.getRandomValues(new Uint8Array(1))[0] === 0) {
+      writes.push(env.DB!.prepare("DELETE FROM price_history WHERE recorded_at<?").bind(Date.now() - 400 * 86_400_000));
+    }
+    await env.DB!.batch(writes);
+
+    // Limit-order matching remains synchronous so a displayed executable quote can
+    // immediately fill eligible simulated orders, but the common no-order path is
+    // now only one lightweight indexed D1 existence check.
     await Promise.allSettled(quotes.map(matchPendingOrders));
+
     return Response.json(
       { quotes, partial: quotes.length !== normalizedSymbols.length, staleOmitted: resolved.length !== quotes.length, source: "NAVER" },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
     if (isQuoteUnavailable(error)) {
-      return Response.json({ error: "네이버증권 실시간 시세를 불러오지 못했습니다.", source: "NAVER" }, { status: 503, headers: { "retry-after": "30" } });
+      return Response.json({ error: "네이버증권 실시간 시세를 불러오지 못했습니다.", source: "NAVER" }, { status: 503, headers: { "retry-after": "30", "cache-control": "no-store" } });
     }
     return apiError(error);
   }
