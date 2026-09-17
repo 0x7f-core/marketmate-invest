@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { calculateTradingCosts } from "@/lib/trading-costs";
+import { getDomesticSecurityClassification } from "@/lib/server/domestic-security-type";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isExecutableTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
 
@@ -42,7 +43,16 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
   const tradeValueKrw = Number((BigInt(order.quantityMicros) * BigInt(priceKrwMicros) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000));
   const isBuy = order.side === "buy";
   const executionExchange = quote.venue ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market === "KR" ? "KRX" : "US");
-  const costs = calculateTradingCosts({ market: quote.market, exchange: executionExchange, side: order.side, tradeValueKrw });
+  const domesticSecurity = quote.market === "KR" && !isBuy
+    ? await getDomesticSecurityClassification(quote.symbol)
+    : null;
+  const costs = calculateTradingCosts({
+    market: quote.market,
+    exchange: executionExchange,
+    side: order.side,
+    tradeValueKrw,
+    securityType: domesticSecurity?.type,
+  });
   const buySettlementKrw = tradeValueKrw + costs.totalCostKrw;
   let reason = "";
   if (!participant || participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) reason = "대회가 종료되어 체결되지 않았습니다.";
