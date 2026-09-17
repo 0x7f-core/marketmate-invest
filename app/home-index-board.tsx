@@ -129,7 +129,10 @@ function Sparkline({ card, series }: { card: CardQuote; series?: Series }) {
     return [...source, { time: (last?.time ?? 0) + 1, value: card.price }].slice(-500);
   }, [card.id, card.price, series]);
 
-  if (points.length < 2) return <div className="home-index-sparkline empty" aria-hidden="true" />;
+  const uniqueValues = new Set(points.map(point => point.value.toFixed(8))).size;
+  if (points.length < 2 || (series?.stale && uniqueValues <= 1)) {
+    return <div className="home-index-sparkline empty" aria-hidden="true" />;
+  }
 
   const previousClose = card.price && card.change ? card.price - card.change : points[0].value;
   const values = [...points.map(point => point.value), previousClose].filter(value => Number.isFinite(value));
@@ -264,7 +267,7 @@ export default function HomeIndexBoard() {
         .home-index-live-board .home-index-card>strong{display:block;grid-column:auto;margin-top:8px;color:#17191c;font-size:29px;font-weight:700;line-height:1.08;letter-spacing:-.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .home-index-live-board .home-index-card>em{display:block;grid-column:auto;margin-top:6px;font-size:15px;font-weight:500;font-style:normal;line-height:1.2;white-space:nowrap}
         .home-index-live-board .home-index-card.up>em{color:#e93648}.home-index-live-board .home-index-card.down>em{color:#2678d9}.home-index-live-board .home-index-card:not(.up):not(.down)>em{color:#6f7881}
-        .home-index-sparkline{display:block;width:100%;height:62px;margin-top:12px;overflow:visible}.home-index-sparkline.empty{background:linear-gradient(180deg,transparent 48%,#edf0f2 49%,#edf0f2 51%,transparent 52%)}
+        .home-index-sparkline{display:block;width:100%;height:62px;margin-top:12px;overflow:visible}.home-index-sparkline.empty{background:linear-gradient(180deg,transparent 49%,#edf0f2 49.5%,#edf0f2 50.5%,transparent 51%)}
         .home-index-sparkline .spark-baseline{stroke:#d9dde1;stroke-width:.8;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
         .home-index-sparkline .spark-line{fill:none;stroke-width:1.25;vector-effect:non-scaling-stroke}.home-index-sparkline .spark-fill{stroke:none;opacity:.08}
         .home-index-sparkline .positive .spark-line{stroke:#eb4d5c}.home-index-sparkline .positive .spark-fill{fill:#eb4d5c}.home-index-sparkline .negative .spark-line{stroke:#2d7ed8}.home-index-sparkline .negative .spark-fill{fill:#2d7ed8}
