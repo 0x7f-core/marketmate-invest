@@ -25,8 +25,8 @@ function patchClosedMarketTimes() {
       session.insertAdjacentElement("afterend", time);
     }
 
-    if (name === "국내") time.textContent = "20:00~08:00";
-    if (name === "미국") time.textContent = usClosedRange;
+    const next = name === "국내" ? "20:00~08:00" : name === "미국" ? usClosedRange : "";
+    if (next && time.textContent !== next) time.textContent = next;
   });
 }
 
@@ -44,7 +44,7 @@ export default function MarketStatusClosedTime() {
 
     schedulePatch();
     const observer = new MutationObserver(schedulePatch);
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, []);
 
