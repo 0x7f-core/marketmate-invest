@@ -263,7 +263,25 @@ async function main() {
     assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 6, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);
     console.log("PASS mobile shell + nav + no root overflow");
 
-    assert(await client.evaluate(visibleExpression(".np-mobile-header .search-wrap")), "Mobile market search is not visible");
+    assert(await client.evaluate(visibleExpression(".np-mobile-search-launch")), "Mobile instrument search launcher is not visible");
+    const openedMobileSearch = await client.evaluate(`(() => {
+      const button = document.querySelector('.np-mobile-search-launch');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    assert(openedMobileSearch, "Could not open mobile instrument search");
+    await client.waitFor(visibleExpression(".mobile-instrument-search"), "mobile instrument search overlay");
+    assert(await client.evaluate(visibleExpression(".mobile-search-input input")), "Mobile instrument search input is not visible");
+    const closedMobileSearch = await client.evaluate(`(() => {
+      const button = document.querySelector('.mobile-search-back');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    assert(closedMobileSearch, "Could not close mobile instrument search");
+    await client.waitFor(hiddenExpression(".mobile-instrument-search"), "mobile instrument search close");
+    console.log("PASS mobile instrument search overlay");
     assert(await client.evaluate(visibleExpression(".np-mobile-order")), "Mobile order panel is not visible");
     assert(await client.evaluate(hiddenExpression(".np-trading > aside")), "Desktop order rail should be hidden on mobile");
     const mobileChart = await client.evaluate(`(() => {
