@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -28,7 +30,12 @@ type RankingResponse = {
   stale: boolean;
   pollingInterval: number;
 };
-
+type MarketStatusResponse = {
+  market?: Market;
+  isOpen?: boolean;
+  label?: string;
+  currentSession?: string;
+};
 type CacheEntry = { data: RankingResponse; expiresAt: number };
 
 const MARKETS: Array<{ key: Market; label: string }> = [
@@ -97,6 +104,50 @@ function rateClass(value: number) {
   return value > 0 ? "up" : value < 0 ? "down" : "";
 }
 
+function localMinutes(timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
+  const hour = Number(read("hour"));
+  const minute = Number(read("minute"));
+  return {
+    weekday: read("weekday"),
+    minutes: Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1,
+  };
+}
+
+function isBeforeRegularOpen(market: Market, status: MarketStatusResponse | null) {
+  if (market === "CRYPTO") return false;
+  const session = status?.currentSession ?? "";
+  if (session === "preMarket" || session === "openingAuction") return true;
+  if (["regularMarket", "afterMarket", "closingAuction", "afterMarketClosing"].includes(session)) return false;
+
+  const clock = localMinutes(market === "KR" ? "Asia/Seoul" : "America/New_York");
+  if (!["Mon", "Tue", "Wed", "Thu", "Fri"].includes(clock.weekday)) return false;
+  const regularOpen = market === "KR" ? 9 * 60 : 9 * 60 + 30;
+  return clock.minutes >= 0 && clock.minutes < regularOpen;
+}
+
+function RankingLogo({ item }: { item: RankingItem }) {
+  if (item.market === "CRYPTO") return null;
+  return (
+    <span className="mm-rank-logo" aria-hidden="true">
+      <b>{item.name.trim().slice(0, 1) || displaySymbol(item).slice(0, 1)}</b>
+      <img
+        src={`/api/instruments/logo?symbol=${encodeURIComponent(item.symbol)}`}
+        alt=""
+        loading="lazy"
+        onError={event => { event.currentTarget.style.display = "none"; }}
+      />
+    </span>
+  );
+}
+
 function RankingSkeleton() {
   return (
     <div className="mm-ranking-skeleton" aria-label="실시간 랭킹 불러오는 중">
@@ -109,6 +160,7 @@ function RankingSection() {
   const [market, setMarket] = useState<Market>("KR");
   const [category, setCategory] = useState<Category>("tradingValue");
   const [data, setData] = useState<RankingResponse | null>(() => clientCache.get(cacheKey("KR", "tradingValue"))?.data ?? null);
+  const [marketStatus, setMarketStatus] = useState<MarketStatusResponse | null>(null);
   const [loading, setLoading] = useState(!data);
   const [error, setError] = useState("");
 
@@ -158,6 +210,19 @@ function RankingSection() {
   }, [market, category, load]);
 
   useEffect(() => {
+    if (market === "CRYPTO") {
+      setMarketStatus(null);
+      return;
+    }
+    let active = true;
+    fetch(`/api/market-status?market=${market}`, { cache: "no-store" })
+      .then(response => response.ok ? response.json() as Promise<MarketStatusResponse> : null)
+      .then(result => { if (active) setMarketStatus(result); })
+      .catch(() => { if (active) setMarketStatus(null); });
+    return () => { active = false; };
+  }, [market]);
+
+  useEffect(() => {
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void load(true);
     }, Math.max(DEFAULT_REFRESH_MS, data?.pollingInterval ?? DEFAULT_REFRESH_MS));
@@ -172,6 +237,7 @@ function RankingSection() {
   }, [data?.pollingInterval, load]);
 
   const items = useMemo(() => data?.items.slice(0, 10) ?? [], [data]);
+  const preOpen = isBeforeRegularOpen(market, marketStatus);
 
   return (
     <section className="np-panel mm-market-rankings" aria-labelledby="mm-market-ranking-title">
@@ -206,20 +272,32 @@ function RankingSection() {
         ))}
       </div>
 
+      {preOpen ? (
+        <div className="mm-ranking-preopen-notice" role="status">
+          현재 개장 전입니다. 거래대금·거래량·상승·하락 순위는 정규장 개장 후 확인할 수 있습니다.
+        </div>
+      ) : null}
+
       <div className="mm-ranking-desktop-head" aria-hidden="true">
         <span>순위</span><span>종목명</span><span>현재가</span><span>등락률</span><span>거래량</span><span>거래대금</span><span>시가총액</span>
       </div>
 
       {loading && !items.length ? <RankingSkeleton /> : error && !items.length ? (
-        <div className="mm-ranking-error"><p>{error}</p><button type="button" onClick={() => void load(true)}>다시 불러오기</button></div>
+        <div className="mm-ranking-error">
+          <p>{preOpen && category !== "marketCap" ? "정규장 개장 후 해당 순위를 확인할 수 있습니다." : error}</p>
+          {preOpen && category !== "marketCap" ? null : <button type="button" onClick={() => void load(true)}>다시 불러오기</button>}
+        </div>
       ) : (
         <ol className="mm-ranking-list" aria-live="polite">
           {items.map(item => (
             <li key={`${market}:${category}:${item.symbol}`}>
               <b className="mm-rank-number">{item.rank}</b>
               <span className="mm-rank-stock">
-                <strong>{item.name}</strong>
-                <small>{displaySymbol(item)} · {item.exchange}</small>
+                <RankingLogo item={item} />
+                <span className="mm-rank-stock-text">
+                  <strong>{item.name}</strong>
+                  <small>{displaySymbol(item)} · {item.exchange}</small>
+                </span>
               </span>
               <strong className="mm-rank-price">{formatPrice(item)}</strong>
               <em className={`mm-rank-rate ${rateClass(item.changeRate)}`}>{formatRate(item.changeRate)}</em>
@@ -285,6 +363,7 @@ export default function HomeMarketRankings() {
         .mm-ranking-category-tabs::-webkit-scrollbar{display:none}
         .mm-ranking-category-tabs button{flex:none;height:34px;padding:0 14px;border:1px solid #e4e7e9;border-radius:17px;background:#fff;color:#606870;font-size:12px;font-weight:700;white-space:nowrap}
         .mm-ranking-category-tabs button.active{border-color:#17191c;background:#17191c;color:#fff}
+        .mm-ranking-preopen-notice{padding:10px 20px;background:#fafbfb;border-bottom:1px solid #eef0f2;color:#707981;font-size:12px;line-height:1.5;letter-spacing:-.02em}
         .mm-ranking-desktop-head,.mm-ranking-list li{display:grid;grid-template-columns:48px minmax(180px,1fr) 110px 90px 110px 120px 120px;align-items:center}
         .mm-ranking-desktop-head{height:40px;padding:0 20px;background:#fafbfb;color:#8a9299;font-size:11px;border-bottom:1px solid #eef0f2}
         .mm-ranking-desktop-head span:nth-child(n+3){text-align:right}
@@ -292,9 +371,12 @@ export default function HomeMarketRankings() {
         .mm-ranking-list li{min-height:61px;padding:8px 20px;border-bottom:1px solid #eef0f2;font-size:12px}
         .mm-ranking-list li:last-child{border-bottom:0}
         .mm-rank-number{color:#4c555d;font-size:13px;font-variant-numeric:tabular-nums}
-        .mm-rank-stock{display:flex;min-width:0;flex-direction:column;gap:3px}
-        .mm-rank-stock strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#22272c;font-size:13px}
-        .mm-rank-stock small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#989fa5;font-size:10px}
+        .mm-rank-stock{display:flex;min-width:0;align-items:center;gap:10px}
+        .mm-rank-logo{position:relative;display:flex;flex:0 0 30px;width:30px;height:30px;align-items:center;justify-content:center;overflow:hidden;border:1px solid #edf0f2;border-radius:50%;background:#f7f8f9;color:#8c949b;font-size:11px;font-weight:800}
+        .mm-rank-logo img{position:absolute;inset:0;width:100%;height:100%;padding:2px;background:#fff;object-fit:contain}
+        .mm-rank-stock-text{display:flex;min-width:0;flex:1;flex-direction:column;gap:3px}
+        .mm-rank-stock-text strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#22272c;font-size:13px}
+        .mm-rank-stock-text small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#989fa5;font-size:10px}
         .mm-rank-price,.mm-rank-rate,.mm-rank-volume,.mm-rank-value,.mm-rank-cap{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
         .mm-rank-price{color:#22272c;font-size:12px}
         .mm-rank-rate{font-style:normal;font-weight:700}
@@ -306,7 +388,7 @@ export default function HomeMarketRankings() {
         .mm-ranking-error p{margin:0}.mm-ranking-error button{height:32px;padding:0 12px;border:1px solid #dfe3e6;border-radius:6px;background:#fff;color:#4e565e;font-size:12px}
         @media(max-width:900px) and (min-width:761px){
           .mm-ranking-desktop-head,.mm-ranking-list li{grid-template-columns:42px minmax(150px,1fr) 100px 78px 95px 105px 105px}
-          .mm-ranking-title,.mm-ranking-market-tabs,.mm-ranking-category-tabs,.mm-ranking-desktop-head,.mm-ranking-list li{padding-left:16px;padding-right:16px}
+          .mm-ranking-title,.mm-ranking-market-tabs,.mm-ranking-category-tabs,.mm-ranking-preopen-notice,.mm-ranking-desktop-head,.mm-ranking-list li{padding-left:16px;padding-right:16px}
         }
         @media(max-width:760px){
           .home-market-ranking-slot{background:#fff}
@@ -318,11 +400,13 @@ export default function HomeMarketRankings() {
           .mm-ranking-market-tabs button.active:after{left:22%;right:22%;height:2px}
           .mm-ranking-category-tabs{padding:11px 16px 12px;gap:7px}
           .mm-ranking-category-tabs button{height:32px;padding:0 13px;font-size:12px}
+          .mm-ranking-preopen-notice{padding:10px 16px;font-size:11px}
           .mm-ranking-desktop-head{display:none}
           .mm-ranking-list li{min-height:70px;padding:10px 16px;display:grid;grid-template-columns:28px minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:8px;row-gap:4px}
           .mm-rank-number{grid-column:1;grid-row:1/3;align-self:center;font-size:13px}
-          .mm-rank-stock{grid-column:2;grid-row:1/3;align-self:center}
-          .mm-rank-stock strong{font-size:14px}.mm-rank-stock small{font-size:10px}
+          .mm-rank-stock{grid-column:2;grid-row:1/3;align-self:center;gap:8px}
+          .mm-rank-logo{flex-basis:32px;width:32px;height:32px}
+          .mm-rank-stock-text strong{font-size:14px}.mm-rank-stock-text small{font-size:10px}
           .mm-rank-price{grid-column:3;grid-row:1;text-align:right;font-size:13px}
           .mm-rank-rate{grid-column:3;grid-row:2;text-align:right;font-size:12px}
           .mm-rank-volume,.mm-rank-value,.mm-rank-cap{display:none}
