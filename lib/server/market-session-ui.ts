@@ -44,9 +44,10 @@ function quickFallback(market: Market) {
     const session = pre ? "프리마켓" : regular ? "정규장" : after ? "애프터마켓" : afterCutoff ? "애프터마켓 마감" : "장 마감";
     const currentSession = pre ? "preMarket" : regular ? "regularMarket" : after ? "afterMarket" : afterCutoff ? "afterMarketClosing" : "closed";
     const isDst = now.zone.toUpperCase().includes("EDT");
+    const fullHours = isDst ? ["17:00", "08:50"] : ["18:00", "09:50"];
     const hours = isDst
-      ? pre ? ["17:00", "22:30"] : regular ? ["22:30", "05:00"] : afterWindow ? ["05:00", "08:50"] : ["22:30", "05:00"]
-      : pre ? ["18:00", "23:30"] : regular ? ["23:30", "06:00"] : afterWindow ? ["06:00", "09:50"] : ["23:30", "06:00"];
+      ? pre ? ["17:00", "22:30"] : regular ? ["22:30", "05:00"] : afterWindow ? ["05:00", "08:50"] : fullHours
+      : pre ? ["18:00", "23:30"] : regular ? ["23:30", "06:00"] : afterWindow ? ["06:00", "09:50"] : fullHours;
     return {
       isOpen,
       label: `${session} · NASDAQ`,
@@ -54,7 +55,7 @@ function quickFallback(market: Market) {
         ? `애프터마켓 모의주문은 ${hours[1]} KST에 마감되었습니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`
         : isOpen
           ? `${session} 빠른 시간 판정입니다 · ${hours[0]}~${hours[1]} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`
-          : `미국 현지 거래시간 밖입니다 · 정규장 ${hours[0]}~${hours[1]} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`,
+          : `미국주식 전체 주문 가능 시간은 ${fullHours[0]}~${fullHours[1]} KST입니다 · 주문 시 네이버증권 장 상태를 다시 확인합니다${isDst ? " · 서머타임" : " · 표준시"}.`,
       exchange: "NASDAQ",
       currentSession,
       isDaylightSavingTime: isDst,
@@ -102,12 +103,25 @@ export async function getResponsiveMarketSession(market: Market) {
   const fallback = quickFallback(market);
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
+    const resolved = await Promise.race([
       getCheckedMarketSession(market),
       new Promise<typeof fallback>(resolve => {
         timer = setTimeout(() => resolve(fallback), 450);
       }),
     ]);
+
+    if (market === "US" && !resolved.isOpen) {
+      const now = localClock("America/New_York");
+      const isDst = now.zone.toUpperCase().includes("EDT");
+      return {
+        ...resolved,
+        isDaylightSavingTime: isDst,
+        openTimeKst: isDst ? "17:00" : "18:00",
+        closeTimeKst: isDst ? "08:50" : "09:50",
+      };
+    }
+
+    return resolved;
   } finally {
     if (timer) clearTimeout(timer);
   }
