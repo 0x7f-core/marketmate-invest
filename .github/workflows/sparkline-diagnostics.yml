@@ -30,29 +30,16 @@ jobs:
           }
           NODE
 
-      - name: Probe raw Naver chart endpoints
+      - name: Probe Bitcoin marketInfo endpoint
         run: |
           node - <<'NODE'
           const base='https://stock.naver.com';
           const now=new Date();
-          const seoul=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
-          const p=t=>seoul.find(x=>x.type===t)?.value||'';
-          const ymd=`${p('year')}${p('month')}${p('day')}`;
-          const pad=n=>String(n).padStart(2,'0');
-          const compact=d=>`${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
-          const end=new Date(now.getTime()+6*3600000), start=new Date(now.getTime()-18*3600000);
-          const urls={
-            KOSPI:`/api/domestic/indexSise/time?koreaIndexType=KOSPI&thistime=${ymd}&startIdx=0&pageSize=20`,
-            SPX:`/api/securityService/chart/foreign/INDEX/NYSE/.INX/interval/5?startDateTime=${compact(start)}&endDateTime=${compact(end)}&utc=true`,
-            BTC:`/api/coin/candle/UPBIT/KRW/BTC/minutes/5?from=${encodeURIComponent(new Date(now.getTime()-26*3600000).toISOString())}&to=${encodeURIComponent(new Date(now.getTime()+300000).toISOString())}`,
-            USDKRW:'/api/stockSecurity/exchange-rates/v2/USD/charts/round?bankType=hana',
-          };
-          for(const [id,path] of Object.entries(urls)){
-            try{
-              const r=await fetch(base+path,{headers:{accept:'application/json, text/plain, */*','accept-language':'ko-KR,ko;q=0.9','user-agent':'Mozilla/5.0','referer':'https://stock.naver.com/'}});
-              const text=await r.text();
-              console.log(`RAW ${id} HTTP=${r.status} bytes=${text.length}`);
-              console.log(text.slice(0,3500));
-            }catch(error){console.log(`RAW ${id} ERROR=${error?.message||error}`)}
-          }
+          const from=new Date(now.getTime()-26*3600000).toISOString();
+          const to=new Date(now.getTime()+300000).toISOString();
+          const path=`/api/coin/candle/UPBIT/KRW/BTC/minutes/5/marketInfo?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+          const r=await fetch(base+path,{headers:{accept:'application/json, text/plain, */*','accept-language':'ko-KR,ko;q=0.9','user-agent':'Mozilla/5.0','referer':'https://stock.naver.com/'}});
+          const text=await r.text();
+          console.log(`BTC_MARKET_INFO HTTP=${r.status} bytes=${text.length}`);
+          console.log(text.slice(0,6000));
           NODE
