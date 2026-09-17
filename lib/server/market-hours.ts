@@ -20,6 +20,8 @@ type NaverStatus = Record<string, unknown>;
 const US_AFTER_MARKET_CUTOFF_MINUTES_ET = 19 * 60 + 50;
 const KR_NXT_PREMARKET_CLOSE_MINUTES = 8 * 60 + 50;
 const KR_KRX_REGULAR_OPEN_MINUTES = 9 * 60;
+const KR_CLOSING_AUCTION_START_MINUTES = 15 * 60 + 20;
+const KR_CLOSING_AUCTION_END_MINUTES = 15 * 60 + 30;
 
 function asRecord(value: unknown): NaverStatus | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as NaverStatus : null;
@@ -54,9 +56,6 @@ function statusList(payload: unknown) {
   const root = asRecord(payload);
   if (!root) return [] as NaverStatus[];
 
-  // 2026-09-16 current contract is top-level { serverTime, statuses }, but this is an
-  // unofficial API. Accept a small set of common response wrappers without walking
-  // arbitrary payload fields or accidentally treating session timetable rows as markets.
   const direct = statusArray(root);
   if (direct.length) return direct;
   for (const key of ["data", "result", "body", "payload"]) {
@@ -120,6 +119,11 @@ function isKrMorningBreak() {
   return minutes >= KR_NXT_PREMARKET_CLOSE_MINUTES && minutes < KR_KRX_REGULAR_OPEN_MINUTES;
 }
 
+function isKrClosingAuction() {
+  const minutes = clockMinutesNow("Asia/Seoul");
+  return minutes >= KR_CLOSING_AUCTION_START_MINUTES && minutes < KR_CLOSING_AUCTION_END_MINUTES;
+}
+
 function beforeUsAfterMarketCutoff() {
   const minutes = newYorkMinutesNow();
   return minutes >= 0 && minutes < US_AFTER_MARKET_CUTOFF_MINUTES_ET;
@@ -146,7 +150,7 @@ function usAfterMarketCloseKst(detail: ReturnType<typeof sessionDetails>) {
 
 function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen || !detail.currentType) return false;
-  if (market === "KR") return !isKrMorningBreak();
+  if (market === "KR") return !isKrMorningBreak() && !isKrClosingAuction();
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
   if (market === "US") return !type.includes("after") || beforeUsAfterMarketCutoff();
@@ -179,6 +183,20 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
       currentSession: "morningBreak",
       openTimeKst: "09:00",
       closeTimeKst: "15:30",
+      source: "NAVER",
+      stale: false,
+    };
+  }
+
+  if (market === "KR" && isKrClosingAuction()) {
+    return {
+      isOpen: false,
+      label: "동시호가",
+      notice: "국내주식은 15:20~15:30 KST 동시호가 시간에는 모의투자 주문을 받지 않습니다. 15:30 KST부터 다시 주문할 수 있습니다.",
+      exchange: "KRX",
+      currentSession: "closingAuction",
+      openTimeKst: "15:30",
+      closeTimeKst: "20:00",
       source: "NAVER",
       stale: false,
     };
