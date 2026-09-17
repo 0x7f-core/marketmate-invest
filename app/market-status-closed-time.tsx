@@ -16,7 +16,15 @@ function patchClosedMarketTimes() {
   document.querySelectorAll<HTMLElement>(".market-status-item").forEach(item => {
     const name = item.querySelector<HTMLElement>(".market-status-name")?.textContent?.trim();
     const session = item.querySelector<HTMLElement>(".market-status-session");
-    if (!session?.textContent?.includes("장 마감")) return;
+    if (!session) return;
+
+    const rawSessionText = session.textContent?.trim() ?? "";
+    if (name === "국내" && (rawSessionText.includes("동시호가") || rawSessionText.includes("장 마감"))) {
+      const simplified = rawSessionText.replace(/^(?:KRX|NXT)\s+/i, "");
+      if (simplified !== rawSessionText) session.textContent = simplified;
+    }
+
+    if (!rawSessionText.includes("장 마감")) return;
 
     let time = item.querySelector<HTMLElement>(".market-status-time");
     if (!time) {
