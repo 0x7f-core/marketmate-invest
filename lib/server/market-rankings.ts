@@ -114,6 +114,31 @@ function domesticExchange(row: Row) {
   return textValue(row, ["marketType", "exchange", "tradeType", "marketName"]) || "KRX";
 }
 
+function normalizeUsExchange(value: string) {
+  const normalized = value.trim().toUpperCase().replace(/[\s_-]+/g, "");
+  if (!normalized || normalized === "USA" || normalized === "US" || normalized === "UNITEDSTATES") return "";
+  if (normalized === "NAS" || normalized.includes("NASDAQ") || ["NMS", "NGM", "NCM", "NSQ"].includes(normalized)) return "NAS";
+  if (normalized === "NYS" || normalized === "NYSE" || normalized.includes("NEWYORKSTOCKEXCHANGE")) return "NYS";
+  if (normalized === "ASE" || normalized === "AMEX" || normalized.includes("NYSEAMERICAN") || normalized.includes("AMERICANSTOCKEXCHANGE")) return "ASE";
+  return value.trim();
+}
+
+function usExchangeFromSymbol(symbol: string) {
+  const suffix = symbol.toUpperCase().match(/\.([OKNPA])$/)?.[1];
+  if (suffix === "O" || suffix === "K") return "NAS";
+  if (suffix === "N" || suffix === "P") return "NYS";
+  if (suffix === "A") return "ASE";
+  return "USA";
+}
+
+function usExchange(row: Row, symbol: string) {
+  for (const key of ["exchangeCode", "exchangeName", "exchange", "stockExchangeType", "exchangeType", "tradeType", "marketType", "marketName"]) {
+    const exchange = normalizeUsExchange(textValue(row, [key]));
+    if (exchange) return exchange;
+  }
+  return usExchangeFromSymbol(symbol);
+}
+
 function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, "rank"> | null {
   const symbol = normalizeSymbol(market, row);
   if (!symbol) return null;
@@ -123,7 +148,7 @@ function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, 
   const exchange = market === "KR"
     ? domesticExchange(row)
     : market === "US"
-      ? textValue(row, ["exchangeName", "exchange", "exchangeCode", "tradeType", "marketType"]) || "USA"
+      ? usExchange(row, symbol)
       : textValue(row, ["exchangeType", "exchange", "market"]) || "UPBIT";
 
   return {
@@ -181,18 +206,32 @@ function needsUsName(item: MarketRankingItem) {
   return !name || name === item.symbol.toUpperCase() || name === tickerCore(item.symbol);
 }
 
-async function enrichUsNames(items: MarketRankingItem[]) {
+function needsUsExchange(item: MarketRankingItem) {
+  return !normalizeUsExchange(item.exchange);
+}
+
+async function enrichUsMetadata(items: MarketRankingItem[]) {
   return Promise.all(items.map(async item => {
-    if (item.market !== "US" || !needsUsName(item)) return item;
+    if (item.market !== "US") return item;
+    const fillName = needsUsName(item);
+    const fillExchange = needsUsExchange(item);
+    if (!fillName && !fillExchange) return item;
     try {
       const basic = await naverJson<Row>(`/api/securityService/stock/${item.symbol}/basic`, {
         ttlMs: 6 * 60 * 60_000,
         staleMs: 7 * 24 * 60 * 60_000,
       });
-      const name = textValue(basic.data, ["stockName", "stockNameKo", "stockNameKor", "koreanName", "stockNameEng"]);
-      return name ? { ...item, name } : item;
+      const name = fillName
+        ? textValue(basic.data, ["stockName", "stockNameKo", "stockNameKor", "koreanName", "stockNameEng"])
+        : "";
+      const exchange = fillExchange ? usExchange(basic.data, item.symbol) : item.exchange;
+      return {
+        ...item,
+        ...(name ? { name } : {}),
+        ...(exchange ? { exchange } : {}),
+      };
     } catch {
-      return item;
+      return fillExchange ? { ...item, exchange: usExchangeFromSymbol(item.symbol) } : item;
     }
   }));
 }
@@ -244,7 +283,7 @@ export async function getMarketRanking(market: RankingMarket, categoryInput: str
   const normalized = uniqueItems(market, result.data);
   let items = rank(normalized, category, market !== "CRYPTO" || category !== "volume");
   if (!items.length) throw new Error("NAVER_RANKING_EMPTY");
-  if (market === "US") items = await enrichUsNames(items);
+  if (market === "US") items = await enrichUsMetadata(items);
   if (market === "KR") items = await enrichDomesticMarkets(items);
   return { market, category, items, source: "NAVER", fetchedAt: result.fetchedAt, stale: result.stale, pollingInterval: 15_000 };
 }
