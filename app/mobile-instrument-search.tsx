@@ -13,7 +13,6 @@ type Instrument = {
   currency: "KRW" | "USD";
 };
 type WatchlistItem = Instrument & { id?: string };
-
 type AuthResponse = { user?: { id?: string } };
 
 const MAX_RECENTS = 20;
@@ -93,15 +92,23 @@ export default function MobileInstrumentSearch() {
     } catch {}
   }, []);
 
+  const closeSearch = useCallback(() => {
+    if (window.history.state?.marketmateMobileSearch) window.history.back();
+    else setOpen(false);
+  }, []);
+
   useEffect(() => {
     const locate = () => {
       const target = document.querySelector(".np-mobile-header>div:first-child");
       if (target) setHeaderTarget(target);
     };
-    locate();
+    const timer = window.setTimeout(locate, 0);
     const observer = new MutationObserver(locate);
     observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -109,13 +116,11 @@ export default function MobileInstrumentSearch() {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
-    void resolveUser();
-    void loadWatchlist();
     return () => {
       cancelAnimationFrame(frame);
       document.body.style.overflow = previousOverflow;
     };
-  }, [open, loadWatchlist, resolveUser]);
+  }, [open]);
 
   useEffect(() => {
     const onPopState = () => {
@@ -130,16 +135,12 @@ export default function MobileInstrumentSearch() {
       window.removeEventListener("popstate", onPopState);
       window.removeEventListener("keydown", onKeyDown);
     };
-  });
+  }, [closeSearch, open]);
 
   useEffect(() => {
     if (!open) return;
     const value = query.trim();
-    if (!value) {
-      setResults([]);
-      setLoading(false);
-      return;
-    }
+    if (!value) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setLoading(true);
@@ -171,14 +172,18 @@ export default function MobileInstrumentSearch() {
     setOpen(true);
     setQuery("");
     setResults([]);
+    setLoading(false);
     const id = userId || await resolveUser();
     if (id) setRecents(readRecents(id));
     void loadWatchlist();
   };
 
-  const closeSearch = () => {
-    if (window.history.state?.marketmateMobileSearch) window.history.back();
-    else setOpen(false);
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    if (!value.trim()) {
+      setResults([]);
+      setLoading(false);
+    }
   };
 
   const choose = (instrument: Instrument) => {
@@ -205,7 +210,7 @@ export default function MobileInstrumentSearch() {
 
   const isFavorite = (item: Instrument) => watchlist.some(entry => sameInstrument(entry, item));
 
-  const toggleFavorite = async (event: React.MouseEvent, item: Instrument) => {
+  const toggleFavorite = async (event: React.SyntheticEvent, item: Instrument) => {
     event.stopPropagation();
     const favorite = isFavorite(item);
     try {
@@ -296,12 +301,12 @@ export default function MobileInstrumentSearch() {
               <input
                 ref={inputRef}
                 value={query}
-                onChange={event => setQuery(event.target.value)}
+                onChange={event => updateQuery(event.target.value)}
                 placeholder="종목, 지수, 코인을 검색해 보세요!"
                 aria-label="종목 검색어"
                 enterKeyHint="search"
               />
-              {query && <button type="button" onClick={() => setQuery("")} aria-label="검색어 지우기"><X /></button>}
+              {query && <button type="button" onClick={() => updateQuery("")} aria-label="검색어 지우기"><X /></button>}
             </div>
           </div>
           <div className="mobile-search-content">
@@ -330,7 +335,7 @@ export default function MobileInstrumentSearch() {
                         onKeyDown={event => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            void toggleFavorite(event as unknown as React.MouseEvent, item);
+                            void toggleFavorite(event, item);
                           }
                         }}
                       >
