@@ -30,7 +30,7 @@
   }
 
   /* Keep the portfolio header controls inside the real mobile viewport.
-     Row 1: title + refresh, Row 2: sort key + direction. */
+     Row 1: title + bulk sell, Row 2: sort key + direction. */
   .holdings>.np-section-title{
     width:100%!important;
     max-width:100%!important;
@@ -79,6 +79,36 @@
   .holdings>.np-section-title>div>button:nth-of-type(2) svg{
     width:15px!important;
     height:15px!important;
+  }
+
+  /* After the manual refresh control was removed, bulk sell became the
+     second button and inherited the old refresh button's right alignment.
+     Give it an explicit mobile rule so its label stays truly centered. */
+  .holdings>.np-section-title #portfolio-bulk-sell-button{
+    grid-column:2!important;
+    grid-row:1!important;
+    justify-self:end!important;
+    width:78px!important;
+    min-width:78px!important;
+    max-width:78px!important;
+    height:32px!important;
+    min-height:32px!important;
+    max-height:32px!important;
+    padding:0!important;
+    margin:0!important;
+    display:grid!important;
+    place-items:center!important;
+    align-items:center!important;
+    justify-items:center!important;
+    align-content:center!important;
+    justify-content:center!important;
+    gap:0!important;
+    text-align:center!important;
+    text-indent:0!important;
+    line-height:1!important;
+    font-size:12px!important;
+    white-space:nowrap!important;
+    box-sizing:border-box!important;
   }
 
   /* Mobile summary is sized against the actual viewport, not the desktop
