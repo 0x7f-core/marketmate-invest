@@ -59,14 +59,40 @@ async function readJson<T>(response: Response): Promise<T> {
   }
 }
 
-function refreshPortfolio() {
-  const buttons = document.querySelectorAll<HTMLButtonElement>(".holdings .np-section-title button");
+function removePortfolioRefreshButton(title: HTMLElement) {
+  const buttons = title.querySelectorAll<HTMLButtonElement>("button");
   for (const button of buttons) {
-    if (button.textContent?.includes("새로고침")) {
-      button.click();
-      return;
+    if (button.id !== BUTTON_ID && button.textContent?.includes("새로고침")) {
+      button.remove();
     }
   }
+}
+
+function styleBulkSellButton(button: HTMLButtonElement) {
+  const important = (property: string, value: string) => button.style.setProperty(property, value, "important");
+
+  important("width", "96px");
+  important("min-width", "96px");
+  important("height", "36px");
+  important("min-height", "36px");
+  important("padding", "0");
+  important("margin", "0");
+  important("border", `1px solid ${SELL_BLUE}`);
+  important("border-radius", "6px");
+  important("background", SELL_BLUE);
+  important("color", "#ffffff");
+  important("font-size", "12px");
+  important("font-weight", "700");
+  important("white-space", "nowrap");
+  important("display", "grid");
+  important("place-items", "center");
+  important("text-align", "center");
+  important("line-height", "1");
+  important("text-indent", "0");
+  important("box-sizing", "border-box");
+  important("appearance", "none");
+  important("-webkit-appearance", "none");
+  button.style.cursor = "pointer";
 }
 
 async function bulkSell(button: HTMLButtonElement) {
@@ -140,8 +166,6 @@ async function bulkSell(button: HTMLButtonElement) {
       }
     }
 
-    refreshPortfolio();
-
     if (!failures.length) {
       window.alert(`${successCount}개 종목의 일괄매도를 완료했습니다.`);
       return;
@@ -155,6 +179,7 @@ async function bulkSell(button: HTMLButtonElement) {
   } finally {
     button.disabled = false;
     button.textContent = originalText;
+    styleBulkSellButton(button);
   }
 }
 
@@ -164,7 +189,15 @@ function installBulkSellButton() {
 
   const title = holdings.querySelector<HTMLElement>(".np-section-title");
   const heading = title?.querySelector("h2")?.textContent?.trim();
-  if (!title || heading !== "내 투자현황" || title.querySelector(`#${BUTTON_ID}`)) return;
+  if (!title || heading !== "내 투자현황") return;
+
+  removePortfolioRefreshButton(title);
+
+  const existing = title.querySelector<HTMLButtonElement>(`#${BUTTON_ID}`);
+  if (existing) {
+    styleBulkSellButton(existing);
+    return;
+  }
 
   const controls = title.querySelector<HTMLElement>(":scope > div") ?? title;
   const button = document.createElement("button");
@@ -172,40 +205,17 @@ function installBulkSellButton() {
   button.type = "button";
   button.textContent = "일괄매도";
   button.setAttribute("aria-label", "보유종목 일괄매도");
-  Object.assign(button.style, {
-    height: "36px",
-    minWidth: "86px",
-    padding: "0 12px",
-    border: `1px solid ${SELL_BLUE}`,
-    borderRadius: "6px",
-    background: SELL_BLUE,
-    color: "#ffffff",
-    fontSize: "12px",
-    fontWeight: "700",
-    whiteSpace: "nowrap",
-    cursor: "pointer",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    textAlign: "center",
-    lineHeight: "1",
-    verticalAlign: "middle",
-    boxSizing: "border-box",
-    appearance: "none",
-    WebkitAppearance: "none",
-  });
+  styleBulkSellButton(button);
+
   button.addEventListener("pointerenter", () => {
-    if (!button.disabled) button.style.background = SELL_BLUE_HOVER;
+    if (!button.disabled) button.style.setProperty("background", SELL_BLUE_HOVER, "important");
   });
   button.addEventListener("pointerleave", () => {
-    button.style.background = SELL_BLUE;
+    button.style.setProperty("background", SELL_BLUE, "important");
   });
   button.addEventListener("click", () => void bulkSell(button));
 
-  const refreshButton = Array.from(controls.querySelectorAll<HTMLButtonElement>("button"))
-    .find(item => item.textContent?.includes("새로고침"));
-  if (refreshButton) controls.insertBefore(button, refreshButton);
-  else controls.appendChild(button);
+  controls.appendChild(button);
 }
 
 export default function PortfolioBulkSell() {
