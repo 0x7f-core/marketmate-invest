@@ -141,7 +141,7 @@ function patchCompetitionTradingGuide() {
 
   const descriptions = guide.querySelectorAll("dd");
   const tradingHours = [
-    "평일 NXT 08:00~20:00 · KRX 정규장 09:00~15:30 (KST)",
+    "평일 NXT 프리마켓 08:00~08:50 · 08:50~09:00 주문 불가 · KRX 정규장 09:00~15:30 · NXT 오후 거래 15:30~20:00 (KST)",
     "서머타임 17:00~08:50 · 표준시 18:00~09:50 (KST, 프리·정규·애프터 포함)",
     "UPBIT 시세 기준 24시간 365일 주문 가능",
   ];
