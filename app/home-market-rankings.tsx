@@ -39,6 +39,12 @@ type MarketStatusResponse = {
   stale?: boolean;
   isHoliday?: boolean;
 };
+type WatchlistResponse = {
+  items?: Array<{
+    market: Market;
+    symbol: string;
+  }>;
+};
 type CacheEntry = { data: RankingResponse; expiresAt: number };
 
 const MARKETS: Array<{ key: Market; label: string }> = [
@@ -64,6 +70,16 @@ function displaySymbol(item: RankingItem) {
   if (item.market === "US") return item.symbol.replace(/\.(?:O|K|N|P|A)$/i, "");
   if (item.market === "CRYPTO") return item.symbol.replace(/^KRW-/, "");
   return item.symbol;
+}
+
+function favoriteKey(market: Market, symbol: string) {
+  if (market === "US") return `${market}:${symbol.replace(/\.(?:O|K|N|P|A)$/i, "").toUpperCase()}`;
+  if (market === "CRYPTO") return `${market}:${symbol.replace(/^KRW-/i, "").toUpperCase()}`;
+  return `${market}:${symbol.toUpperCase()}`;
+}
+
+function favoriteExchange(item: RankingItem) {
+  return item.market === "CRYPTO" ? "NAVER" : item.exchange;
 }
 
 function formatPrice(item: RankingItem) {
@@ -179,6 +195,14 @@ function RankingLogo({ item }: { item: RankingItem }) {
   );
 }
 
+function FavoriteStar({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m12 2.8 2.78 5.63 6.22.9-4.5 4.39 1.06 6.2L12 17l-5.56 2.92 1.06-6.2L3 9.33l6.22-.9L12 2.8Z" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function RankingSkeleton() {
   return (
     <div className="mm-ranking-skeleton" aria-label="실시간 랭킹 불러오는 중">
@@ -194,6 +218,8 @@ function RankingSection() {
   const [marketStatus, setMarketStatus] = useState<MarketStatusResponse | null>(null);
   const [loading, setLoading] = useState(!data);
   const [error, setError] = useState("");
+  const [favorites, setFavorites] = useState<Record<string, string>>({});
+  const [favoriteBusy, setFavoriteBusy] = useState<Set<string>>(() => new Set());
 
   const load = useCallback(async (force = false) => {
     const key = cacheKey(market, category);
@@ -232,6 +258,57 @@ function RankingSection() {
     }
   }, [market, category]);
 
+  const loadFavorites = useCallback(async () => {
+    try {
+      const response = await fetch("/api/watchlist", { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json() as WatchlistResponse;
+      const next: Record<string, string> = {};
+      for (const item of result.items ?? []) {
+        next[favoriteKey(item.market, item.symbol)] = `${item.market}:${item.symbol}`;
+      }
+      setFavorites(next);
+    } catch {
+      // 즐겨찾기 조회 실패가 실시간 랭킹 자체를 막지 않도록 조용히 유지한다.
+    }
+  }, []);
+
+  const toggleFavorite = useCallback(async (item: RankingItem) => {
+    const key = favoriteKey(item.market, item.symbol);
+    if (favoriteBusy.has(key)) return;
+    const existingInstrumentId = favorites[key];
+    setFavoriteBusy(current => new Set(current).add(key));
+    try {
+      const response = existingInstrumentId
+        ? await fetch(`/api/watchlist?instrumentId=${encodeURIComponent(existingInstrumentId)}`, { method: "DELETE" })
+        : await fetch("/api/watchlist", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              market: item.market,
+              symbol: item.symbol,
+              name: item.name,
+              exchange: favoriteExchange(item),
+              currency: item.currency,
+            }),
+          });
+      if (!response.ok) return;
+      setFavorites(current => {
+        const next = { ...current };
+        if (existingInstrumentId) delete next[key];
+        else next[key] = `${item.market}:${item.symbol}`;
+        return next;
+      });
+      window.dispatchEvent(new CustomEvent("marketmate:watchlist-changed"));
+    } finally {
+      setFavoriteBusy(current => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  }, [favoriteBusy, favorites]);
+
   useEffect(() => {
     const cached = clientCache.get(cacheKey(market, category));
     setData(cached?.data ?? null);
@@ -239,6 +316,10 @@ function RankingSection() {
     setError("");
     void load(false);
   }, [market, category, load]);
+
+  useEffect(() => {
+    void loadFavorites();
+  }, [loadFavorites]);
 
   useEffect(() => {
     if (market === "CRYPTO") {
@@ -329,7 +410,7 @@ function RankingSection() {
       ) : null}
 
       <div className="mm-ranking-desktop-head" aria-hidden="true">
-        <span>순위</span><span>종목명</span><span>현재가</span><span>등락률</span><span>거래량</span><span>거래대금</span><span>시가총액</span>
+        <span>순위</span><span>종목명</span><span>현재가</span><span>등락률</span><span>거래량</span><span>거래대금</span><span>시가총액</span><span />
       </div>
 
       {loading && !items.length ? <RankingSkeleton /> : error && !items.length ? (
@@ -339,36 +420,58 @@ function RankingSection() {
         </div>
       ) : (
         <ol className="mm-ranking-list" aria-live="polite">
-          {items.map(item => (
-            <li
-              key={`${market}:${category}:${item.symbol}`}
-              role="button"
-              tabIndex={0}
-              aria-label={`${item.name} 시세 보기`}
-              onClick={() => void openRankingInstrument(item)}
-              onKeyDown={event => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  void openRankingInstrument(item);
-                }
-              }}
-            >
-              <b className="mm-rank-number">{item.rank}</b>
-              <span className="mm-rank-stock">
-                <RankingLogo item={item} />
-                <span className="mm-rank-stock-text">
-                  <strong>{item.name}</strong>
-                  <small>{displaySymbol(item)} · {item.exchange}</small>
+          {items.map(item => {
+            const key = favoriteKey(item.market, item.symbol);
+            const favorite = Boolean(favorites[key]);
+            const busy = favoriteBusy.has(key);
+            return (
+              <li
+                key={`${market}:${category}:${item.symbol}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`${item.name} 시세 보기`}
+                onClick={() => void openRankingInstrument(item)}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    void openRankingInstrument(item);
+                  }
+                }}
+              >
+                <b className="mm-rank-number">{item.rank}</b>
+                <span className="mm-rank-stock">
+                  <RankingLogo item={item} />
+                  <span className="mm-rank-stock-text">
+                    <strong>{item.name}</strong>
+                    <small className="mm-rank-symbol">{displaySymbol(item)} · {item.exchange}</small>
+                    <span className="mm-rank-mobile-metric">
+                      <small>{metricLabel(category)}</small>
+                      <b className={category === "up" || category === "down" ? rateClass(item.changeRate) : ""}>{metricValue(item, category)}</b>
+                    </span>
+                  </span>
                 </span>
-              </span>
-              <strong className="mm-rank-price">{formatPrice(item)}</strong>
-              <em className={`mm-rank-rate ${rateClass(item.changeRate)}`}>{formatRate(item.changeRate)}</em>
-              <span className="mm-rank-volume">{formatVolume(item.volume)}</span>
-              <span className="mm-rank-value">{formatMoney(item.tradingValue, item.currency)}</span>
-              <span className="mm-rank-cap">{formatMoney(item.marketCap, item.currency)}</span>
-              <span className="mm-rank-mobile-metric"><small>{metricLabel(category)}</small><b className={category === "up" || category === "down" ? rateClass(item.changeRate) : ""}>{metricValue(item, category)}</b></span>
-            </li>
-          ))}
+                <strong className="mm-rank-price">{formatPrice(item)}</strong>
+                <em className={`mm-rank-rate ${rateClass(item.changeRate)}`}>{formatRate(item.changeRate)}</em>
+                <span className="mm-rank-volume">{formatVolume(item.volume)}</span>
+                <span className="mm-rank-value">{formatMoney(item.tradingValue, item.currency)}</span>
+                <span className="mm-rank-cap">{formatMoney(item.marketCap, item.currency)}</span>
+                <button
+                  type="button"
+                  className={`mm-rank-favorite${favorite ? " active" : ""}`}
+                  aria-label={favorite ? `${item.name} 관심종목에서 제거` : `${item.name} 관심종목에 추가`}
+                  aria-pressed={favorite}
+                  disabled={busy}
+                  onClick={event => {
+                    event.stopPropagation();
+                    void toggleFavorite(item);
+                  }}
+                  onKeyDown={event => event.stopPropagation()}
+                >
+                  <FavoriteStar active={favorite} />
+                </button>
+              </li>
+            );
+          })}
         </ol>
       )}
     </section>
@@ -426,7 +529,7 @@ export default function HomeMarketRankings() {
         .mm-ranking-category-tabs button{flex:none;height:34px;padding:0 14px;border:1px solid #e4e7e9;border-radius:17px;background:#fff;color:#606870;font-size:12px;font-weight:700;white-space:nowrap}
         .mm-ranking-category-tabs button.active{border-color:#17191c;background:#17191c;color:#fff}
         .mm-ranking-preopen-notice{padding:10px 20px;background:#fafbfb;border-bottom:1px solid #eef0f2;color:#707981;font-size:12px;line-height:1.5;letter-spacing:-.02em}
-        .mm-ranking-desktop-head,.mm-ranking-list li{display:grid;grid-template-columns:48px minmax(180px,1fr) 110px 90px 110px 120px 120px;align-items:center}
+        .mm-ranking-desktop-head,.mm-ranking-list li{display:grid;grid-template-columns:48px minmax(180px,1fr) 110px 90px 110px 120px 120px 42px;align-items:center}
         .mm-ranking-desktop-head{height:40px;padding:0 20px;background:#fafbfb;color:#8a9299;font-size:11px;border-bottom:1px solid #eef0f2}
         .mm-ranking-desktop-head span:nth-child(n+3){text-align:right}
         .mm-ranking-list{list-style:none;margin:0;padding:0}
@@ -447,12 +550,17 @@ export default function HomeMarketRankings() {
         .mm-rank-rate{font-style:normal;font-weight:700}
         .mm-rank-volume,.mm-rank-value,.mm-rank-cap{color:#596169}
         .mm-rank-mobile-metric{display:none}
+        .mm-rank-favorite{width:34px;height:34px;justify-self:end;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:#aeb4b9;padding:5px;border-radius:50%;cursor:pointer}
+        .mm-rank-favorite svg{width:22px;height:22px;display:block}
+        .mm-rank-favorite.active{color:#03b75a}
+        .mm-rank-favorite:disabled{opacity:.5;cursor:default}
+        .mm-rank-favorite:focus-visible{outline:2px solid #dfe3e6;outline-offset:0}
         .mm-ranking-skeleton i{display:block;height:61px;border-bottom:1px solid #eef0f2;background:linear-gradient(90deg,#fff 0,#f7f8f9 45%,#fff 100%);background-size:220% 100%;animation:mm-ranking-shimmer 1.1s linear infinite}
         @keyframes mm-ranking-shimmer{to{background-position:-120% 0}}
         .mm-ranking-error{min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#7b838b;font-size:13px}
         .mm-ranking-error p{margin:0}.mm-ranking-error button{height:32px;padding:0 12px;border:1px solid #dfe3e6;border-radius:6px;background:#fff;color:#4e565e;font-size:12px}
         @media(max-width:900px) and (min-width:761px){
-          .mm-ranking-desktop-head,.mm-ranking-list li{grid-template-columns:42px minmax(150px,1fr) 100px 78px 95px 105px 105px}
+          .mm-ranking-desktop-head,.mm-ranking-list li{grid-template-columns:42px minmax(150px,1fr) 100px 78px 95px 105px 105px 38px}
           .mm-ranking-title,.mm-ranking-market-tabs,.mm-ranking-category-tabs,.mm-ranking-preopen-notice,.mm-ranking-desktop-head,.mm-ranking-list li{padding-left:16px;padding-right:16px}
         }
         @media(max-width:760px){
@@ -467,16 +575,23 @@ export default function HomeMarketRankings() {
           .mm-ranking-category-tabs button{height:32px;padding:0 13px;font-size:12px}
           .mm-ranking-preopen-notice{padding:10px 16px;font-size:11px}
           .mm-ranking-desktop-head{display:none}
-          .mm-ranking-list li{min-height:70px;padding:10px 16px;display:grid;grid-template-columns:28px minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:8px;row-gap:4px}
-          .mm-rank-number{grid-column:1;grid-row:1/3;align-self:center;font-size:13px}
-          .mm-rank-stock{grid-column:2;grid-row:1/3;align-self:center;gap:8px}
-          .mm-rank-logo{flex-basis:32px;width:32px;height:32px}
-          .mm-rank-stock-text strong{font-size:14px}.mm-rank-stock-text small{font-size:10px}
-          .mm-rank-price{grid-column:3;grid-row:1;text-align:right;font-size:13px}
-          .mm-rank-rate{grid-column:3;grid-row:2;text-align:right;font-size:12px}
+          .mm-ranking-list li{min-height:78px;padding:11px 12px 11px 16px;display:grid;grid-template-columns:24px minmax(0,1fr) auto 36px;grid-template-rows:auto auto;column-gap:8px;row-gap:4px}
+          .mm-rank-number{grid-column:1;grid-row:1/3;align-self:center;font-size:14px}
+          .mm-rank-stock{grid-column:2;grid-row:1/3;align-self:center;gap:9px}
+          .mm-rank-logo{flex-basis:34px;width:34px;height:34px}
+          .mm-rank-stock-text{gap:2px}
+          .mm-rank-stock-text strong{font-size:15px;line-height:1.25}
+          .mm-rank-symbol{display:none}
+          .mm-rank-mobile-metric{display:flex;min-width:0;align-items:baseline;gap:4px;color:#9299a0;font-size:11px;line-height:1.25;white-space:nowrap}
+          .mm-rank-mobile-metric small{display:inline;overflow:visible;color:#9299a0;font-size:11px}
+          .mm-rank-mobile-metric b{overflow:hidden;text-overflow:ellipsis;color:#9299a0;font-size:11px;font-weight:500}
+          .mm-rank-mobile-metric b.up,.mm-rank-mobile-metric b.down{color:#9299a0}
+          .mm-rank-price{grid-column:3;grid-row:1;text-align:right;align-self:end;font-size:14px;font-weight:800}
+          .mm-rank-rate{grid-column:3;grid-row:2;text-align:right;align-self:start;font-size:12px}
           .mm-rank-volume,.mm-rank-value,.mm-rank-cap{display:none}
-          .mm-rank-mobile-metric{display:none}
-          .mm-ranking-skeleton i{height:70px}
+          .mm-rank-favorite{grid-column:4;grid-row:1/3;align-self:center;width:34px;height:34px;padding:5px}
+          .mm-rank-favorite svg{width:23px;height:23px}
+          .mm-ranking-skeleton i{height:78px}
         }
       `}</style>
     </>
