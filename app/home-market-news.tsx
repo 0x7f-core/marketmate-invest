@@ -9,6 +9,8 @@ type NewsItem = {
   publishedAt: number;
 };
 
+const MARKET_NEWS_SELECTOR = ".np-home .np-news, .np-single > .np-news";
+
 function relativeTime(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "날짜 미상";
   const minutes = Math.max(0, Math.floor((Date.now() - value) / 60_000));
@@ -26,24 +28,25 @@ function normalizedLink(value: string) {
   }
 }
 
-function renderMarketNews(items: NewsItem[]) {
-  const panel = document.querySelector<HTMLElement>(".np-home .np-news");
-  if (!panel) return;
+function marketNewsPanels() {
+  return Array.from(document.querySelectorAll<HTMLElement>(MARKET_NEWS_SELECTOR));
+}
 
+function renderPanel(panel: HTMLElement, items: NewsItem[]) {
   const sorted = [...items]
     .sort((a, b) => b.publishedAt - a.publishedAt)
     .filter((item, index, all) => all.findIndex(other => other.title === item.title) === index)
     .slice(0, 10);
 
-  const expectedSignature = sorted.map(item => `${normalizedLink(item.link)}:${item.publishedAt}`).join("|");
+  const expectedSignature = sorted.map(item => `${normalizedLink(item.link)}:${item.publishedAt}:${item.source}`).join("|");
   const currentSignature = Array.from(panel.querySelectorAll<HTMLAnchorElement>(":scope > article > a"))
-    .map(anchor => `${anchor.href}:${anchor.parentElement?.dataset.publishedAt ?? ""}`)
+    .map(anchor => `${anchor.href}:${anchor.parentElement?.dataset.publishedAt ?? ""}:${anchor.parentElement?.dataset.source ?? ""}`)
     .join("|");
   const currentTitle = panel.querySelector(".np-section-title h2")?.textContent?.trim() ?? "";
-  if (currentTitle === "시장 종합 뉴스" && currentSignature === expectedSignature) return;
+  if (currentTitle === "주요 뉴스" && currentSignature === expectedSignature) return;
 
   const title = panel.querySelector<HTMLElement>(".np-section-title h2");
-  if (title) title.textContent = "시장 종합 뉴스";
+  if (title) title.textContent = "주요 뉴스";
   const count = panel.querySelector<HTMLElement>(".np-section-title span");
   if (count) count.textContent = sorted.length ? `${sorted.length}건 · 최신순` : "";
 
@@ -52,7 +55,7 @@ function renderMarketNews(items: NewsItem[]) {
   if (!sorted.length) {
     const empty = document.createElement("p");
     empty.className = "np-empty";
-    empty.textContent = "표시할 시장 종합 뉴스가 없습니다.";
+    empty.textContent = "표시할 주요 뉴스가 없습니다.";
     panel.appendChild(empty);
     return;
   }
@@ -60,6 +63,7 @@ function renderMarketNews(items: NewsItem[]) {
   for (const item of sorted) {
     const article = document.createElement("article");
     article.dataset.publishedAt = String(item.publishedAt);
+    article.dataset.source = item.source;
 
     const link = document.createElement("a");
     link.href = item.link;
@@ -74,6 +78,10 @@ function renderMarketNews(items: NewsItem[]) {
     article.appendChild(meta);
     panel.appendChild(article);
   }
+}
+
+function renderMarketNews(items: NewsItem[]) {
+  for (const panel of marketNewsPanels()) renderPanel(panel, items);
 }
 
 export default function HomeMarketNews() {
@@ -101,7 +109,7 @@ export default function HomeMarketNews() {
     };
 
     const tick = () => {
-      if (!active || !document.querySelector(".np-home")) return;
+      if (!active || marketNewsPanels().length === 0) return;
       if (!items.length || Date.now() - lastLoadedAt >= 90_000) {
         void load();
         return;
