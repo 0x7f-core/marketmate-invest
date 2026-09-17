@@ -42,28 +42,38 @@ export default function HomeDashboardOrder() {
   const storageKey = useMemo(() => userId ? `marketmate:home-dashboard-order:${userId}` : "", [userId]);
 
   useEffect(() => {
+    if (!target?.isConnected) {
+      setReady(false);
+      return;
+    }
     let active = true;
+    setReady(false);
     fetch("/api/auth/me", { cache: "no-store" })
       .then(async response => response.ok ? await response.json() as AuthResponse : null)
       .then(result => {
         if (!active) return;
         const id = result?.user?.id?.trim() ?? "";
-        setUserId(id);
+        let nextOrder: DashboardId[] = [...DEFAULT_ORDER];
         if (id) {
           try {
             const saved = validOrder(JSON.parse(window.localStorage.getItem(`marketmate:home-dashboard-order:${id}`) ?? "null"));
-            if (saved) setOrder(saved);
+            if (saved) nextOrder = saved;
           } catch {
             // Corrupt local preferences fall back to the documented default order.
           }
         }
+        setUserId(id);
+        setOrder(nextOrder);
         setReady(true);
       })
       .catch(() => {
-        if (active) setReady(true);
+        if (!active) return;
+        setUserId("");
+        setOrder([...DEFAULT_ORDER]);
+        setReady(true);
       });
     return () => { active = false; };
-  }, []);
+  }, [target]);
 
   useEffect(() => {
     if (!ready || !storageKey) return;
