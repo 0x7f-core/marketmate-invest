@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 const US_EXCHANGE_PATTERN = /\b(?:NAS|NYS|AMS|NASDAQ|NYSE|AMEX|USA)\b/i;
+let cachedUsdKrw = 0;
 
 function parseKrw(value: string) {
   const parsed = Number(value.replace(/[^0-9.-]/g, ""));
@@ -11,7 +12,21 @@ function parseKrw(value: string) {
 
 function readUsdKrw() {
   const node = document.querySelector<HTMLElement>("[data-market-strip-usdkrw-price]");
-  return node ? parseKrw(node.textContent ?? "") : 0;
+  const fromStrip = node ? parseKrw(node.textContent ?? "") : 0;
+  return fromStrip || cachedUsdKrw;
+}
+
+async function refreshUsdKrw() {
+  try {
+    const response = await fetch("/api/market-overview", { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = await response.json() as { quotes?: Array<{ id?: string; price?: number }> };
+    const quote = payload.quotes?.find(item => item.id === "USDKRW");
+    const value = Number(quote?.price || 0);
+    if (Number.isFinite(value) && value > 0) cachedUsdKrw = value;
+  } catch {
+    // Keep the existing KRW-only fallback when live FX is temporarily unavailable.
+  }
 }
 
 function formatKrw(value: number) {
@@ -97,7 +112,7 @@ function enhanceMobileAverage(target: HTMLElement, averageKrw: number, isUs: boo
   const sub = line.querySelector<HTMLElement>("[data-mobile-position-average-sub]");
   if (isUs && usdKrw) {
     setText(main, formatUsd(averageKrw / usdKrw));
-    setText(sub, formatKrw(averageKrw));
+    setText(sub, `(${formatKrw(averageKrw)})`);
     if (sub) sub.style.display = "inline";
   } else {
     setText(main, formatKrw(averageKrw));
@@ -152,6 +167,7 @@ export default function PortfolioAveragePrices() {
     };
 
     schedule();
+    void refreshUsdKrw().then(schedule);
     const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
