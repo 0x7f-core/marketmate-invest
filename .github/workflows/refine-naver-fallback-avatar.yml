@@ -1,57 +1,42 @@
-name: Refine Naver-like fallback avatar
+name: One-time Naver fallback refinement
 
 on:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/refine-naver-fallback-avatar.yml
 
 permissions:
   contents: write
 
 jobs:
-  patch:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Match observed Naver fallback color rule
-        shell: bash
+      - name: Patch fallback avatar rule
         run: |
           python - <<'PY'
           from pathlib import Path
+          p = Path("app/trading-dashboard.tsx")
+          s = p.read_text()
+          old = 'const INSTRUMENT_FALLBACK_COLORS=["#8b4fa4","#4f8a69","#4778ad","#d89a24","#bc3f7a","#ce6530","#6b79a8","#3f8f8a"] as const;\nfunction instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"name">){const seed=`${instrument.market}:${instrument.symbol}:${instrument.name}`;let hash=2166136261;for(let i=0;i<seed.length;i+=1){hash^=seed.charCodeAt(i);hash=Math.imul(hash,16777619);}return INSTRUMENT_FALLBACK_COLORS[(hash>>>0)%INSTRUMENT_FALLBACK_COLORS.length];}'
+          new = '// Observed Naver search results group fallback colors into six recurring hues.\nconst INSTRUMENT_FALLBACK_COLORS=["#cf6530","#dc9a24","#50896a","#4d75a8","#8e4ca4","#be3b7c"] as const;\nfunction instrumentFallbackSeed(instrument:Pick<Instrument,"market"|"symbol"|"name">){const code=normalizeNaverLogoCode(instrument.symbol).replace(/\\.(?:O|K|N|P|A)$/i,"").normalize("NFKC").trim();return code||instrument.name.normalize("NFKC").trim();}\nfunction instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"name">){const seed=instrumentFallbackSeed(instrument);let hash=0;for(let i=0;i<seed.length;i+=1)hash=(Math.imul(hash,31)+seed.charCodeAt(i))|0;const index=((hash%INSTRUMENT_FALLBACK_COLORS.length)+INSTRUMENT_FALLBACK_COLORS.length)%INSTRUMENT_FALLBACK_COLORS.length;return INSTRUMENT_FALLBACK_COLORS[index];}'
+          if old not in s:
+              raise SystemExit("fallback block not found")
+          p.write_text(s.replace(old, new))
 
-          dashboard = Path('app/trading-dashboard.tsx')
-          text = dashboard.read_text()
-          old = '''const INSTRUMENT_FALLBACK_COLORS=["#8b4fa4","#4f8a69","#4778ad","#d89a24","#bc3f7a","#ce6530","#6b79a8","#3f8f8a"] as const;
-function instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"name">){const seed=`${instrument.market}:${instrument.symbol}:${instrument.name}`;let hash=2166136261;for(let i=0;i<seed.length;i+=1){hash^=seed.charCodeAt(i);hash=Math.imul(hash,16777619);}return INSTRUMENT_FALLBACK_COLORS[(hash>>>0)%INSTRUMENT_FALLBACK_COLORS.length];}'''
-          new = '''// Naver fallback avatars visibly use six recurring hues. A Java-style string hash
-// (hash = hash * 31 + char) over the instrument code reproduces the color grouping
-// in the observed Naver search results while keeping each instrument stable.
-const INSTRUMENT_FALLBACK_COLORS=["#cf6530","#dc9a24","#50896a","#4d75a8","#8e4ca4","#be3b7c"] as const;
-function instrumentFallbackSeed(instrument:Pick<Instrument,"market"|"symbol"|"name">){const code=normalizeNaverLogoCode(instrument.symbol).replace(/\\.(?:O|K|N|P|A)$/i,"").normalize("NFKC").trim();return code||instrument.name.normalize("NFKC").trim();}
-function instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"name">){const seed=instrumentFallbackSeed(instrument);let hash=0;for(let i=0;i<seed.length;i+=1)hash=(Math.imul(hash,31)+seed.charCodeAt(i))|0;const index=((hash%INSTRUMENT_FALLBACK_COLORS.length)+INSTRUMENT_FALLBACK_COLORS.length)%INSTRUMENT_FALLBACK_COLORS.length;return INSTRUMENT_FALLBACK_COLORS[index];}'''
-          if old not in text:
-              raise SystemExit('dashboard fallback block not found')
-          dashboard.write_text(text.replace(old, new))
-
-          css = Path('app/globals.css')
-          styles = css.read_text()
-          old_css = '.instrument-logo.fallback{border-color:transparent;color:#fff;font-weight:750;text-align:center;box-shadow:inset 0 0 0 1px #00000008}'
-          new_css = '.instrument-logo.fallback{border-color:transparent;color:#fff;font-weight:700;text-align:center;box-shadow:none}'
-          if old_css not in styles:
-              raise SystemExit('fallback CSS block not found')
-          css.write_text(styles.replace(old_css, new_css))
+          p = Path("app/globals.css")
+          s = p.read_text()
+          old = '.instrument-logo.fallback{border-color:transparent;color:#fff;font-weight:750;text-align:center;box-shadow:inset 0 0 0 1px #00000008}'
+          new = '.instrument-logo.fallback{border-color:transparent;color:#fff;font-weight:700;text-align:center;box-shadow:none}'
+          if old not in s:
+              raise SystemExit("fallback style not found")
+          p.write_text(s.replace(old, new))
           PY
-      - name: Commit source change and remove one-time workflow
-        shell: bash
+      - name: Commit fix
         run: |
           rm .github/workflows/refine-naver-fallback-avatar.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/trading-dashboard.tsx app/globals.css .github/workflows/refine-naver-fallback-avatar.yml
-          git commit -m "fix: align fallback avatar colors with Naver"
+          git commit -m "fix: align fallback avatar rule with Naver"
           git push
-
-# one-time trigger
