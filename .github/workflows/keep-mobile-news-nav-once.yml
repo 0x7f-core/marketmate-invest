@@ -1,0 +1,49 @@
+name: One-time mobile news nav preservation
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep News in mobile bottom navigation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          dashboard = Path('app/trading-dashboard.tsx')
+          text = dashboard.read_text()
+          old_import = 'import { ChevronRight, DoorOpen, Home, LineChart, LogOut, RefreshCw, Search, ShieldCheck, Star, Trash2, Trophy, WalletCards, X } from "lucide-react";'
+          new_import = 'import { ChevronRight, DoorOpen, Home, LineChart, LogOut, Newspaper, RefreshCw, Search, ShieldCheck, Star, Trash2, Trophy, WalletCards, X } from "lucide-react";'
+          if old_import not in text:
+              raise SystemExit('lucide import not found')
+          text = text.replace(old_import, new_import, 1)
+
+          old_nav = '[["home",Home,"홈"],["watchlist",Star,"관심"],["market",LineChart,"시세"],["competition",Trophy,"대회"],["portfolio",WalletCards,"MY"]]'
+          new_nav = '[["home",Home,"홈"],["watchlist",Star,"관심"],["market",LineChart,"시세"],["competition",Trophy,"대회"],["news",Newspaper,"뉴스"],["portfolio",WalletCards,"MY"]]'
+          if old_nav not in text:
+              raise SystemExit('mobile bottom navigation not found')
+          dashboard.write_text(text.replace(old_nav, new_nav, 1))
+
+          smoke = Path('scripts/validate-browser-runtime.mjs')
+          text = smoke.read_text()
+          old = 'assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 5, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);'
+          new = 'assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 6, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);'
+          if old not in text:
+              raise SystemExit('updated mobile nav smoke assertion not found')
+          smoke.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit mobile bottom navigation
+        run: |
+          rm .github/workflows/keep-mobile-news-nav-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/trading-dashboard.tsx scripts/validate-browser-runtime.mjs .github/workflows/keep-mobile-news-nav-once.yml
+          git commit -m "ui: keep News in mobile bottom navigation"
+          git push
