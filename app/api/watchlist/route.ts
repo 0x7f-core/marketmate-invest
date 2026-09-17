@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 import { type Market } from "@/lib/server/market-data";
@@ -53,6 +54,21 @@ function snapshotStatement(item: RefreshedWatchlistQuote) {
     );
 }
 
+async function repairDomesticListings(items: WatchlistRow[]) {
+  const repaired = await Promise.all(items.map(async item => {
+    if (item.market !== "KR") return item;
+    const listing = await getDomesticListingMarket(item.symbol, item.exchange);
+    return listing ? { ...item, exchange: listing } : item;
+  }));
+  const changed = repaired.filter((item, index) => item.market === "KR" && item.exchange !== items[index].exchange);
+  if (changed.length) {
+    await env.DB!.batch(changed.map(item =>
+      env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(item.exchange, `${item.market}:${item.symbol}`),
+    )).catch(() => undefined);
+  }
+  return repaired;
+}
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
@@ -62,7 +78,7 @@ export async function GET(request: Request) {
     const stale = rows.filter(item => !item.receivedAt || item.receivedAt < Date.now() - 15_000).slice(0, 6);
 
     if (!stale.length) {
-      return Response.json({ items: rows }, { headers: { "cache-control": "no-store" } });
+      return Response.json({ items: await repairDomesticListings(rows) }, { headers: { "cache-control": "no-store" } });
     }
 
     const refreshed = await Promise.allSettled(stale.map(async item => {
@@ -73,31 +89,23 @@ export async function GET(request: Request) {
 
     const successful = refreshed.flatMap(entry => entry.status === "fulfilled" && entry.value ? [entry.value] : []);
     if (successful.length) {
-      const statements = successful.flatMap(item => {
-        const instrumentId = `${item.quote.market}:${item.quote.symbol}`;
-        const updates = [snapshotStatement(item)];
-        if (item.quote.market === "KR" && item.quote.venue) {
-          updates.unshift(env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(item.quote.venue, instrumentId));
-        }
-        return updates;
-      });
-      await env.DB!.batch(statements).catch(() => undefined);
+      await env.DB!.batch(successful.map(snapshotStatement)).catch(() => undefined);
     }
 
     const latestById = new Map(successful.map(item => [item.watchlistId, item] as const));
-    const items = rows.map(item => {
+    const refreshedItems = rows.map(item => {
       const refreshedItem = latestById.get(item.id);
       if (!refreshedItem) return item;
       const { quote, receivedAt } = refreshedItem;
       return {
         ...item,
-        exchange: quote.venue ?? item.exchange,
         priceKrwMicros: Math.round(quote.price * quote.exchangeRate * 1_000_000),
         changeRatePpm: Math.round(quote.changeRate * 10_000),
         fxRateMicros: Math.round(quote.exchangeRate * 1_000_000),
         receivedAt,
       };
     });
+    const items = await repairDomesticListings(refreshedItems);
 
     return Response.json({ items }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
@@ -113,10 +121,13 @@ export async function POST(request: Request) {
       return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
     }
     const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
-    const exchange = normalizeSupportedExchange(body.market, body.exchange);
+    let exchange = normalizeSupportedExchange(body.market, body.exchange);
     const currency = body.market === "US" ? "USD" : "KRW";
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !exchange || !body.name.trim() || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
       return Response.json({error:"한국·미국주식과 가상자산만 등록할 수 있습니다."},{status:400});
+    }
+    if (body.market === "KR") {
+      exchange = await getDomesticListingMarket(symbol, exchange) || exchange;
     }
     const instrumentId = `${body.market}:${symbol}`;
     await env.DB!.batch([
