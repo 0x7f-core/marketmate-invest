@@ -350,30 +350,6 @@ function foreignOrder(category: RankingCategory) {
         : category === "down" ? "down" : "marketValue";
 }
 
-async function domesticRanking(category: RankingCategory) {
-  const primary = await naverJson<unknown>(buildNaverPath("/api/domestic/market/stock/default", {
-    tradeType: "KRX", marketType: "ALL", orderType: domesticOrder(category), startIdx: 0, pageSize: 10,
-  }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
-  if (uniqueItems("KR", primary.data).length) return primary;
-
-  // Before the KRX regular session Naver's legacy KRX ranking returns HTTP 200 + [] for
-  // trading value/volume/rise/fall, while the public site continues to show live NXT data.
-  if (category === "tradingValue" || category === "volume") {
-    const v3 = await naverJson<unknown>(buildNaverPath("/api/stockSecurity/individual-stocks/v3/domestic", {
-      listingType: domesticV3ListingType(category), exchangeType: "consolidated", index: 0, size: 10,
-    }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
-    const rows = domesticV3Rows(v3.data, category);
-    if (rows.length) return { ...v3, data: rows };
-  }
-
-  const nxt = await naverJson<unknown>(buildNaverPath("/api/domestic/market/stock/default", {
-    tradeType: "NXT", marketType: "ALL", orderType: domesticOrder(category), startIdx: 0, pageSize: 10,
-  }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
-  if (uniqueItems("KR", nxt.data).length) return nxt;
-
-  return primary;
-}
-
 async function foreignRanking(category: RankingCategory) {
   return naverJson<unknown>(buildNaverPath("/api/foreign/market/stock/global", {
     nation: "usa", tradeType: "ALL", orderType: foreignOrder(category), startIdx: 0, pageSize: 10,
