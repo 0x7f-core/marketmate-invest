@@ -61,9 +61,15 @@ export async function GET(request: Request) {
               c.initial_cash_krw AS initialCashKrw,
               (SELECT COUNT(*) FROM fills f WHERE f.participant_id=p.id) AS fillCount,
               (SELECT COUNT(DISTINCT f.instrument_id) FROM fills f WHERE f.participant_id=p.id) AS tradedInstrumentCount,
-              (SELECT GROUP_CONCAT(recent.symbol, ', ')
-                 FROM (SELECT i2.symbol AS symbol FROM fills f2 JOIN instruments i2 ON i2.id=f2.instrument_id
-                       WHERE f2.participant_id=p.id GROUP BY f2.instrument_id ORDER BY MAX(f2.executed_at) DESC LIMIT 3) recent
+              (SELECT GROUP_CONCAT(holding.label, ', ')
+                 FROM (
+                   SELECT CASE WHEN i2.market='KR' THEN i2.name ELSE i2.symbol END AS label
+                   FROM positions pos2
+                   JOIN instruments i2 ON i2.id=pos2.instrument_id
+                   WHERE pos2.participant_id=p.id AND pos2.quantity_micros>0
+                   ORDER BY pos2.updated_at DESC
+                   LIMIT 3
+                 ) holding
               ) AS recentSymbols,
               COALESCE(SUM(CASE WHEN pos.id IS NOT NULL AND q.price_micros IS NULL THEN 1 ELSE 0 END),0) AS pricingIncomplete,
               p.cash_krw + COALESCE(SUM((pos.quantity_micros / 1000000.0) * (COALESCE(q.price_micros,pos.average_price_micros) / 1000000.0)),0) AS totalAssetKrw
