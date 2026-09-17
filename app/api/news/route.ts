@@ -32,7 +32,13 @@ export async function GET(request: Request) {
     });
     return Response.json(
       { items, source: "NAVER", stale: result.stale },
-      { headers: { "cache-control": "private, max-age=60" } },
+      {
+        headers: {
+          "cache-control": "no-store, no-cache, must-revalidate",
+          pragma: "no-cache",
+          expires: "0",
+        },
+      },
     );
   } catch (error) {
     return apiError(error);
