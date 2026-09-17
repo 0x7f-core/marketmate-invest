@@ -1,4 +1,5 @@
 import { getDomesticListingMarket, normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
+import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 
 export type RankingMarket = "KR" | "US" | "CRYPTO";
@@ -255,46 +256,91 @@ function domesticV3ListingType(category: RankingCategory) {
         : category === "down" ? "changeRateDescDownAll" : "marketCapDesc";
 }
 
-function domesticV3Rows(payload: unknown, category: RankingCategory) {
+type DomesticPriceVenue = "krx" | "nxt";
+
+function asRow(value: unknown): Row | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Row : undefined;
+}
+
+function venueNumber(venue: Row | undefined, keys: string[]) {
+  return venue ? numberValue(venue, keys) : 0;
+}
+
+function domesticV3Rows(
+  payload: unknown,
+  priceVenue: DomesticPriceVenue,
+  aggregateTrading: boolean,
+) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
   const items = (payload as Row).items;
   if (!Array.isArray(items)) return [];
 
-  const metric = (venue: Row | undefined) => {
-    if (!venue) return 0;
-    return category === "volume" ? numberValue(venue, ["tradingVolume", "volume"])
-      : category === "tradingValue" ? numberValue(venue, ["tradingValue", "tradeAmount", "amount"])
-        : category === "marketCap" ? numberValue(venue, ["marketCap", "marketValue"])
-          : Math.abs(numberValue(venue, ["changeRate", "rate"]));
-  };
-
   return items.flatMap(item => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const row = item as Row;
-    const krx = row.krx && typeof row.krx === "object" && !Array.isArray(row.krx) ? row.krx as Row : undefined;
-    const nxt = row.nxt && typeof row.nxt === "object" && !Array.isArray(row.nxt) ? row.nxt as Row : undefined;
-    const krxMetric = metric(krx);
-    const nxtMetric = metric(nxt);
-    const venue = krxMetric > 0 || nxtMetric <= 0 ? (krx ?? nxt) : (nxt ?? krx);
-    if (!venue) return [];
+    const row = asRow(item);
+    if (!row) return [];
+
+    const krx = asRow(row.krx);
+    const nxt = asRow(row.nxt);
+    const preferred = priceVenue === "nxt" ? (nxt ?? krx) : (krx ?? nxt);
+    if (!preferred) return [];
+
+    const volume = aggregateTrading
+      ? venueNumber(krx, ["tradingVolume", "volume"]) + venueNumber(nxt, ["tradingVolume", "volume"])
+      : venueNumber(preferred, ["tradingVolume", "volume"]);
+    const tradingValue = aggregateTrading
+      ? venueNumber(krx, ["tradingValue", "tradeAmount", "amount"]) + venueNumber(nxt, ["tradingValue", "tradeAmount", "amount"])
+      : venueNumber(preferred, ["tradingValue", "tradeAmount", "amount"]);
 
     return [{
       ...row,
-      currentPrice: rowValue(venue, ["currentPrice", "price"]),
-      changePrice: rowValue(venue, ["changePrice"]),
-      changeRate: rowValue(venue, ["changeRate"]),
-      tradingVolume: rowValue(venue, ["tradingVolume", "volume"]),
-      tradingValue: rowValue(venue, ["tradingValue", "tradeAmount", "amount"]),
-      marketCap: rowValue(venue, ["marketCap", "marketValue"]),
+      currentPrice: rowValue(preferred, ["currentPrice", "price"]),
+      changePrice: rowValue(preferred, ["changePrice"]),
+      changeRate: rowValue(preferred, ["changeRate"]),
+      tradingVolume: volume,
+      tradingValue,
+      // Naver exposes market-cap ranking on the KRX basis even while NXT premarket prices are shown.
+      marketCap: rowValue(krx ?? preferred, ["marketCap", "marketValue"]),
     }];
   });
 }
 
-function domesticOrder(category: RankingCategory) {
-  return category === "tradingValue" ? "priceTop"
-    : category === "volume" ? "quantTop"
-      : category === "up" ? "up"
-        : category === "down" ? "down" : "marketSum";
+async function isNxtPremarket() {
+  try {
+    const session = await getCheckedMarketSession("KR");
+    return session.isOpen
+      && session.exchange?.toUpperCase() === "NXT"
+      && session.currentSession?.toLowerCase().includes("pre") === true;
+  } catch {
+    return false;
+  }
+}
+
+async function domesticRanking(category: RankingCategory) {
+  const nxtPremarket = await isNxtPremarket();
+  const aggregateTrading = category === "tradingValue" || category === "volume";
+
+  // Naver parity:
+  // - trading value / volume: KRX + NXT consolidated ranking
+  // - rise / fall: KRX ranking, except NXT premarket uses NXT
+  // - market cap: KRX ranking at all times; during NXT premarket, show NXT price when supported
+  const exchangeType = aggregateTrading
+    ? "consolidated"
+    : category === "marketCap"
+      ? "krx"
+      : nxtPremarket
+        ? "nxt"
+        : "krx";
+
+  const result = await naverJson<unknown>(buildNaverPath("/api/stockSecurity/individual-stocks/v3/domestic", {
+    listingType: domesticV3ListingType(category),
+    exchangeType,
+    index: 0,
+    size: 10,
+  }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
+
+  const priceVenue: DomesticPriceVenue = nxtPremarket ? "nxt" : "krx";
+  const rows = domesticV3Rows(result.data, priceVenue, aggregateTrading);
+  return { ...result, data: rows };
 }
 
 function foreignOrder(category: RankingCategory) {
