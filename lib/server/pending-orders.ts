@@ -61,9 +61,8 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
   const nextAvg = isBuy ? Number((BigInt(oldQty) * BigInt(oldAvg) + BigInt(order.quantityMicros) * BigInt(buyCostPriceKrwMicros)) / BigInt(oldQty + order.quantityMicros)) : (nextQty === 0 ? 0 : oldAvg);
   const grossRealized = !isBuy ? Number((BigInt(order.quantityMicros) * BigInt(priceKrwMicros - oldAvg)) / BigInt(1_000_000_000_000)) : 0;
   const realized = !isBuy ? grossRealized - costs.totalCostKrw : 0;
-  const tradeLedgerAmount = isBuy ? -tradeValueKrw : tradeValueKrw;
-  const tradeBalance = participant!.cashKrw + tradeLedgerAmount;
-  const nextCash = tradeBalance - costs.totalCostKrw;
+  const ledgerAmount = isBuy ? -(tradeValueKrw + costs.totalCostKrw) : tradeValueKrw - costs.totalCostKrw;
+  const nextCash = participant!.cashKrw + ledgerAmount;
   const fillId = crypto.randomUUID();
   const statements = [
     env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, order.participantId, participant!.cashKrw),
@@ -74,12 +73,8 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
       SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?) ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`)
       .bind(crypto.randomUUID(), order.participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
     env.DB!.prepare(`INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at)
-      SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, order.side, tradeLedgerAmount, fillId, tradeBalance, now, fillId),
+      SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, order.side, ledgerAmount, fillId, nextCash, now, fillId),
   ];
-  if (costs.totalCostKrw > 0) {
-    statements.push(env.DB!.prepare(`INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at)
-      SELECT ?,?,'fee',?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, -costs.totalCostKrw, fillId, nextCash, now, fillId));
-  }
   if (quote.market === "KR" && quote.venue) {
     statements.push(env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=? AND EXISTS(SELECT 1 FROM fills WHERE id=?)").bind(quote.venue, instrumentId, fillId));
   }

@@ -7,6 +7,7 @@ import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote, isExecutableTradingQuote } from "@/lib/server/trading-quote";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
+import { calculateTradingCosts } from "@/lib/trading-costs";
 
 type OrderBody = {
   participantId?: string; clientOrderId?: string; market?: Market; symbol?: string;
@@ -124,15 +125,28 @@ export async function POST(request: Request) {
       "SELECT quantity_micros AS quantityMicros,average_price_micros AS averagePriceMicros,realized_pnl_krw AS realizedPnlKrw FROM positions WHERE participant_id=? AND instrument_id=?"
     ).bind(participantId, instrumentId).first<{quantityMicros:number;averagePriceMicros:number;realizedPnlKrw:number}>();
     const reserved = await env.DB!.prepare(`SELECT
-      COALESCE(SUM(CASE WHEN side='buy' THEN (quantity_micros/1000000.0)*(limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0) ELSE 0 END),0) AS cashKrw,
+      COALESCE(SUM(CASE WHEN o.side='buy' THEN
+        (o.quantity_micros/1000000.0)*(o.limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0) *
+        CASE
+          WHEN i.market='US' THEN 1.0007
+          WHEN i.market='CRYPTO' THEN 1.0005
+          WHEN i.market='KR' AND UPPER(i.exchange)='NXT' THEN 1.000145
+          ELSE 1.00015
+        END
+        ELSE 0 END),0) AS cashKrw,
       COALESCE(SUM(CASE WHEN o.side='sell' AND o.instrument_id=? THEN o.quantity_micros ELSE 0 END),0) AS sellQuantityMicros
-      FROM orders o LEFT JOIN quote_snapshots q ON q.instrument_id=o.instrument_id WHERE o.participant_id=? AND o.status='pending'`)
+      FROM orders o JOIN instruments i ON i.id=o.instrument_id
+      LEFT JOIN quote_snapshots q ON q.instrument_id=o.instrument_id
+      WHERE o.participant_id=? AND o.status='pending'`)
       .bind(instrumentId, participantId).first<{cashKrw:number;sellQuantityMicros:number}>();
+    const reservedCashKrw = Math.ceil(Number(reserved?.cashKrw ?? 0));
     const orderCheckValueKrw = body.orderType === "limit"
       ? Number((BigInt(quantityMicros) * BigInt(Math.round(Number(body.limitPrice) * fxRate * 1_000_000)) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000))
       : tradeValueKrw;
+    const orderCheckCosts = calculateTradingCosts({ market: body.market, exchange: activeExchange, side: "buy", tradeValueKrw: orderCheckValueKrw });
+    const orderCheckSettlementKrw = orderCheckValueKrw + orderCheckCosts.totalCostKrw;
     if (!isBuy && (!position || position.quantityMicros - Number(reserved?.sellQuantityMicros ?? 0) < quantityMicros)) return Response.json({ error: "주문 가능한 보유수량이 부족합니다." }, { status: 409 });
-    if (isBuy && participant.cashKrw - Number(reserved?.cashKrw ?? 0) < orderCheckValueKrw) return Response.json({ error: "주문 가능 금액이 부족합니다." }, { status: 409 });
+    if (isBuy && participant.cashKrw - reservedCashKrw < orderCheckSettlementKrw) return Response.json({ error: "수수료를 포함한 주문 가능 금액이 부족합니다." }, { status: 409 });
 
     if (!marketable) {
       await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
@@ -141,25 +155,30 @@ export async function POST(request: Request) {
       return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange } }, { status: 201 });
     }
 
+    const costs = calculateTradingCosts({ market: body.market, exchange: activeExchange, side: body.side!, tradeValueKrw });
     const expectedCash = participant.cashKrw;
-    const nextCash = isBuy ? expectedCash - tradeValueKrw : expectedCash + tradeValueKrw;
+    const ledgerAmount = isBuy ? -(tradeValueKrw + costs.totalCostKrw) : tradeValueKrw - costs.totalCostKrw;
+    const nextCash = expectedCash + ledgerAmount;
     const oldQty = position?.quantityMicros ?? 0;
     const oldAvg = position?.averagePriceMicros ?? 0;
     const nextQty = isBuy ? oldQty + quantityMicros : oldQty - quantityMicros;
+    const buyCostPriceKrwMicros = isBuy && costs.totalCostKrw > 0
+      ? priceKrwMicros + Number((BigInt(costs.totalCostKrw) * 1_000_000_000_000n) / BigInt(quantityMicros))
+      : priceKrwMicros;
     const nextAvg = isBuy
-      ? Number((BigInt(oldQty) * BigInt(oldAvg) + BigInt(quantityMicros) * BigInt(priceKrwMicros)) / BigInt(oldQty + quantityMicros))
+      ? Number((BigInt(oldQty) * BigInt(oldAvg) + BigInt(quantityMicros) * BigInt(buyCostPriceKrwMicros)) / BigInt(oldQty + quantityMicros))
       : (nextQty === 0 ? 0 : oldAvg);
-    const realized = !isBuy
+    const grossRealized = !isBuy
       ? Number((BigInt(quantityMicros) * BigInt(priceKrwMicros - oldAvg)) / BigInt(1_000_000_000_000))
       : 0;
-    const ledgerAmount = isBuy ? -tradeValueKrw : tradeValueKrw;
+    const realized = !isBuy ? grossRealized - costs.totalCostKrw : 0;
 
     const statements = [
       env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, participantId, expectedCash),
       env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
         SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, body.orderType, quantityMicros, limitPriceMicros, quantityMicros, "filled", null, now, now),
       env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
-        SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, participantId, instrumentId, body.side, quantityMicros, nativePriceMicros, fxRateMicros, 0, now, orderId),
+        SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, participantId, instrumentId, body.side, quantityMicros, nativePriceMicros, fxRateMicros, costs.totalCostKrw, now, orderId),
       env.DB!.prepare(`INSERT INTO positions (id,participant_id,instrument_id,quantity_micros,average_price_micros,realized_pnl_krw,updated_at)
         SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)
         ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`).bind(positionId, participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
@@ -172,8 +191,15 @@ export async function POST(request: Request) {
     ];
     const result = await env.DB!.batch(statements);
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
-    await auditLog(request, "order.filled", "order", orderId, user.id, { market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange }).catch(() => undefined);
-    return Response.json({ order: { id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency, exchangeRate: fxRate, exchange: activeExchange, valueKrw: tradeValueKrw, executedAt: now } }, { status: 201 });
+    await auditLog(request, "order.filled", "order", orderId, user.id, {
+      market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange,
+      commissionKrw: costs.commissionKrw, taxKrw: costs.taxKrw, totalCostKrw: costs.totalCostKrw,
+    }).catch(() => undefined);
+    return Response.json({ order: {
+      id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency,
+      exchangeRate: fxRate, exchange: activeExchange, valueKrw: tradeValueKrw, commissionKrw: costs.commissionKrw,
+      taxKrw: costs.taxKrw, totalCostKrw: costs.totalCostKrw, settlementKrw: Math.abs(ledgerAmount), executedAt: now,
+    } }, { status: 201 });
   } catch (error) {
     if (isQuoteUnavailable(error)) {
       return Response.json({ error: "네이버증권 실시간 시세를 확인할 수 없어 주문을 중단했습니다." }, { status: 503, headers: { "retry-after": "30" } });

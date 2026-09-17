@@ -96,17 +96,27 @@ export async function GET(request: Request) {
     const repairedPositions = await repairDomesticListings(positions.results);
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
-              f.fx_rate_micros AS fxRateMicros,
+              f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,
               f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
        WHERE f.participant_id=? ORDER BY f.executed_at DESC LIMIT 100`
     ).bind(participantId).all();
-    const reserved = await env.DB!.prepare(`SELECT COALESCE(SUM((o.quantity_micros/1000000.0)*(o.limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0)),0) AS reservedCashKrw
-      FROM orders o LEFT JOIN quote_snapshots q ON q.instrument_id=o.instrument_id
+    const reserved = await env.DB!.prepare(`SELECT COALESCE(SUM(
+        (o.quantity_micros/1000000.0)*(o.limit_price_micros/1000000.0)*(COALESCE(q.fx_rate_micros,1000000)/1000000.0) *
+        CASE
+          WHEN i.market='US' THEN 1.0007
+          WHEN i.market='CRYPTO' THEN 1.0005
+          WHEN i.market='KR' AND UPPER(i.exchange)='NXT' THEN 1.000145
+          ELSE 1.00015
+        END
+      ),0) AS reservedCashKrw
+      FROM orders o JOIN instruments i ON i.id=o.instrument_id
+      LEFT JOIN quote_snapshots q ON q.instrument_id=o.instrument_id
       WHERE o.participant_id=? AND o.status='pending' AND o.side='buy'`).bind(participantId).first<{reservedCashKrw:number}>();
+    const reservedCashKrw = Math.ceil(Number(reserved?.reservedCashKrw ?? 0));
     const marketValueKrw = repairedPositions.reduce((sum, row) => sum + Number(row.marketValueKrw ?? 0), 0);
     return Response.json({
-      account: { ...account, reservedCashKrw: Number(reserved?.reservedCashKrw ?? 0), availableCashKrw: Math.max(0, Number(account.cashKrw ?? 0) - Number(reserved?.reservedCashKrw ?? 0)), marketValueKrw, totalAssetKrw: Number(account.cashKrw ?? 0) + marketValueKrw },
+      account: { ...account, reservedCashKrw, availableCashKrw: Math.max(0, Number(account.cashKrw ?? 0) - reservedCashKrw), marketValueKrw, totalAssetKrw: Number(account.cashKrw ?? 0) + marketValueKrw },
       positions: repairedPositions,
       fills: fills.results,
     }, { headers: { "cache-control": "no-store" } });
