@@ -18,6 +18,14 @@ function relativeTime(value: number) {
   return `${Math.floor(minutes / 1_440)}일 전`;
 }
 
+function normalizedLink(value: string) {
+  try {
+    return new URL(value, window.location.origin).href;
+  } catch {
+    return value;
+  }
+}
+
 function renderMarketNews(items: NewsItem[]) {
   const panel = document.querySelector<HTMLElement>(".np-home .np-news");
   if (!panel) return;
@@ -27,7 +35,7 @@ function renderMarketNews(items: NewsItem[]) {
     .filter((item, index, all) => all.findIndex(other => other.title === item.title) === index)
     .slice(0, 10);
 
-  const expectedSignature = sorted.map(item => `${item.link}:${item.publishedAt}`).join("|");
+  const expectedSignature = sorted.map(item => `${normalizedLink(item.link)}:${item.publishedAt}`).join("|");
   const currentSignature = Array.from(panel.querySelectorAll<HTMLAnchorElement>(":scope > article > a"))
     .map(anchor => `${anchor.href}:${anchor.parentElement?.dataset.publishedAt ?? ""}`)
     .join("|");
@@ -72,43 +80,41 @@ export default function HomeMarketNews() {
   useEffect(() => {
     let active = true;
     let items: NewsItem[] = [];
-    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let loading = false;
-
-    const patch = () => {
-      if (!active || !document.querySelector(".np-home .np-news")) return;
-      renderMarketNews(items);
-    };
+    let lastLoadedAt = 0;
 
     const load = async () => {
-      if (!active || loading || !document.querySelector(".np-home")) return;
+      if (!active || loading) return;
       loading = true;
       try {
         const response = await fetch("/api/news?market=KR", { cache: "no-store" });
         const data = response.ok ? await response.json() as { items?: NewsItem[] } : null;
         if (!active) return;
         items = data?.items ?? [];
+        lastLoadedAt = Date.now();
         renderMarketNews(items);
       } catch {
         // Keep the last successfully loaded market news.
       } finally {
         loading = false;
-        if (active) refreshTimer = setTimeout(load, 90_000);
       }
     };
 
-    const observer = new MutationObserver(() => {
-      patch();
-      if (!items.length) void load();
-    });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    const tick = () => {
+      if (!active || !document.querySelector(".np-home")) return;
+      if (!items.length || Date.now() - lastLoadedAt >= 90_000) {
+        void load();
+        return;
+      }
+      renderMarketNews(items);
+    };
 
-    patch();
-    void load();
+    const timer = window.setInterval(tick, 1_500);
+    tick();
+
     return () => {
       active = false;
-      observer.disconnect();
-      if (refreshTimer) clearTimeout(refreshTimer);
+      window.clearInterval(timer);
     };
   }, []);
 
