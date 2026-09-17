@@ -7,6 +7,7 @@ import HomeMarketRankingLogos from "./home-market-ranking-logos";
 import HomeMarketRankings from "./home-market-rankings";
 import MarketStatusClosedTime from "./market-status-closed-time";
 import PortfolioBulkSell from "./portfolio-bulk-sell";
+import QuoteIdentityGuard from "./quote-identity-guard";
 import TradingFeeGuide from "./trading-fee-guide";
 import TradingDashboard from "./trading-dashboard";
 
@@ -20,6 +21,7 @@ export default function Home() {
       <DesktopNavLabel />
       <MarketStatusClosedTime />
       <PortfolioBulkSell />
+      <QuoteIdentityGuard />
       <TradingFeeGuide />
       <HomeMarketNews />
       <HomeMarketRankingLogos />
