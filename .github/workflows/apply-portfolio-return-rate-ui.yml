@@ -1,0 +1,119 @@
+name: Apply portfolio return-rate UI
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-portfolio-return-rate-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch trading dashboard
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("app/trading-dashboard.tsx")
+          text = path.read_text(encoding="utf-8")
+
+          def replace_once(old: str, new: str):
+              global text
+              if old not in text:
+                  raise SystemExit(f"Required dashboard pattern not found:\n{old[:180]}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              '''type Fill = {
+            id: string; side: "buy" | "sell"; quantityMicros: number; priceMicros: number; fxRateMicros: number;
+            executedAt: number; market: Market; symbol: string; name: string; currency: string;
+          };''',
+              '''type Fill = {
+            id: string; side: "buy" | "sell"; quantityMicros: number; priceMicros: number; fxRateMicros: number;
+            executedAt: number; market: Market; symbol: string; name: string; currency: string;
+            returnRate?: number | null; returnRateKind?: "current" | "realized";
+          };''',
+          )
+
+          replace_once(
+              'type PositionSortKey = "name" | "quantity" | "averagePrice" | "marketValue" | "unrealizedPnl";',
+              'type PositionSortKey = "name" | "quantity" | "averagePrice" | "marketValue" | "unrealizedPnl" | "returnRate";',
+          )
+
+          replace_once(
+              '''function returnRate(total: number, initial: number) {
+            return initial > 0 ? ((total - initial) / initial) * 100 : 0;
+          }''',
+              '''function returnRate(total: number, initial: number) {
+            return initial > 0 ? ((total - initial) / initial) * 100 : 0;
+          }
+
+          function positionReturnRate(position: Portfolio["positions"][number]) {
+            const costBasisKrw = (position.quantityMicros / 1_000_000) * (position.averagePriceKrwMicros / 1_000_000);
+            return costBasisKrw > 0 ? (Number(position.unrealizedPnlKrw ?? 0) / costBasisKrw) * 100 : 0;
+          }
+
+          function formatReturnRate(value: number | null | undefined) {
+            if (value == null || !Number.isFinite(value)) return "-";
+            return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+          }''',
+          )
+
+          replace_once(
+              '<small className={(position.unrealizedPnlKrw ?? 0) >= 0 ? "up" : "down"}>{formatKrw(position.unrealizedPnlKrw ?? 0)}</small>',
+              '<small className={(position.unrealizedPnlKrw ?? 0) >= 0 ? "up" : "down"}>{formatKrw(position.unrealizedPnlKrw ?? 0)} · {position.currentPriceKrwMicros ? formatReturnRate(positionReturnRate(position)) : "-"}</small>',
+          )
+
+          fill_amount = '<small>{formatKrw(fillValueKrw(fill))}</small>'
+          fill_amount_with_rate = '<small className={fill.returnRate == null ? "" : fill.returnRate >= 0 ? "up" : "down"}>{formatKrw(fillValueKrw(fill))} · {fill.returnRateKind === "realized" ? "실현" : "현재"} {formatReturnRate(fill.returnRate)}</small>'
+          if text.count(fill_amount) < 2:
+              raise SystemExit("Expected both personal and participant fill amount patterns")
+          text = text.replace(fill_amount, fill_amount_with_rate)
+
+          replace_once(
+              'const read=(position:Portfolio["positions"][number])=>{if(positionSortKey==="quantity")return position.quantityMicros;if(positionSortKey==="averagePrice")return position.averagePriceKrwMicros;if(positionSortKey==="marketValue")return Number(position.marketValueKrw??0);return Number(position.unrealizedPnlKrw??0);};',
+              'const read=(position:Portfolio["positions"][number])=>{if(positionSortKey==="quantity")return position.quantityMicros;if(positionSortKey==="averagePrice")return position.averagePriceKrwMicros;if(positionSortKey==="marketValue")return Number(position.marketValueKrw??0);if(positionSortKey==="unrealizedPnl")return Number(position.unrealizedPnlKrw??0);return positionReturnRate(position);};',
+          )
+
+          replace_once(
+              '<option value="unrealizedPnl">평가손익</option></select>',
+              '<option value="unrealizedPnl">평가손익</option><option value="returnRate">수익률</option></select>',
+          )
+
+          replace_once(
+              '<TableHead>평가손익</TableHead></TableRow>',
+              '<TableHead>평가손익</TableHead><TableHead>수익률</TableHead></TableRow>',
+          )
+
+          replace_once(
+              '<TableCell className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatKrw(p.unrealizedPnlKrw??0):"-"}</TableCell></TableRow>',
+              '<TableCell className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatKrw(p.unrealizedPnlKrw??0):"-"}</TableCell><TableCell className={positionReturnRate(p)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatReturnRate(positionReturnRate(p)):"-"}</TableCell></TableRow>',
+          )
+
+          replace_once('colSpan={5} className="empty-cell"', 'colSpan={6} className="empty-cell"')
+
+          replace_once(
+              '<em className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatKrw(p.unrealizedPnlKrw??0):"-"}</em>',
+              '<em className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?`${formatKrw(p.unrealizedPnlKrw??0)} · ${formatReturnRate(positionReturnRate(p))}`:"-"}</em>',
+          )
+
+          path.write_text(text, encoding="utf-8")
+      - name: Verify patch
+        run: |
+          git diff --check
+          grep -q 'option value="returnRate"' app/trading-dashboard.tsx
+          grep -q 'returnRateKind' app/trading-dashboard.tsx
+          grep -q '<TableHead>수익률</TableHead>' app/trading-dashboard.tsx
+      - name: Commit dashboard update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/trading-dashboard.tsx
+          git commit -m "Add return rates to portfolio and fill history"
+          git push origin HEAD:main
