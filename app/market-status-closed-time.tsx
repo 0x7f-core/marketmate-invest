@@ -11,7 +11,7 @@ function isUsDaylightSavingTime() {
 }
 
 function patchClosedMarketTimes() {
-  const usRange = isUsDaylightSavingTime() ? "17:00~08:50" : "18:00~09:50";
+  const usClosedRange = isUsDaylightSavingTime() ? "08:50~17:00" : "09:50~18:00";
 
   document.querySelectorAll<HTMLElement>(".market-status-item").forEach(item => {
     const name = item.querySelector<HTMLElement>(".market-status-name")?.textContent?.trim();
@@ -25,8 +25,8 @@ function patchClosedMarketTimes() {
       session.insertAdjacentElement("afterend", time);
     }
 
-    if (name === "국내") time.textContent = "08:00~20:00";
-    if (name === "미국") time.textContent = usRange;
+    if (name === "국내") time.textContent = "20:00~08:00";
+    if (name === "미국") time.textContent = usClosedRange;
   });
 }
 
