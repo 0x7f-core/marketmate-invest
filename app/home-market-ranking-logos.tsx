@@ -100,6 +100,33 @@ export default function HomeMarketRankingLogos() {
     <style>{`
       .mm-rank-logo>b{position:relative;z-index:0;color:inherit}
       .mm-rank-logo.mm-rank-crypto-logo img{padding:0;background:transparent;object-fit:cover}
+
+      @media(min-width:761px){
+        .mm-market-rankings{container-type:inline-size}
+        .mm-ranking-desktop-head,.mm-ranking-list li{
+          grid-template-columns:42px minmax(150px,1fr) minmax(86px,100px) minmax(64px,80px) minmax(72px,92px) minmax(84px,104px) minmax(84px,104px) 36px!important;
+          padding-left:16px!important;
+          padding-right:16px!important;
+        }
+        .mm-ranking-desktop-head>*,.mm-ranking-list li>*{min-width:0}
+        .mm-rank-price,.mm-rank-rate,.mm-rank-volume,.mm-rank-value,.mm-rank-cap{overflow:hidden;text-overflow:ellipsis}
+
+        @container (max-width:720px){
+          .mm-ranking-desktop-head,.mm-ranking-list li{
+            grid-template-columns:34px minmax(0,1fr) 92px 72px 34px!important;
+            padding-left:14px!important;
+            padding-right:14px!important;
+          }
+          .mm-ranking-desktop-head span:nth-child(5),
+          .mm-ranking-desktop-head span:nth-child(6),
+          .mm-ranking-desktop-head span:nth-child(7),
+          .mm-rank-volume,.mm-rank-value,.mm-rank-cap{display:none!important}
+          .mm-rank-mobile-metric{display:flex!important;min-width:0;align-items:baseline;gap:4px;color:#9299a0;font-size:10px;line-height:1.25;white-space:nowrap}
+          .mm-rank-mobile-metric small{display:inline;overflow:visible;color:#9299a0;font-size:10px}
+          .mm-rank-mobile-metric b{min-width:0;overflow:hidden;text-overflow:ellipsis;color:#9299a0;font-size:10px;font-weight:500}
+          .mm-rank-mobile-metric b.up,.mm-rank-mobile-metric b.down{color:#9299a0!important}
+        }
+      }
     `}</style>
   );
 }
