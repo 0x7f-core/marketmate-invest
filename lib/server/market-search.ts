@@ -1,3 +1,4 @@
+import { normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
@@ -57,6 +58,20 @@ function marketOf(record: Record<string, unknown>): Market | null {
   return null;
 }
 
+function domesticListingExchange(record: Record<string, unknown>) {
+  const listingFields = ["marketType", "marketName", "typeCode", "typeName", "stockExchangeType", "exchangeType", "exchangeName", "exchange"];
+  for (const key of listingFields) {
+    const value = text(record, [key]);
+    const listing = normalizeDomesticListingMarket(value);
+    if (listing) return listing;
+  }
+  for (const key of listingFields) {
+    const normalized = normalizeSupportedExchange("KR", text(record, [key]));
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
 function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const market = marketOf(record);
   if (!market) return null;
@@ -84,9 +99,10 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const nationKind = classifySupportedNation(nation);
   const exchange = market === "CRYPTO"
     ? "UPBIT"
-    : normalizeSupportedExchange(market, exchangeRaw)
-      || (market === "KR" && nationKind === "KR" ? "KRX" : "")
-      || (market === "US" && nationKind === "US" ? "USA" : "");
+    : market === "KR"
+      ? domesticListingExchange(record) || (nationKind === "KR" ? "KRX" : "")
+      : normalizeSupportedExchange(market, exchangeRaw)
+        || (nationKind === "US" ? "USA" : "");
   if (!exchange) return null;
   return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
