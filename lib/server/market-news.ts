@@ -27,22 +27,121 @@ function collect(value: unknown, depth = 0, output: Array<Record<string, unknown
   return output;
 }
 
+const NAVER_NEWS_OFFICES: Record<string, string> = {
+  "001": "연합뉴스",
+  "002": "프레시안",
+  "003": "뉴시스",
+  "005": "국민일보",
+  "006": "미디어오늘",
+  "007": "일다",
+  "008": "머니투데이",
+  "009": "매일경제",
+  "011": "서울경제",
+  "014": "파이낸셜뉴스",
+  "015": "한국경제",
+  "016": "헤럴드경제",
+  "018": "이데일리",
+  "020": "동아일보",
+  "021": "문화일보",
+  "022": "세계일보",
+  "023": "조선일보",
+  "025": "중앙일보",
+  "028": "한겨레",
+  "029": "디지털타임스",
+  "030": "전자신문",
+  "031": "아이뉴스24",
+  "032": "경향신문",
+  "036": "한겨레21",
+  "037": "주간동아",
+  "044": "코리아헤럴드",
+  "047": "오마이뉴스",
+  "050": "한경비즈니스",
+  "052": "YTN",
+  "053": "주간조선",
+  "055": "SBS",
+  "056": "KBS",
+  "057": "MBN",
+  "079": "노컷뉴스",
+  "081": "서울신문",
+  "082": "부산일보",
+  "087": "강원일보",
+  "088": "매일신문",
+  "092": "지디넷코리아",
+  "094": "월간산",
+  "119": "데일리안",
+  "123": "조세일보",
+  "127": "기자협회보",
+  "138": "디지털데일리",
+  "152": "참세상",
+  "214": "MBC",
+  "215": "한국경제TV",
+  "243": "이코노미스트",
+  "262": "신동아",
+  "277": "아시아경제",
+  "293": "블로터",
+  "296": "코메디닷컴",
+  "308": "시사IN",
+  "310": "여성신문",
+  "346": "헬스조선",
+  "353": "중앙SUNDAY",
+  "366": "조선비즈",
+  "374": "SBS Biz",
+  "417": "머니S",
+  "421": "뉴스1",
+  "422": "연합뉴스TV",
+  "437": "JTBC",
+  "448": "TV조선",
+  "449": "채널A",
+  "469": "한국일보",
+  "584": "동아사이언스",
+  "586": "시사저널",
+  "607": "뉴스타파",
+  "629": "더팩트",
+  "640": "코리아중앙데일리",
+  "648": "비즈워치",
+};
+
 const SOURCE_NAME_KEYS = [
   "officeName", "pressName", "mediaName", "publisherName", "providerName", "sourceName",
-  "newsOfficeName", "newsAgencyName", "companyName", "name", "title",
+  "newsOfficeName", "newsAgencyName", "companyName",
 ];
 const SOURCE_CONTAINER_KEYS = ["office", "press", "media", "publisher", "provider", "source", "newsOffice", "newsAgency", "company"];
+const SOURCE_CODE_KEYS = [
+  "oid", "officeId", "officeCode", "pressId", "pressCode", "mediaId", "mediaCode",
+  "publisherId", "publisherCode", "providerId", "providerCode", "sourceId", "sourceCode", "source",
+];
+
+function sourceFromOfficeCode(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const clean = String(value).trim();
+  if (!/^\d{1,3}$/.test(clean)) return "";
+  return NAVER_NEWS_OFFICES[clean.padStart(3, "0")] ?? "";
+}
+
+function cleanSourceName(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const clean = String(value).trim();
+  if (!clean || /^(?:NAVER|네이버증권)$/i.test(clean)) return "";
+  const mapped = sourceFromOfficeCode(clean);
+  if (mapped) return mapped;
+  if (/^\d+$/.test(clean)) return "";
+  return clean;
+}
 
 function sourceValue(value: unknown, depth = 0): string {
   if (depth > 3 || value === null || value === undefined) return "";
-  if (typeof value === "string") {
-    const clean = value.trim();
-    return clean && !/^(?:NAVER|네이버증권)$/i.test(clean) ? clean : "";
-  }
+  if (typeof value === "string" || typeof value === "number") return cleanSourceName(value);
   if (typeof value !== "object" || Array.isArray(value)) return "";
+
   const record = value as Record<string, unknown>;
-  const direct = text(record, SOURCE_NAME_KEYS);
-  if (direct && !/^(?:NAVER|네이버증권)$/i.test(direct)) return direct;
+  for (const key of SOURCE_NAME_KEYS) {
+    const direct = cleanSourceName(record[key]);
+    if (direct) return direct;
+  }
+  for (const key of SOURCE_CODE_KEYS) {
+    const mapped = sourceFromOfficeCode(record[key]);
+    if (mapped) return mapped;
+  }
   for (const key of SOURCE_CONTAINER_KEYS) {
     const nested = sourceValue(record[key], depth + 1);
     if (nested) return nested;
@@ -56,11 +155,14 @@ function sourceValue(value: unknown, depth = 0): string {
 }
 
 function newsSource(record: Record<string, unknown>) {
-  const direct = text(record, [
-    "officeName", "pressName", "mediaName", "publisherName", "providerName", "sourceName",
-    "newsOfficeName", "newsAgencyName", "companyName", "press", "media", "publisher", "provider", "office",
-  ]);
-  if (direct && !/^(?:NAVER|네이버증권)$/i.test(direct)) return direct;
+  for (const key of SOURCE_NAME_KEYS) {
+    const direct = cleanSourceName(record[key]);
+    if (direct) return direct;
+  }
+  for (const key of SOURCE_CODE_KEYS) {
+    const mapped = sourceFromOfficeCode(record[key]);
+    if (mapped) return mapped;
+  }
   for (const key of SOURCE_CONTAINER_KEYS) {
     const nested = sourceValue(record[key]);
     if (nested) return nested;
