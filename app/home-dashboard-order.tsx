@@ -42,12 +42,8 @@ export default function HomeDashboardOrder() {
   const storageKey = useMemo(() => userId ? `marketmate:home-dashboard-order:${userId}` : "", [userId]);
 
   useEffect(() => {
-    if (!target?.isConnected) {
-      setReady(false);
-      return;
-    }
+    if (!target?.isConnected) return;
     let active = true;
-    setReady(false);
     fetch("/api/auth/me", { cache: "no-store" })
       .then(async response => response.ok ? await response.json() as AuthResponse : null)
       .then(result => {
