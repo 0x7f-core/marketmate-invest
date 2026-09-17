@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
+import { getDomesticSecurityClassification } from "@/lib/server/domestic-security-type";
 import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
@@ -155,7 +156,16 @@ export async function POST(request: Request) {
       return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange } }, { status: 201 });
     }
 
-    const costs = calculateTradingCosts({ market: body.market, exchange: activeExchange, side: body.side!, tradeValueKrw });
+    const domesticSecurity = body.market === "KR" && !isBuy
+      ? await getDomesticSecurityClassification(symbol)
+      : null;
+    const costs = calculateTradingCosts({
+      market: body.market,
+      exchange: activeExchange,
+      side: body.side!,
+      tradeValueKrw,
+      securityType: domesticSecurity?.type,
+    });
     const expectedCash = participant.cashKrw;
     const ledgerAmount = isBuy ? -(tradeValueKrw + costs.totalCostKrw) : tradeValueKrw - costs.totalCostKrw;
     const nextCash = expectedCash + ledgerAmount;
@@ -193,12 +203,14 @@ export async function POST(request: Request) {
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
     await auditLog(request, "order.filled", "order", orderId, user.id, {
       market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange,
+      securityType: domesticSecurity?.type, securityTypeSource: domesticSecurity?.source,
       commissionKrw: costs.commissionKrw, taxKrw: costs.taxKrw, totalCostKrw: costs.totalCostKrw,
     }).catch(() => undefined);
     return Response.json({ order: {
       id: orderId, status: "filled", side: body.side, quantity: body.quantity, price: quote.price, currency: quote.currency,
       exchangeRate: fxRate, exchange: activeExchange, valueKrw: tradeValueKrw, commissionKrw: costs.commissionKrw,
-      taxKrw: costs.taxKrw, totalCostKrw: costs.totalCostKrw, settlementKrw: Math.abs(ledgerAmount), executedAt: now,
+      taxKrw: costs.taxKrw, totalCostKrw: costs.totalCostKrw, settlementKrw: Math.abs(ledgerAmount),
+      securityType: domesticSecurity?.type, executedAt: now,
     } }, { status: 201 });
   } catch (error) {
     if (isQuoteUnavailable(error)) {
