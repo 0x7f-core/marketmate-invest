@@ -85,13 +85,26 @@ function marketOpen(id: string) {
   const minutes = Number(part("hour")) * 60 + Number(part("minute"));
   if (!weekday || !Number.isFinite(minutes)) return false;
   if (id === "SPX" || id === "COMP") return minutes >= 9 * 60 + 30 && minutes < 16 * 60;
-  if (id === "USDKRW") return minutes >= 9 * 60 && minutes < 15 * 60 + 30;
   return minutes >= 9 * 60 && minutes < 15 * 60 + 30;
 }
 
-function statusText(id: string) {
+function fxUpdating(series?: Series) {
+  if (!series || series.stale) return false;
+  const timestamp = series.points.at(-1)?.time ?? 0;
+  if (!timestamp) return false;
+  const age = Date.now() - timestamp;
+  return age >= -5 * 60_000 && age <= 30 * 60_000;
+}
+
+function quoteUpdating(id: string, series?: Series) {
+  if (id === "BTC") return true;
+  if (id === "USDKRW") return fxUpdating(series);
+  return marketOpen(id);
+}
+
+function statusText(id: string, series?: Series) {
   if (id === "BTC") return "24시간";
-  if (id === "USDKRW") return marketOpen(id) ? "고시중" : "고시마감";
+  if (id === "USDKRW") return fxUpdating(series) ? "고시중" : "고시마감";
   return marketOpen(id) ? "장중" : "장마감";
 }
 
@@ -123,7 +136,7 @@ function Sparkline({ card, series }: { card: CardQuote; series?: Series }) {
   const points = useMemo(() => {
     const source = (series?.points ?? []).filter(point => Number.isFinite(point.time) && Number.isFinite(point.value) && point.value > 0);
     if (!source.length) return [];
-    if (!marketOpen(card.id) || !card.price) return source;
+    if (!quoteUpdating(card.id, series) || !card.price) return source;
     const last = source.at(-1);
     if (last && Math.abs(last.value - card.price) < Number.EPSILON) return source;
     return [...source, { time: (last?.time ?? 0) + 1, value: card.price }].slice(-500);
@@ -252,7 +265,7 @@ export default function HomeIndexBoard() {
               <strong>{formatPrice(card)}</strong>
               <em>{formatChange(card)}</em>
               <Sparkline card={card} series={cardSeries} />
-              <small>{formatDate(card.id, cardSeries?.points ?? [])}<i />{statusText(card.id)}</small>
+              <small>{formatDate(card.id, cardSeries?.points ?? [])}<i />{statusText(card.id, cardSeries)}</small>
             </button>
           );
         })}
