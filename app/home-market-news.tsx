@@ -62,7 +62,8 @@ function renderMarketNews(items: NewsItem[]) {
     const meta = document.createElement("span");
     meta.textContent = `${item.source} · ${relativeTime(item.publishedAt)}`;
 
-    article.append(link, meta);
+    article.appendChild(link);
+    article.appendChild(meta);
     panel.appendChild(article);
   }
 }
