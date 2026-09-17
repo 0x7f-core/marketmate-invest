@@ -18,11 +18,10 @@ function isQuoteUnavailable(error: unknown) {
 function persistenceStatements(quote: TradingQuote, requestedExchange?: string) {
   const instrumentId = `${quote.market}:${quote.symbol}`;
   const domesticListing = quote.market === "KR" ? normalizeDomesticListingMarket(requestedExchange) : "";
-  const resolvedExchange = quote.market === "KR"
-    ? domesticListing || "KRX"
-    : quote.venue
-      ?? requestedExchange
-      ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
+  const resolvedExchange = quote.venue
+    ?? requestedExchange
+    ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market);
+  const persistedExchange = quote.market === "KR" ? domesticListing || "KRX" : resolvedExchange;
   const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
   const receivedAt = Date.now();
   const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
@@ -37,7 +36,7 @@ function persistenceStatements(quote: TradingQuote, requestedExchange?: string) 
         WHEN excluded.exchange IN ('KOSPI','KOSDAQ','KONEX','KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange
         ELSE instruments.exchange END,
       is_active=1`)
-      .bind(instrumentId, quote.market, quote.symbol, quote.symbol, quote.currency, resolvedExchange),
+      .bind(instrumentId, quote.market, quote.symbol, quote.symbol, quote.currency, persistedExchange),
     env.DB!.prepare(`INSERT INTO quote_snapshots (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
       VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(instrument_id) DO UPDATE SET price_micros=excluded.price_micros,change_micros=excluded.change_micros,
