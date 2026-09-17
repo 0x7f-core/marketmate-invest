@@ -27,6 +27,52 @@ function collect(value: unknown, depth = 0, output: Array<Record<string, unknown
   return output;
 }
 
+const SOURCE_NAME_KEYS = [
+  "officeName", "pressName", "mediaName", "publisherName", "providerName", "sourceName",
+  "newsOfficeName", "newsAgencyName", "companyName", "name", "title",
+];
+const SOURCE_CONTAINER_KEYS = ["office", "press", "media", "publisher", "provider", "source", "newsOffice", "newsAgency", "company"];
+
+function sourceValue(value: unknown, depth = 0): string {
+  if (depth > 3 || value === null || value === undefined) return "";
+  if (typeof value === "string") {
+    const clean = value.trim();
+    return clean && !/^(?:NAVER|네이버증권)$/i.test(clean) ? clean : "";
+  }
+  if (typeof value !== "object" || Array.isArray(value)) return "";
+  const record = value as Record<string, unknown>;
+  const direct = text(record, SOURCE_NAME_KEYS);
+  if (direct && !/^(?:NAVER|네이버증권)$/i.test(direct)) return direct;
+  for (const key of SOURCE_CONTAINER_KEYS) {
+    const nested = sourceValue(record[key], depth + 1);
+    if (nested) return nested;
+  }
+  for (const [key, nestedValue] of Object.entries(record)) {
+    if (!/(?:office|press|media|publisher|provider|source|agency|company)/i.test(key)) continue;
+    const nested = sourceValue(nestedValue, depth + 1);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+function newsSource(record: Record<string, unknown>) {
+  const direct = text(record, [
+    "officeName", "pressName", "mediaName", "publisherName", "providerName", "sourceName",
+    "newsOfficeName", "newsAgencyName", "companyName", "press", "media", "publisher", "provider", "office",
+  ]);
+  if (direct && !/^(?:NAVER|네이버증권)$/i.test(direct)) return direct;
+  for (const key of SOURCE_CONTAINER_KEYS) {
+    const nested = sourceValue(record[key]);
+    if (nested) return nested;
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (!/(?:office|press|media|publisher|provider|source|agency|company)/i.test(key)) continue;
+    const nested = sourceValue(value);
+    if (nested) return nested;
+  }
+  return "네이버증권";
+}
+
 function codeKey(value: string) {
   return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
@@ -97,7 +143,7 @@ function normalize(payload: unknown) {
       title,
       link: articleLink(record, title),
       publishedAt: parsePublishedAt(record),
-      source: text(record, ["officeName", "pressName", "press", "source", "providerName", "mediaName", "publisherName"]) || "네이버증권",
+      source: newsSource(record),
     };
   }).filter((item): item is NewsItem => Boolean(item));
 
