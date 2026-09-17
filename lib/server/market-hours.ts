@@ -146,11 +146,10 @@ function usAfterMarketCloseKst(detail: ReturnType<typeof sessionDetails>) {
 
 function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen || !detail.currentType) return false;
-  if (market === "KR" && isKrMorningBreak()) return false;
+  if (market === "KR") return !isKrMorningBreak();
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
   if (market === "US") return !type.includes("after") || beforeUsAfterMarketCutoff();
-  if (market === "KR" && exchange === "krx" && type.includes("pre")) return false;
   return true;
 }
 
