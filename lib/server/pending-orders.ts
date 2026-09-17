@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { calculateTradingCosts } from "@/lib/trading-costs";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isExecutableTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
 
@@ -40,9 +41,12 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
   const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
   const tradeValueKrw = Number((BigInt(order.quantityMicros) * BigInt(priceKrwMicros) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000));
   const isBuy = order.side === "buy";
+  const executionExchange = quote.venue ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market === "KR" ? "KRX" : "US");
+  const costs = calculateTradingCosts({ market: quote.market, exchange: executionExchange, side: order.side, tradeValueKrw });
+  const buySettlementKrw = tradeValueKrw + costs.totalCostKrw;
   let reason = "";
   if (!participant || participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) reason = "대회가 종료되어 체결되지 않았습니다.";
-  else if (isBuy && participant.cashKrw < tradeValueKrw) reason = "주문 가능 금액이 부족해 체결되지 않았습니다.";
+  else if (isBuy && participant.cashKrw < buySettlementKrw) reason = "수수료를 포함한 주문 가능 금액이 부족해 체결되지 않았습니다.";
   else if (!isBuy && (!position || position.quantityMicros < order.quantityMicros)) reason = "보유수량이 부족해 체결되지 않았습니다.";
   if (reason) {
     await env.DB!.prepare("UPDATE orders SET status='rejected',rejection_reason=?,updated_at=? WHERE id=? AND status='partial'").bind(reason, now, order.id).run();
@@ -51,21 +55,31 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
   const oldQty = position?.quantityMicros ?? 0;
   const oldAvg = position?.averagePriceMicros ?? 0;
   const nextQty = isBuy ? oldQty + order.quantityMicros : oldQty - order.quantityMicros;
-  const nextAvg = isBuy ? Number((BigInt(oldQty) * BigInt(oldAvg) + BigInt(order.quantityMicros) * BigInt(priceKrwMicros)) / BigInt(oldQty + order.quantityMicros)) : (nextQty === 0 ? 0 : oldAvg);
-  const realized = !isBuy ? Number((BigInt(order.quantityMicros) * BigInt(priceKrwMicros - oldAvg)) / BigInt(1_000_000_000_000)) : 0;
-  const nextCash = isBuy ? participant!.cashKrw - tradeValueKrw : participant!.cashKrw + tradeValueKrw;
+  const buyCostPriceKrwMicros = isBuy && costs.totalCostKrw > 0
+    ? priceKrwMicros + Number((BigInt(costs.totalCostKrw) * 1_000_000_000_000n) / BigInt(order.quantityMicros))
+    : priceKrwMicros;
+  const nextAvg = isBuy ? Number((BigInt(oldQty) * BigInt(oldAvg) + BigInt(order.quantityMicros) * BigInt(buyCostPriceKrwMicros)) / BigInt(oldQty + order.quantityMicros)) : (nextQty === 0 ? 0 : oldAvg);
+  const grossRealized = !isBuy ? Number((BigInt(order.quantityMicros) * BigInt(priceKrwMicros - oldAvg)) / BigInt(1_000_000_000_000)) : 0;
+  const realized = !isBuy ? grossRealized - costs.totalCostKrw : 0;
+  const tradeLedgerAmount = isBuy ? -tradeValueKrw : tradeValueKrw;
+  const tradeBalance = participant!.cashKrw + tradeLedgerAmount;
+  const nextCash = tradeBalance - costs.totalCostKrw;
   const fillId = crypto.randomUUID();
   const statements = [
     env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, order.participantId, participant!.cashKrw),
     env.DB!.prepare("UPDATE orders SET status='filled',filled_quantity_micros=quantity_micros,updated_at=? WHERE id=? AND status='partial' AND changes()>0").bind(now, order.id),
     env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
-      SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='filled')`).bind(fillId, order.id, order.participantId, instrumentId, order.side, order.quantityMicros, nativePriceMicros, Math.round(quote.exchangeRate * 1_000_000), 0, now, order.id),
+      SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='filled')`).bind(fillId, order.id, order.participantId, instrumentId, order.side, order.quantityMicros, nativePriceMicros, Math.round(quote.exchangeRate * 1_000_000), costs.totalCostKrw, now, order.id),
     env.DB!.prepare(`INSERT INTO positions (id,participant_id,instrument_id,quantity_micros,average_price_micros,realized_pnl_krw,updated_at)
       SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?) ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`)
       .bind(crypto.randomUUID(), order.participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
     env.DB!.prepare(`INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at)
-      SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, order.side, isBuy ? -tradeValueKrw : tradeValueKrw, fillId, nextCash, now, fillId),
+      SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, order.side, tradeLedgerAmount, fillId, tradeBalance, now, fillId),
   ];
+  if (costs.totalCostKrw > 0) {
+    statements.push(env.DB!.prepare(`INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at)
+      SELECT ?,?,'fee',?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, -costs.totalCostKrw, fillId, nextCash, now, fillId));
+  }
   if (quote.market === "KR" && quote.venue) {
     statements.push(env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=? AND EXISTS(SELECT 1 FROM fills WHERE id=?)").bind(quote.venue, instrumentId, fillId));
   }
