@@ -112,7 +112,7 @@ function enhanceMobileAverage(target: HTMLElement, averageKrw: number, isUs: boo
     line.dataset.mobilePositionAverage = "1";
     line.style.display = "flex";
     line.style.alignItems = "baseline";
-    line.style.gap = "4px";
+    line.style.gap = "2px";
     line.style.marginTop = "3px";
     line.style.fontSize = "10px";
     line.style.lineHeight = "1.25";
@@ -143,7 +143,7 @@ function enhanceMobileAverage(target: HTMLElement, averageKrw: number, isUs: boo
   const sub = line.querySelector<HTMLElement>("[data-mobile-position-average-sub]");
   if (isUs && usdKrw) {
     setText(main, formatUsd(averageKrw / usdKrw));
-    setText(sub, formatKrw(averageKrw));
+    setText(sub, `(${formatKrw(averageKrw)})`);
     if (sub) sub.style.display = "inline";
   } else {
     setText(main, formatKrw(averageKrw));
