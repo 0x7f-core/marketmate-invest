@@ -118,6 +118,32 @@ const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
   else start();
 })();`;
 
+// The competition page is rendered inside a large client dashboard. Keep the
+// displayed rate notice synchronized from one small global enhancer instead of
+// duplicating the rates across multiple responsive layouts.
+const TRADING_FEE_GUIDE = String.raw`(() => {
+  const text = "거래비용: 국내 KRX 0.015% · NXT 0.0145%, 미국주식 0.07%(이벤트 혜택 기준), 가상자산 업비트 KRW 0.05%의 수수료가 매수·매도 모두 적용됩니다. 국내 일반주식은 매도 시 거래세 0.20%가 추가되며 ETF·ETN·ELW는 거래세가 없습니다.";
+
+  const apply = () => {
+    document.querySelectorAll(".trading-guide ul").forEach((list) => {
+      if (!(list instanceof HTMLUListElement) || list.querySelector("[data-trading-fee-guide]")) return;
+      const item = document.createElement("li");
+      item.dataset.tradingFeeGuide = "1";
+      item.textContent = text;
+      list.prepend(item);
+    });
+  };
+
+  const start = () => {
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.body, { childList: true, subtree: true });
+  };
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
+})();`;
+
 // The home page originally showed static implementation notes in the market-status
 // row. Replace them with the same compact, live session summary pattern used by
 // Npay Securities: domestic, U.S., and crypto state in one line, backed by this
@@ -268,6 +294,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: NAVER_CRYPTO_LOGO }} />
         <script dangerouslySetInnerHTML={{ __html: US_ETF_ORDER_BUTTON_LABEL }} />
+        <script dangerouslySetInnerHTML={{ __html: TRADING_FEE_GUIDE }} />
         <script dangerouslySetInnerHTML={{ __html: LIVE_MARKET_STATUS_BOARD }} />
       </head>
       <body className="antialiased">{children}</body>
