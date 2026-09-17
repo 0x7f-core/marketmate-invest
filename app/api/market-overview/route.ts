@@ -1,12 +1,11 @@
-import { apiError, requireUser } from "@/lib/server/auth";
 import { getMarketOverview } from "@/lib/server/market-data";
 import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
-import { enforceRateLimit } from "@/lib/server/safety";
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const user = await requireUser(request);
-    await enforceRateLimit(request, "market_overview", 60, 60_000, user.id);
+    // Market overview is public read-only data. Do not gate it behind the user
+    // session/rate-limit tables: that added several D1 round trips to the hottest
+    // polling path before any market data could be returned.
     const [resolved, fx] = await Promise.all([
       getMarketOverview(),
       getNaverUsdKrwRate().catch(() => null),
@@ -32,9 +31,19 @@ export async function GET(request: Request) {
     const pollingInterval = Math.max(2_000, Math.min(120_000, intervals.length ? Math.min(...intervals) : 10_000));
     return Response.json(
       { quotes, pollingInterval, partial: quotes.length !== resolved.length, staleOmitted: resolved.length !== quotes.length, timestamp: Date.now() },
-      { headers: { "cache-control": "private, max-age=2" } },
+      {
+        headers: {
+          // The browser polling loop still decides freshness from pollingInterval.
+          // A tiny shared cache lets concurrent page loads reuse the same response
+          // without creating a visible stale-data window.
+          "cache-control": "public, max-age=1, s-maxage=2, stale-while-revalidate=2",
+        },
+      },
     );
-  } catch (error) {
-    return apiError(error);
+  } catch {
+    return Response.json(
+      { error: "시장 지표를 불러오지 못했습니다." },
+      { status: 503, headers: { "cache-control": "no-store", "retry-after": "5" } },
+    );
   }
 }
