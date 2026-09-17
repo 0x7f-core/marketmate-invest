@@ -2,9 +2,9 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
-import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { type Market } from "@/lib/server/market-data";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
-import { getTradingQuote } from "@/lib/server/trading-quote";
+import { getTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
 
 const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency,
   q.price_micros AS priceKrwMicros,q.change_rate_ppm AS changeRatePpm,q.fx_rate_micros AS fxRateMicros,q.received_at AS receivedAt
@@ -24,6 +24,35 @@ type WatchlistRow = {
   receivedAt?: number | null;
 };
 
+type RefreshedWatchlistQuote = { watchlistId: string; quote: TradingQuote; receivedAt: number };
+
+function snapshotStatement(item: RefreshedWatchlistQuote) {
+  const { quote, receivedAt } = item;
+  const instrumentId = `${quote.market}:${quote.symbol}`;
+  const sourceTimestamp = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1_000 : quote.timestamp;
+  return env.DB!.prepare(`INSERT INTO quote_snapshots
+    (instrument_id,price_micros,change_micros,change_rate_ppm,fx_rate_micros,source,source_timestamp,received_at)
+    VALUES (?,?,?,?,?,?,?,?)
+    ON CONFLICT(instrument_id) DO UPDATE SET
+      price_micros=excluded.price_micros,
+      change_micros=excluded.change_micros,
+      change_rate_ppm=excluded.change_rate_ppm,
+      fx_rate_micros=excluded.fx_rate_micros,
+      source=excluded.source,
+      source_timestamp=excluded.source_timestamp,
+      received_at=excluded.received_at`)
+    .bind(
+      instrumentId,
+      Math.round(quote.price * quote.exchangeRate * 1_000_000),
+      Math.round(quote.change * quote.exchangeRate * 1_000_000),
+      Math.round(quote.changeRate * 10_000),
+      Math.round(quote.exchangeRate * 1_000_000),
+      quote.source,
+      sourceTimestamp,
+      receivedAt,
+    );
+}
+
 export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
@@ -39,28 +68,34 @@ export async function GET(request: Request) {
     const refreshed = await Promise.allSettled(stale.map(async item => {
       const quote = await getTradingQuote(item.market, item.symbol, item.exchange);
       if (quote.stale) return null;
-      if (item.market === "KR" && quote.venue) {
-        await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, item.id).run().catch(() => undefined);
-      }
-      await persistQuoteSnapshot(quote).catch(() => undefined);
-      return { id: item.id, quote };
+      return { watchlistId: item.id, quote, receivedAt: Date.now() } satisfies RefreshedWatchlistQuote;
     }));
 
-    const latestById = new Map(refreshed.flatMap(entry => {
-      if (entry.status !== "fulfilled" || !entry.value) return [];
-      return [[entry.value.id, entry.value.quote] as const];
-    }));
+    const successful = refreshed.flatMap(entry => entry.status === "fulfilled" && entry.value ? [entry.value] : []);
+    if (successful.length) {
+      const statements = successful.flatMap(item => {
+        const instrumentId = `${item.quote.market}:${item.quote.symbol}`;
+        const updates = [snapshotStatement(item)];
+        if (item.quote.market === "KR" && item.quote.venue) {
+          updates.unshift(env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(item.quote.venue, instrumentId));
+        }
+        return updates;
+      });
+      await env.DB!.batch(statements).catch(() => undefined);
+    }
 
+    const latestById = new Map(successful.map(item => [item.watchlistId, item] as const));
     const items = rows.map(item => {
-      const quote = latestById.get(item.id);
-      if (!quote) return item;
+      const refreshedItem = latestById.get(item.id);
+      if (!refreshedItem) return item;
+      const { quote, receivedAt } = refreshedItem;
       return {
         ...item,
         exchange: quote.venue ?? item.exchange,
         priceKrwMicros: Math.round(quote.price * quote.exchangeRate * 1_000_000),
         changeRatePpm: Math.round(quote.changeRate * 10_000),
         fxRateMicros: Math.round(quote.exchangeRate * 1_000_000),
-        receivedAt: quote.timestamp,
+        receivedAt,
       };
     });
 
