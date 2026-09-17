@@ -150,6 +150,10 @@ function patchCompetitionTradingGuide() {
 }
 
 function patchCryptoSourceLabels() {
+  document.querySelectorAll<HTMLSelectElement>('select[aria-label="보유종목 정렬 기준"] option').forEach(option => {
+    if (option.textContent === "종목 이름") option.textContent = "종목명";
+  });
+
   document.querySelectorAll(".np-market-status span").forEach(element => {
     if (element.textContent?.includes("가상자산 · 네이버증권 24시간 시세")) {
       replaceTextNode(element, "가상자산 · 네이버증권 24시간 시세", "가상자산 · UPBIT 24시간 시세");
