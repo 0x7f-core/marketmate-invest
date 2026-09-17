@@ -86,8 +86,8 @@ function enhanceDesktopAverage(cell: HTMLTableCellElement, averageKrw: number, u
 
     const main = document.createElement("strong");
     main.dataset.positionAverageMain = "1";
-    main.style.fontSize = "13px";
-    main.style.fontWeight = "700";
+    main.style.fontSize = "12px";
+    main.style.fontWeight = "400";
     main.style.color = "#171c22";
 
     const sub = document.createElement("small");
