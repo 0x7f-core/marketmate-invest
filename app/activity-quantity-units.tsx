@@ -24,7 +24,7 @@ export default function ActivityQuantityUnits() {
     const schedulePatch = () => {
       if (scheduled) return;
       scheduled = true;
-      requestAnimationFrame(() => {
+      queueMicrotask(() => {
         scheduled = false;
         patchActivityQuantityUnits();
       });
