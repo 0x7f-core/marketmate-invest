@@ -248,7 +248,7 @@ function JoinDialog({ onChanged }: { onChanged: () => void }) {
       name, initialCashKrw: Number(cash), startsAt: now - 1_000, endsAt,
     };
     const response = await fetch(mode === "join" ? "/api/competitions/join" : "/api/competitions", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+      method: "POST", headers: { "content-type":"application/json" }, body: JSON.stringify(payload),
     });
     const result = await response.json() as { error?: string; competition?: { inviteCode?: string } };
     if (!response.ok) return setStatus(result.error ?? "처리하지 못했습니다.");
@@ -403,6 +403,7 @@ export default function TradingDashboard(){
   const restoreRemembered=(next:Market)=>{const remembered=lastViewed[next];if(!remembered?.symbol||!remembered.name)return false;setSelected(quoteFromInstrument(remembered));return true;};
   const openMarketView=()=>{const next=lastViewed[lastViewedMarket]?.symbol?lastViewedMarket:selected.market;if(next!==market)setMarketSession(LOADING_MARKET_SESSION);setMarket(next);restoreRemembered(next);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
   const chooseInstrument=(instrument:Instrument)=>{if(instrument.market!==market)setMarketSession(LOADING_MARKET_SESSION);rememberInstrument(instrument);setMarket(instrument.market);setSelected(quoteFromInstrument(instrument));setView("market");window.scrollTo({top:0,behavior:"smooth"});};
+  useEffect(()=>{const onOpenInstrument=(event:Event)=>{const detail=(event as CustomEvent<Instrument>).detail;if(!detail||!["KR","US","CRYPTO"].includes(detail.market)||!detail.symbol||!detail.name||!detail.exchange||!["KRW","USD"].includes(detail.currency))return;const normalized:Instrument={market:detail.market,symbol:detail.symbol,name:detail.name,exchange:detail.exchange,currency:detail.currency};if(normalized.market!==market)setMarketSession(LOADING_MARKET_SESSION);setLastViewedMarket(normalized.market);setLastViewed(current=>{const next={...current,[normalized.market]:normalized};if(auth&&auth!=="loading"){try{window.localStorage.setItem(`marketmate:last-viewed:${auth.id}`,JSON.stringify({lastMarket:normalized.market,instruments:next}));}catch{}}return next;});setMarket(normalized.market);setSelected({...normalized,price:0,change:0,rate:0,exchangeRate:1});setView("market");window.scrollTo({top:0,behavior:"smooth"});};window.addEventListener("marketmate:open-instrument",onOpenInstrument);return()=>window.removeEventListener("marketmate:open-instrument",onOpenInstrument);},[auth,market]);
   const changeMarket=(next:Market)=>{if(next!==market)setMarketSession(LOADING_MARKET_SESSION);setMarket(next);if(!restoreRemembered(next)&&selected.market!==next)setSelected(DEFAULTS[next]);setLastViewedMarket(next);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
   const logout=async()=>{await fetch("/api/auth/logout",{method:"POST"});setAuth(null);};
   const selectedInWatchlist=watchlist.some(item=>item.market===selected.market&&item.symbol===selected.symbol);
