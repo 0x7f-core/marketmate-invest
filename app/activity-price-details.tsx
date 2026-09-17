@@ -32,9 +32,14 @@ type ParticipantActivity = {
 type Portfolio = {
   fills: Fill[];
 };
+type MarketOverview = {
+  quotes?: Array<{ id?: string; price?: number }>;
+};
 
 const USD_KRW_CACHE_KEY = "marketmate:usdkrw:last";
+const FAST_PRICE_EVENT = "marketmate:fast-price-data";
 const responseCache = new Map<string, { expiresAt: number; promise: Promise<unknown | null> }>();
+const latestApiUrls = new Map<string, string>();
 let usdKrw = 0;
 
 function formatKrw(value: number) {
@@ -70,6 +75,16 @@ function readStoredUsdKrw() {
   }
 }
 
+function rememberUsdKrw(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return;
+  usdKrw = value;
+  try {
+    window.localStorage.setItem(USD_KRW_CACHE_KEY, String(value));
+  } catch {
+    // localStorage can be unavailable in restricted browser modes.
+  }
+}
+
 async function warmUsdKrw() {
   if (usdKrw > 0) return usdKrw;
   usdKrw = readStoredUsdKrw();
@@ -77,16 +92,53 @@ async function warmUsdKrw() {
   try {
     const response = await fetch("/api/market-overview", { cache: "no-store" });
     if (!response.ok) return 0;
-    const payload = await response.json() as { quotes?: Array<{ id?: string; price?: number }> };
+    const payload = await response.json() as MarketOverview;
     const rate = Number(payload.quotes?.find(item => item.id === "USDKRW")?.price ?? 0);
-    if (Number.isFinite(rate) && rate > 0) usdKrw = rate;
+    rememberUsdKrw(rate);
   } catch {
     // Price details can still render in KRW when the FX warm-up fails.
   }
   return usdKrw;
 }
 
+function requestUrl(input: RequestInfo | URL) {
+  try {
+    if (typeof input === "string") return new URL(input, window.location.href);
+    if (input instanceof URL) return input;
+    return new URL(input.url, window.location.href);
+  } catch {
+    return null;
+  }
+}
+
+function captureJsonResponse(url: URL, response: Response, onReady: () => void) {
+  const pathname = url.pathname;
+  if (!["/api/portfolio", "/api/participants/activity", "/api/market-overview"].includes(pathname)) return;
+
+  const key = `${pathname}${url.search}`;
+  const promise = response.clone().json()
+    .then((payload: unknown) => {
+      if (pathname === "/api/market-overview") {
+        const overview = payload as MarketOverview;
+        const rate = Number(overview.quotes?.find(item => item.id === "USDKRW")?.price ?? 0);
+        if (rate > 0) rememberUsdKrw(rate);
+        window.dispatchEvent(new CustomEvent(FAST_PRICE_EVENT, { detail: { pathname, usdKrw: rate } }));
+      } else {
+        window.dispatchEvent(new CustomEvent(FAST_PRICE_EVENT, { detail: { pathname } }));
+      }
+      onReady();
+      return payload;
+    })
+    .catch(() => null);
+
+  latestApiUrls.set(pathname, key);
+  responseCache.set(key, { expiresAt: Date.now() + 5_000, promise });
+}
+
 function latestApiUrl(pathname: string) {
+  const captured = latestApiUrls.get(pathname);
+  if (captured) return captured;
+
   const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     try {
@@ -107,7 +159,7 @@ function loadJson<T>(url: string) {
   const promise = fetch(url, { cache: "no-store" })
     .then(async response => response.ok ? await response.json() as T : null)
     .catch(() => null);
-  responseCache.set(url, { expiresAt: now + 1_000, promise });
+  responseCache.set(url, { expiresAt: now + 2_000, promise });
   return promise;
 }
 
@@ -178,27 +230,46 @@ export default function ActivityPriceDetails() {
     let scheduled = false;
     let active = true;
 
+    const runPatch = () => {
+      if (!active) return;
+      void Promise.all([patchMyFillPrices(), patchParticipantPrices()]);
+    };
+
     const schedulePatch = () => {
       if (!active || scheduled) return;
       scheduled = true;
-      requestAnimationFrame(() => {
+      queueMicrotask(() => {
         scheduled = false;
-        void Promise.all([patchMyFillPrices(), patchParticipantPrices()]);
+        runPatch();
       });
     };
 
     usdKrw = readStoredUsdKrw();
-    void warmUsdKrw().then(schedulePatch);
+
+    const originalFetch = window.fetch.bind(window);
+    const wrappedFetch: typeof window.fetch = async (input, init) => {
+      const response = await originalFetch(input, init);
+      const url = requestUrl(input);
+      if (url && response.ok) captureJsonResponse(url, response, schedulePatch);
+      return response;
+    };
+    window.fetch = wrappedFetch;
+
     schedulePatch();
+    if (!usdKrw) void warmUsdKrw().then(schedulePatch);
 
     const observer = new MutationObserver(schedulePatch);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     const interval = window.setInterval(schedulePatch, 15_000);
+    const onFastData = () => schedulePatch();
+    window.addEventListener(FAST_PRICE_EVENT, onFastData);
 
     return () => {
       active = false;
       observer.disconnect();
       window.clearInterval(interval);
+      window.removeEventListener(FAST_PRICE_EVENT, onFastData);
+      if (window.fetch === wrappedFetch) window.fetch = originalFetch;
     };
   }, []);
 
