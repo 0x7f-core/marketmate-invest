@@ -34,7 +34,7 @@ function persistenceStatements(quote: TradingQuote, requestedExchange?: string) 
       VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET currency=excluded.currency,
       exchange=CASE
         WHEN instruments.market='KR' AND instruments.exchange IN ('KOSPI','KOSDAQ','KONEX') AND excluded.exchange IN ('KRX','NXT') THEN instruments.exchange
-        WHEN excluded.exchange IN ('KOSPI','KOSDAQ','KONEX','KRX','NXT','NAS','NYS','AMS','NAVER','UPBIT') THEN excluded.exchange
+        WHEN excluded.exchange IN ('KOSPI','KOSDAQ','KONEX','KRX','NXT','NAS','NYS','AMS','ARCA','CBOE','OTC','NAVER','UPBIT') THEN excluded.exchange
         ELSE instruments.exchange END,
       is_active=1`)
       .bind(instrumentId, quote.market, quote.symbol, quote.symbol, quote.currency, persistedExchange),
