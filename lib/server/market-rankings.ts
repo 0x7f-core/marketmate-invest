@@ -32,6 +32,16 @@ export type MarketRankingResult = {
   pollingInterval: number;
 };
 
+export type PopularStockMarket = "KR" | "US";
+export type PopularStocksResult = {
+  market: PopularStockMarket;
+  items: MarketRankingItem[];
+  source: "NAVER";
+  fetchedAt: number;
+  stale: boolean;
+  pollingInterval: number;
+};
+
 type Row = Record<string, unknown>;
 
 const CATEGORY_SET = new Set<RankingCategory>(["tradingValue", "volume", "up", "down", "marketCap"]);
@@ -351,6 +361,70 @@ async function cryptoRanking(category: RankingCategory) {
   return naverJson<unknown>(buildNaverPath("/api/coin/rank/UPBIT", {
     sortType, page: 1, pageSize: category === "volume" ? 100 : 10,
   }), { ttlMs: 15_000, staleMs: 5 * 60_000 });
+}
+
+
+function aggregatePopularRows(payload: unknown, market: PopularStockMarket) {
+  const root = asRow(payload);
+  const rawItems = Array.isArray(payload)
+    ? payload
+    : root && Array.isArray(root.items)
+      ? root.items
+      : [];
+
+  return rawItems.flatMap(raw => {
+    const row = asRow(raw);
+    if (!row) return [];
+    const price = asRow(row.price);
+    const venue = market === "KR" ? (asRow(row.krx) ?? asRow(row.nxt)) : undefined;
+    return [{ ...row, ...(venue ?? {}), ...(price ?? {}) }];
+  });
+}
+
+async function popularAggregate(market: PopularStockMarket) {
+  if (market === "KR") {
+    return naverJson<unknown>(buildNaverPath("/api/stockSecurity/aggregate/domesticStock", {
+      type: "popular",
+      exchangeType: "KRX",
+      size: 10,
+    }), { ttlMs: 30_000, staleMs: 5 * 60_000 });
+  }
+  return naverJson<unknown>(buildNaverPath("/api/stockSecurity/aggregate/foreignPopularStock", {
+    size: 10,
+  }), { ttlMs: 30_000, staleMs: 5 * 60_000 });
+}
+
+async function legacyPopular(market: PopularStockMarket) {
+  return naverJson<unknown>(buildNaverPath("/api/domestic/market/searchTop", {
+    nationType: market === "KR" ? "KOR" : "USA",
+    startIdx: 0,
+    pageSize: 10,
+  }), { ttlMs: 30_000, staleMs: 5 * 60_000 });
+}
+
+export async function getPopularStocks(market: PopularStockMarket): Promise<PopularStocksResult> {
+  let result = await popularAggregate(market);
+  let rows = aggregatePopularRows(result.data, market);
+  let normalized = uniqueItems(market, rows.length ? rows : result.data);
+
+  if (!normalized.length) {
+    result = await legacyPopular(market);
+    normalized = uniqueItems(market, result.data);
+  }
+
+  let items = normalized.slice(0, 10).map((item, index) => ({ ...item, rank: index + 1 }));
+  if (market === "US") items = await enrichUsMetadata(items);
+  if (market === "KR") items = await enrichDomesticMarkets(items);
+  if (!items.length) throw new Error("NAVER_POPULAR_STOCKS_EMPTY");
+
+  return {
+    market,
+    items,
+    source: "NAVER",
+    fetchedAt: result.fetchedAt,
+    stale: result.stale,
+    pollingInterval: 30_000,
+  };
 }
 
 export async function getMarketRanking(market: RankingMarket, categoryInput: string): Promise<MarketRankingResult> {
