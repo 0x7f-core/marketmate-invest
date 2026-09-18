@@ -1,5 +1,5 @@
 import { apiError, requireUser } from "@/lib/server/auth";
-import type { Market } from "@/lib/server/market-data";
+import type { DomesticTradingVenue, Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { getResponsiveMarketSession } from "@/lib/server/market-session-ui";
 import { enforceRateLimit } from "@/lib/server/safety";
@@ -11,8 +11,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const market = url.searchParams.get("market") as Market | null;
     if (!market || !["KR", "US", "CRYPTO"].includes(market)) return Response.json({ error: "시장을 확인해주세요." }, { status: 400 });
-    const live = url.searchParams.get("live") === "1";
-    const session = live ? await getCheckedMarketSession(market) : await getResponsiveMarketSession(market);
+    const rawVenue = url.searchParams.get("venue")?.toUpperCase();
+    const venue = market === "KR" && (rawVenue === "KRX" || rawVenue === "NXT") ? rawVenue as DomesticTradingVenue : undefined;
+    const live = url.searchParams.get("live") === "1" || Boolean(venue);
+    const session = live ? await getCheckedMarketSession(market, venue) : await getResponsiveMarketSession(market);
     return Response.json({ market, ...session }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return apiError(error);
