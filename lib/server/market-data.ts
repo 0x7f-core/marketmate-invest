@@ -532,6 +532,7 @@ export type MarketIndexDetail = MarketIndexQuote & {
   cashSell?: number;
   send?: number;
   receive?: number;
+  chartImages?: Partial<Record<"1M" | "3M" | "1Y", string>>;
 };
 
 export function isTrackedMarketIndexId(value: string): value is TrackedMarketIndexId {
@@ -682,7 +683,9 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
     };
   }
 
-  const history = await trackedIndexHistory(meta, "1Y").catch(() => ({ points: [] as ChartPoint[], stale: false }));
+  const history = meta.kind === "fx"
+    ? { points: [] as ChartPoint[], stale: false }
+    : await trackedIndexHistory(meta, "1Y").catch(() => ({ points: [] as ChartPoint[], stale: false }));
   const latest = history.points.at(-1);
   const high52Week = history.points.length ? Math.max(...history.points.map(point => point.high)) : 0;
   const low52Week = history.points.length ? Math.min(...history.points.map(point => point.low)) : 0;
@@ -706,6 +709,7 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
     cashSell: fxDetail?.cashSell,
     send: fxDetail?.send,
     receive: fxDetail?.receive,
+    chartImages: fxDetail?.chartImages,
   };
 }
 
