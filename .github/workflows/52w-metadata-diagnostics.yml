@@ -13,18 +13,12 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          for url in             'https://m.stock.naver.com/front-api/stock/domestic/integration?code=005930&endType=stock'             'https://m.stock.naver.com/front-api/stock/domestic/basic?code=005930&endType=stock'
-          do
-            echo "===== $url ====="
-            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://m.stock.naver.com/' -A 'Mozilla/5.0' "$url" || true)
+          probe() {
+            echo "===== $1 ====="
+            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://m.stock.naver.com/' -A 'Mozilla/5.0' "$2" || true)
             echo "HTTP $code"
-            python3 - <<'PY'
-import json
-try:
-    data=json.load(open('/tmp/b'))
-    print(json.dumps(data,ensure_ascii=False)[:50000])
-except Exception:
-    print(open('/tmp/b',encoding='utf-8',errors='ignore').read()[:50000])
-PY
+            head -c 50000 /tmp/b || true
             echo
-          done
+          }
+          probe integration 'https://m.stock.naver.com/front-api/stock/domestic/integration?code=005930&endType=stock'
+          probe basic 'https://m.stock.naver.com/front-api/stock/domestic/basic?code=005930&endType=stock'
