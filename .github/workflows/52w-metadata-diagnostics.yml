@@ -13,11 +13,28 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          for url in             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=day&stockExchangeType=NXT'             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=day&tradeType=NXT'             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=day&exchangeType=NXT'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&stockExchangeType=NXT'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&tradeType=NXT'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&exchangeType=NXT'
-          do
-            echo "===== $url ====="
-            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0' "$url" || true)
-            echo "HTTP $code"
-            head -c 1200 /tmp/b || true
-            echo
-          done
+          curl -sS --max-time 25 -A 'Mozilla/5.0' 'https://stock.naver.com/domestic/stock/005930' -o /tmp/page
+          python3 - <<'PY' > /tmp/scripts
+          import re
+          t=open('/tmp/page',encoding='utf-8',errors='ignore').read()
+          for u in dict.fromkeys(re.findall(r'<script[^>]+src="([^"]+\.js[^"]*)"',t)):
+              if u.startswith('/'): u='https://stock.naver.com'+u
+              print(u.replace('&amp;','&'))
+          PY
+          echo "scripts $(wc -l </tmp/scripts)"
+          n=0
+          while IFS= read -r url; do
+            n=$((n+1))
+            curl -sS --max-time 15 -A 'Mozilla/5.0' "$url" -o /tmp/chunk || continue
+            if grep -Eq 'NXT|nxt' /tmp/chunk && grep -Eq 'chart|Chart' /tmp/chunk; then
+              echo "===== MATCH $n $url ====="
+              python3 - <<'PY'
+          import re
+          t=open('/tmp/chunk',encoding='utf-8',errors='ignore').read()
+          for needle in ['NXT','stockExchangeType','exchangeType','tradeType','codeType','chart/domestic','securityService/chart']:
+              for m in list(re.finditer(needle,t))[:8]:
+                  i=m.start()
+                  print('\n--',needle,'--\n',t[max(0,i-700):i+1300])
+          PY
+            fi
+          done < /tmp/scripts
