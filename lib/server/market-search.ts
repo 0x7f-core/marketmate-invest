@@ -10,7 +10,14 @@ import type { Market, SearchInstrument } from "@/lib/server/market-data";
 const HANGUL_INITIALS = ["ᄀ","ᄁ","ᄂ","ᄃ","ᄄ","ᄅ","ᄆ","ᄇ","ᄈ","ᄉ","ᄊ","ᄋ","ᄌ","ᄍ","ᄎ","ᄏ","ᄐ","ᄑ","ᄒ"] as const;
 const DOMESTIC_INITIAL_PAGE_SIZE = 100;
 const DOMESTIC_INITIAL_MAX_PAGES = 40;
-const DOMESTIC_INITIAL_BATCH_SIZE = 4;
+const DOMESTIC_INITIAL_BATCH_SIZE = 12;
+const DOMESTIC_INITIAL_CATALOG_TTL_MS = 6 * 60 * 60_000;
+const DOMESTIC_INITIAL_QUERY_TTL_MS = 30 * 60_000;
+
+type DomesticInitialCatalog = { instruments: SearchInstrument[]; stale: boolean };
+let domesticInitialCatalogCache: (DomesticInitialCatalog & { expiresAt: number }) | null = null;
+let domesticInitialCatalogInflight: Promise<DomesticInitialCatalog> | null = null;
+const domesticInitialQueryCache = new Map<string, { expiresAt: number; instruments: SearchInstrument[]; stale: boolean }>();
 
 function compactSearchText(value: string) {
   return value.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("en-US");
@@ -30,6 +37,11 @@ function syllableInitialIndex(char: string) {
 
 function hasHangulInitialQuery(value: string) {
   return [...compactSearchText(value)].some(char => queryInitialIndex(char) >= 0);
+}
+
+function isPureHangulInitialQuery(value: string) {
+  const chars = [...compactSearchText(value)];
+  return chars.length > 0 && chars.every(char => queryInitialIndex(char) >= 0);
 }
 
 function literalPrefixBeforeInitial(value: string) {
@@ -102,10 +114,79 @@ function domesticCatalogTotalCount(payload: unknown) {
   return Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
-async function searchDomesticInitialCatalog(query: string) {
+async function fetchDomesticCatalogPage(index: number) {
+  return naverJson<unknown>(
+    buildNaverPath("/api/stockSecurity/individual-stocks/v3/domestic", {
+      listingType: "tradingValueDesc",
+      exchangeType: "consolidated",
+      index,
+      size: DOMESTIC_INITIAL_PAGE_SIZE,
+    }),
+    { ttlMs: DOMESTIC_INITIAL_CATALOG_TTL_MS, staleMs: 24 * 60 * 60_000, timeoutMs: 8_000 },
+  );
+}
+
+function collectDomesticCatalogPage(
+  response: Awaited<ReturnType<typeof naverJson<unknown>>>,
+  output: Map<string, SearchInstrument>,
+) {
+  for (const raw of domesticCatalogRows(response.data)) {
+    const item = domesticCatalogItem(raw);
+    if (item) output.set(`${item.market}:${item.symbol}`, item);
+  }
+}
+
+async function loadDomesticInitialCatalog(): Promise<DomesticInitialCatalog> {
+  const now = Date.now();
+  if (domesticInitialCatalogCache && domesticInitialCatalogCache.expiresAt > now) {
+    return domesticInitialCatalogCache;
+  }
+  if (domesticInitialCatalogInflight) return domesticInitialCatalogInflight;
+
+  domesticInitialCatalogInflight = (async () => {
+    const unique = new Map<string, SearchInstrument>();
+    let stale = false;
+    const first = await fetchDomesticCatalogPage(0);
+    stale ||= first.stale;
+    collectDomesticCatalogPage(first, unique);
+
+    const totalCount = domesticCatalogTotalCount(first.data);
+    const pageLimit = totalCount
+      ? Math.min(DOMESTIC_INITIAL_MAX_PAGES, Math.ceil(totalCount / DOMESTIC_INITIAL_PAGE_SIZE))
+      : domesticCatalogHasNext(first.data) ? DOMESTIC_INITIAL_MAX_PAGES : 1;
+
+    for (let index = 1; index < pageLimit; index += DOMESTIC_INITIAL_BATCH_SIZE) {
+      const indexes = Array.from(
+        { length: Math.min(DOMESTIC_INITIAL_BATCH_SIZE, pageLimit - index) },
+        (_, offset) => index + offset,
+      );
+      const batch = await Promise.allSettled(indexes.map(fetchDomesticCatalogPage));
+      let fulfilled = 0;
+      for (const entry of batch) {
+        if (entry.status !== "fulfilled") continue;
+        fulfilled += 1;
+        stale ||= entry.value.stale;
+        collectDomesticCatalogPage(entry.value, unique);
+      }
+      if (!fulfilled) break;
+    }
+
+    const catalog = { instruments: [...unique.values()], stale };
+    domesticInitialCatalogCache = { ...catalog, expiresAt: Date.now() + DOMESTIC_INITIAL_CATALOG_TTL_MS };
+    return catalog;
+  })().finally(() => {
+    domesticInitialCatalogInflight = null;
+  });
+
+  return domesticInitialCatalogInflight;
+}
+
+async function searchDomesticInitialCatalogFast(query: string) {
   const matches = new Map<string, SearchInstrument>();
   let stale = false;
-  const addPage = (response: Awaited<ReturnType<typeof naverJson<unknown>>>) => {
+  const first = await fetchDomesticCatalogPage(0);
+  stale ||= first.stale;
+  const addMatches = (response: Awaited<ReturnType<typeof naverJson<unknown>>>) => {
     stale ||= response.stale;
     for (const raw of domesticCatalogRows(response.data)) {
       const item = domesticCatalogItem(raw);
@@ -113,18 +194,8 @@ async function searchDomesticInitialCatalog(query: string) {
       matches.set(`${item.market}:${item.symbol}`, item);
     }
   };
-  const fetchPage = (index: number) => naverJson<unknown>(
-    buildNaverPath("/api/stockSecurity/individual-stocks/v3/domestic", {
-      listingType: "tradingValueDesc",
-      exchangeType: "consolidated",
-      index,
-      size: DOMESTIC_INITIAL_PAGE_SIZE,
-    }),
-    { ttlMs: 6 * 60 * 60_000, staleMs: 24 * 60 * 60_000, timeoutMs: 8_000 },
-  );
+  addMatches(first);
 
-  const first = await fetchPage(0);
-  addPage(first);
   const totalCount = domesticCatalogTotalCount(first.data);
   const pageLimit = totalCount
     ? Math.min(DOMESTIC_INITIAL_MAX_PAGES, Math.ceil(totalCount / DOMESTIC_INITIAL_PAGE_SIZE))
@@ -135,17 +206,43 @@ async function searchDomesticInitialCatalog(query: string) {
       { length: Math.min(DOMESTIC_INITIAL_BATCH_SIZE, pageLimit - index) },
       (_, offset) => index + offset,
     );
-    const batch = await Promise.allSettled(indexes.map(fetchPage));
+    const batch = await Promise.allSettled(indexes.map(fetchDomesticCatalogPage));
     let fulfilled = 0;
     for (const entry of batch) {
       if (entry.status !== "fulfilled") continue;
       fulfilled += 1;
-      addPage(entry.value);
+      addMatches(entry.value);
     }
     if (!fulfilled) break;
   }
 
   return { instruments: [...matches.values()], stale };
+}
+
+async function searchDomesticInitialCatalog(query: string) {
+  const key = compactSearchText(query);
+  const cached = domesticInitialQueryCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+  if (cached) domesticInitialQueryCache.delete(key);
+
+  const pureInitial = isPureHangulInitialQuery(query);
+  const result = pureInitial && [...key].length === 1
+    ? await searchDomesticInitialCatalogFast(query)
+    : (() => loadDomesticInitialCatalog().then(catalog => ({
+        instruments: catalog.instruments.filter(item => koreanPatternIndex(item.name, query) >= 0),
+        stale: catalog.stale,
+      })))();
+
+  const resolved = await result;
+  if (domesticInitialQueryCache.size >= 128) {
+    const oldest = domesticInitialQueryCache.keys().next().value as string | undefined;
+    if (oldest) domesticInitialQueryCache.delete(oldest);
+  }
+  domesticInitialQueryCache.set(key, {
+    ...resolved,
+    expiresAt: Date.now() + DOMESTIC_INITIAL_QUERY_TTL_MS,
+  });
+  return resolved;
 }
 
 function text(record: Record<string, unknown>, keys: string[]) {
@@ -275,6 +372,7 @@ function searchRank(item: SearchInstrument, query: string) {
 
 export async function searchNaverMarket(query: string, market?: Market) {
   const initialSearch = market !== "US" && market !== "CRYPTO" && hasHangulInitialQuery(query);
+  const pureInitialSearch = initialSearch && isPureHangulInitialQuery(query);
   const target = market === "CRYPTO" ? "coin" : market === "KR" || market === "US" ? "stock" : "stock,coin";
   const literalPrefix = initialSearch ? literalPrefixBeforeInitial(query) : "";
   const upstreamQueries = initialSearch ? (literalPrefix ? [literalPrefix] : []) : [query];
@@ -290,14 +388,6 @@ export async function searchNaverMarket(query: string, market?: Market) {
   ]));
 
   const successful = requests.filter((entry): entry is PromiseFulfilledResult<Awaited<ReturnType<typeof naverJson<unknown>>>> => entry.status === "fulfilled");
-  const catalog = initialSearch
-    ? await searchDomesticInitialCatalog(query).catch(() => null)
-    : null;
-  if (!successful.length && !catalog) {
-    const rejected = requests.find((entry): entry is PromiseRejectedResult => entry.status === "rejected");
-    throw rejected?.reason ?? new Error("NAVER_SEARCH_UNAVAILABLE");
-  }
-
   const unique = new Map<string, SearchInstrument>();
   for (const response of successful) {
     for (const record of collect(response.value.data)) {
@@ -307,10 +397,24 @@ export async function searchNaverMarket(query: string, market?: Market) {
       unique.set(`${item.market}:${item.symbol}`, item);
     }
   }
-  if (catalog) {
-    for (const item of catalog.instruments) {
-      if (!market || market === "KR") unique.set(`${item.market}:${item.symbol}`, item);
+
+  // Mixed queries such as "대한ㄱ" usually resolve from Naver autocomplete using
+  // the literal prefix ("대한"). Only fall back to the full domestic catalog
+  // when autocomplete found no matching domestic row. Pure initial queries have
+  // no literal prefix, so they use the cached catalog directly.
+  let catalog: Awaited<ReturnType<typeof searchDomesticInitialCatalog>> | null = null;
+  if (initialSearch && (pureInitialSearch || unique.size === 0)) {
+    catalog = await searchDomesticInitialCatalog(query).catch(() => null);
+    if (catalog) {
+      for (const item of catalog.instruments) {
+        if (!market || market === "KR") unique.set(`${item.market}:${item.symbol}`, item);
+      }
     }
+  }
+
+  if (!successful.length && !catalog && !initialSearch) {
+    const rejected = requests.find((entry): entry is PromiseRejectedResult => entry.status === "rejected");
+    throw rejected?.reason ?? new Error("NAVER_SEARCH_UNAVAILABLE");
   }
 
   const ranked = [...unique.values()]
