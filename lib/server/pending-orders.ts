@@ -14,7 +14,9 @@ export async function matchPendingOrders(quote: TradingQuote) {
 
   // Most quote refreshes have no executable pending order. Check D1 first so
   // normal price rendering does not pay for an additional market-session lookup.
-  const domesticVenue = quote.market === "KR" ? quote.venue ?? "KRX" : null;
+  const domesticVenue = quote.market === "KR"
+    ? (quote.venue === "NXT" ? "NXT" : "KRX")
+    : null;
   const candidate = await env.DB.prepare(`SELECT id FROM orders
     WHERE instrument_id=? AND status='pending'
       AND (? IS NULL OR COALESCE(venue,'KRX')=?)
