@@ -13,17 +13,18 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          probe() {
-            name="$1"; url="$2"
-            echo "===== $name ====="
-            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-52w-Diagnostic/1.0' "$url" || true)
-            echo "HTTP $code"
-            head -c 12000 /tmp/b || true
-            echo
-          }
-          probe daily_default 'https://stock.naver.com/api/stockSecurity/items/v2/domestic/005930/daily-prices?size=5'
-          probe daily_nxt_exchange 'https://stock.naver.com/api/stockSecurity/items/v2/domestic/005930/daily-prices?size=5&exchangeType=NXT'
-          probe sise_nxt_trade 'https://stock.naver.com/api/domestic/detail/005930/siseDay?pageSize=5&tradeType=NXT'
-          probe sise_nxt_code 'https://stock.naver.com/api/domestic/detail/005930/siseDay?pageSize=5&codeType=NXT'
-          probe crypto_days_naive 'https://stock.naver.com/api/coin/candle/UPBIT/KRW/BTC/days?from=2025-09-18T00%3A00%3A00&to=2026-09-18T23%3A59%3A59'
-          probe crypto_weeks_naive 'https://stock.naver.com/api/coin/candle/UPBIT/KRW/BTC/weeks?from=2025-09-18T00%3A00%3A00&to=2026-09-18T23%3A59%3A59'
+          curl -sS --max-time 30 -H 'accept: text/html,*/*' -A 'Mozilla/5.0' 'https://stock.naver.com/domestic/stock/005930' -o /tmp/page
+          echo '===== page matches ====='
+          python3 - <<'PY'
+          text=open('/tmp/page',encoding='utf-8',errors='ignore').read()
+          for needle in ['52주 최고','highPriceOf52Weeks','week52HighPrice','380000','374500']:
+              print('\n--',needle,'--')
+              start=0
+              found=0
+              while found<8:
+                  i=text.find(needle,start)
+                  if i<0: break
+                  print(text[max(0,i-400):i+900])
+                  start=i+len(needle)
+                  found+=1
+          PY
