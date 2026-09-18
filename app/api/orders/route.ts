@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticSecurityClassification } from "@/lib/server/domestic-security-type";
 import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
-import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
+import { persistQuoteSnapshot, type DomesticTradingVenue, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
@@ -13,13 +13,13 @@ import { calculateTradingCosts } from "@/lib/trading-costs";
 type OrderBody = {
   participantId?: string; clientOrderId?: string; market?: Market; symbol?: string;
   name?: string; exchange?: string; side?: "buy" | "sell"; orderType?: "market" | "limit";
-  quantity?: number; limitPrice?: number;
+  quantity?: number; limitPrice?: number; venue?: DomesticTradingVenue;
 };
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 function isQuoteUnavailable(error: unknown) {
-  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
+  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE", "NAVER_NXT_UNAVAILABLE"].includes(error.message));
 }
 
 export async function GET(request: Request) {
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     if (!allowed) throw new Error("FORBIDDEN");
     const result = await env.DB!.prepare(`SELECT o.id,o.side,o.order_type AS orderType,o.quantity_micros AS quantityMicros,
       o.limit_price_micros AS limitPriceMicros,o.filled_quantity_micros AS filledQuantityMicros,o.status,o.rejection_reason AS rejectionReason,
-      o.created_at AS createdAt,o.updated_at AS updatedAt,i.market,i.symbol,i.name,i.currency
+      o.venue,o.created_at AS createdAt,o.updated_at AS updatedAt,i.market,i.symbol,i.name,i.currency
       FROM orders o JOIN instruments i ON i.id=o.instrument_id WHERE o.participant_id=? ORDER BY o.created_at DESC LIMIT 100`).bind(participantId).all();
     return Response.json({ orders: result.results }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
@@ -63,8 +63,10 @@ export async function POST(request: Request) {
     const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
     const name = typeof body.name === "string" ? body.name.trim() : "";
     let exchange = typeof body.exchange === "string" ? body.exchange.trim() : body.exchange === undefined ? undefined : "";
+    const requestedVenue = body.venue === "KRX" || body.venue === "NXT" ? body.venue : undefined;
     if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !name || name.length > 80 ||
         (exchange !== undefined && (!exchange || exchange.length > 40 || /[\u0000-\u001F\u007F]/.test(exchange))) ||
+        (body.venue !== undefined && !requestedVenue) || (requestedVenue && body.market !== "KR") ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
         !["market", "limit"].includes(body.orderType ?? "") || !Number.isFinite(body.quantity) || Number(body.quantity) <= 0 || Number(body.quantity) > 1_000_000 ||
         (body.orderType === "limit" && (!Number.isFinite(body.limitPrice) || Number(body.limitPrice) <= 0))) {
@@ -93,9 +95,15 @@ export async function POST(request: Request) {
     if (participant.status !== "active" || now < participant.startsAt || now > participant.endsAt) {
       return Response.json({ error: "현재 주문 가능한 대회가 아닙니다." }, { status: 409 });
     }
-    const marketSession = await getCheckedMarketSession(body.market);
+    const marketSession = await getCheckedMarketSession(body.market, body.market === "KR" ? requestedVenue : undefined);
     if (!marketSession.isOpen) return Response.json({ error: marketSession.notice }, { status: 409 });
-    const quote = await getTradingQuote(body.market, symbol, exchange, marketSession);
+    const quote = await getTradingQuote(
+      body.market,
+      symbol,
+      exchange,
+      marketSession,
+      body.market === "KR" ? requestedVenue : undefined,
+    );
     const sourceTime = quote.timestamp < 1_000_000_000_000 ? quote.timestamp * 1000 : quote.timestamp;
     if (!isExecutableTradingQuote(quote, now)) return Response.json({ error: "네이버증권 시세가 지연되어 주문을 중단했습니다." }, { status: 503 });
     const fxRate = quote.exchangeRate;
@@ -116,10 +124,17 @@ export async function POST(request: Request) {
     const limitPriceMicros = body.orderType === "limit" ? Math.round(Number(body.limitPrice) * 1_000_000) : null;
     const marketable = body.orderType === "market" || (isBuy ? nativePriceMicros <= Number(limitPriceMicros) : nativePriceMicros >= Number(limitPriceMicros));
     const activeExchange = quote.venue ?? exchange ?? body.market;
+    const executionVenue = body.market === "KR" && (activeExchange === "KRX" || activeExchange === "NXT") ? activeExchange : null;
+    const instrumentExchange = exchange ?? (body.market === "CRYPTO" ? "UPBIT" : body.market);
 
     await env.DB!.prepare(
-      "INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1) ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,exchange=excluded.exchange,is_active=1"
-    ).bind(instrumentId, body.market, symbol, name, quote.currency, activeExchange).run();
+      `INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1)
+       ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,
+       exchange=CASE
+         WHEN instruments.market='KR' AND instruments.exchange IN ('KOSPI','KOSDAQ','KONEX') THEN instruments.exchange
+         ELSE excluded.exchange
+       END,is_active=1`
+    ).bind(instrumentId, body.market, symbol, name, quote.currency, instrumentExchange).run();
     await persistQuoteSnapshot(quote);
 
     const position = await env.DB!.prepare(
@@ -131,7 +146,7 @@ export async function POST(request: Request) {
         CASE
           WHEN i.market='US' THEN 1.0007
           WHEN i.market='CRYPTO' THEN 1.0005
-          WHEN i.market='KR' AND UPPER(i.exchange)='NXT' THEN 1.000145
+          WHEN i.market='KR' AND UPPER(COALESCE(o.venue,i.exchange))='NXT' THEN 1.000145
           ELSE 1.00015
         END
         ELSE 0 END),0) AS cashKrw,
@@ -150,8 +165,8 @@ export async function POST(request: Request) {
     if (isBuy && participant.cashKrw - reservedCashKrw < orderCheckSettlementKrw) return Response.json({ error: "수수료를 포함한 주문 가능 금액이 부족합니다." }, { status: 409 });
 
     if (!marketable) {
-      await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, "limit", quantityMicros, limitPriceMicros, now, now).run();
+      await env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,venue,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,0,'pending',NULL,?,?)`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, "limit", executionVenue, quantityMicros, limitPriceMicros, now, now).run();
       await auditLog(request, "order.pending", "order", orderId, user.id, { market: body.market, symbol, side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange }).catch(() => undefined);
       return Response.json({ order: { id: orderId, status: "pending", side: body.side, quantity: body.quantity, limitPrice: body.limitPrice, exchange: activeExchange } }, { status: 201 });
     }
@@ -185,10 +200,10 @@ export async function POST(request: Request) {
 
     const statements = [
       env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, participantId, expectedCash),
-      env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, body.orderType, quantityMicros, limitPriceMicros, quantityMicros, "filled", null, now, now),
-      env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
-        SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, participantId, instrumentId, body.side, quantityMicros, nativePriceMicros, fxRateMicros, costs.totalCostKrw, now, orderId),
+      env.DB!.prepare(`INSERT INTO orders (id,client_order_id,participant_id,instrument_id,side,order_type,venue,quantity_micros,limit_price_micros,filled_quantity_micros,status,rejection_reason,created_at,updated_at)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE changes()>0`).bind(orderId, clientOrderId, participantId, instrumentId, body.side, body.orderType, executionVenue, quantityMicros, limitPriceMicros, quantityMicros, "filled", null, now, now),
+      env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,venue,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
+        SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=?)`).bind(fillId, orderId, participantId, instrumentId, body.side, executionVenue, quantityMicros, nativePriceMicros, fxRateMicros, costs.totalCostKrw, now, orderId),
       env.DB!.prepare(`INSERT INTO positions (id,participant_id,instrument_id,quantity_micros,average_price_micros,realized_pnl_krw,updated_at)
         SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)
         ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`).bind(positionId, participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
@@ -202,7 +217,7 @@ export async function POST(request: Request) {
     const result = await env.DB!.batch(statements);
     if ((result[0].meta.changes ?? 0) !== 1) return Response.json({ error: "자산이 변경되어 주문을 다시 확인해주세요." }, { status: 409 });
     await auditLog(request, "order.filled", "order", orderId, user.id, {
-      market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange,
+      market: body.market, symbol, side: body.side, orderType: body.orderType, quantity: body.quantity, exchange: activeExchange, venue: executionVenue,
       securityType: domesticSecurity?.type, securityTypeSource: domesticSecurity?.source,
       commissionKrw: costs.commissionKrw, taxKrw: costs.taxKrw, totalCostKrw: costs.totalCostKrw,
     }).catch(() => undefined);
