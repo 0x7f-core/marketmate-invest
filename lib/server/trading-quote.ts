@@ -44,6 +44,7 @@ function newerQuote(base: TradingQuote, candidate: TradingQuote | null) {
   return {
     ...base,
     ...candidate,
+    referencePrice: candidate.referencePrice ?? base.referencePrice,
     open: candidate.open ?? base.open,
     high: candidate.high ?? base.high,
     low: candidate.low ?? base.low,
