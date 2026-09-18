@@ -284,6 +284,46 @@ async function main() {
     assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 6, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);
     console.log("PASS mobile shell + nav + no root overflow");
 
+    const mobileQuoteLayout = await client.evaluate(`(() => {
+      const price = document.querySelector('.np-price-domestic');
+      const priceMain = document.querySelector('.np-price-main');
+      const venue = document.querySelector('.np-domestic-venue-switch');
+      const stats = [...document.querySelectorAll('.np-quote .np-stats > span')];
+      const datedLabels = [...document.querySelectorAll('.np-quote .np-stat-label')];
+      if (!price || !priceMain || !venue || stats.length !== 8) return null;
+      const p = price.getBoundingClientRect();
+      const m = priceMain.getBoundingClientRect();
+      const v = venue.getBoundingClientRect();
+      const boxes = stats.map(node => node.getBoundingClientRect());
+      return {
+        priceText: price.textContent || '',
+        sideBySide: v.left > m.left && v.top < m.bottom && v.bottom > m.top,
+        withinPriceRow: v.left >= p.left && v.right <= p.right,
+        rowTops: boxes.map(box => Math.round(box.top)),
+        volumeTop: Math.round(boxes[6].top),
+        tradingValueTop: Math.round(boxes[7].top),
+        tradingValueWidth: Math.round(boxes[7].width),
+        volumeWidth: Math.round(boxes[6].width),
+        datedLabelBorders: datedLabels.map(node => getComputedStyle(node).borderRightWidth),
+        datedLabelOffsets: datedLabels.map((node, index) => {
+          const cell = stats[index + 4]?.getBoundingClientRect();
+          const label = node.getBoundingClientRect();
+          return cell ? Math.round((label.left - cell.left) * 10) / 10 : 999;
+        })
+      };
+    })()`);
+    assert(mobileQuoteLayout, "Mobile domestic quote layout metrics unavailable");
+    assert(!mobileQuoteLayout.priceText.includes('현재가·거래 기준'), "Legacy domestic venue label is still visible");
+    assert(!/\\b(?:KRX|NXT) 현재가\\b/.test(mobileQuoteLayout.priceText), "Legacy KRX/NXT current-price caption is still visible");
+    assert(mobileQuoteLayout.sideBySide && mobileQuoteLayout.withinPriceRow, `Current price and KRX/NXT selector are not on one row: ${JSON.stringify(mobileQuoteLayout)}`);
+    const quoteRows = new Set(mobileQuoteLayout.rowTops);
+    assert(quoteRows.size === 4, `Mobile quote stats should be 2 columns x 4 rows: ${JSON.stringify(mobileQuoteLayout)}`);
+    assert(Math.abs(mobileQuoteLayout.volumeTop - mobileQuoteLayout.tradingValueTop) <= 1, `Trading value is not beside volume: ${JSON.stringify(mobileQuoteLayout)}`);
+    assert(Math.abs(mobileQuoteLayout.volumeWidth - mobileQuoteLayout.tradingValueWidth) <= 2, `Trading value cell width differs from volume: ${JSON.stringify(mobileQuoteLayout)}`);
+    assert(mobileQuoteLayout.datedLabelBorders.every(value => value === '0px'), `52-week labels still have vertical dividers: ${JSON.stringify(mobileQuoteLayout)}`);
+    assert(mobileQuoteLayout.datedLabelOffsets.every(value => value >= 8 && value <= 12), `52-week labels are not left-aligned with other stat labels: ${JSON.stringify(mobileQuoteLayout)}`);
+    console.log("PASS mobile price/venue row + 2x4 stats + 52-week label alignment");
+
     assert(await client.evaluate(visibleExpression(".np-mobile-search-launch")), "Mobile instrument search launcher is not visible");
     const openedMobileSearch = await client.evaluate(`(() => {
       const button = document.querySelector('.np-mobile-search-launch');
