@@ -4,6 +4,7 @@ import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { annotateFillReturns } from "@/lib/server/fill-returns";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getTradingQuote } from "@/lib/server/trading-quote";
+import { getUsListingExchange, normalizeUsListingExchange } from "@/lib/server/us-listing-exchange";
 
 type StalePositionQuote = {
   id: string;
@@ -67,13 +68,20 @@ async function refreshPortfolioQuote(instrument: StalePositionQuote, refreshStar
   }
 }
 
-async function repairDomesticListings(items: PositionRow[]) {
+async function repairListingExchanges(items: PositionRow[]) {
   const repaired = await Promise.all(items.map(async item => {
-    if (item.market !== "KR") return item;
-    const listing = await getDomesticListingMarket(item.symbol, item.exchange);
-    return listing ? { ...item, exchange: listing } : item;
+    if (item.market === "KR") {
+      const listing = await getDomesticListingMarket(item.symbol, item.exchange);
+      return listing ? { ...item, exchange: listing } : item;
+    }
+    if (item.market === "US") {
+      const normalized = normalizeUsListingExchange(item.exchange);
+      const listing = normalized || await getUsListingExchange(item.symbol, item.exchange);
+      return listing ? { ...item, exchange: listing } : item;
+    }
+    return item;
   }));
-  const changed = repaired.filter((item, index) => item.market === "KR" && item.exchange !== items[index].exchange);
+  const changed = repaired.filter((item, index) => item.exchange !== items[index].exchange);
   if (changed.length) {
     await env.DB!.batch(changed.map(item =>
       env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(item.exchange, `${item.market}:${item.symbol}`),
@@ -111,7 +119,7 @@ export async function GET(request: Request) {
        LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
        WHERE pos.participant_id=? AND pos.quantity_micros>0 ORDER BY i.market,i.name`
     ).bind(participantId).all<PositionRow>();
-    const repairedPositions = await repairDomesticListings(positions.results);
+    const repairedPositions = await repairListingExchanges(positions.results);
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.venue,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,
