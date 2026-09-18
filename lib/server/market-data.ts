@@ -245,7 +245,7 @@ async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"
   );
   const snapshotPromise = naverJson<unknown>(
     `/api/stockSecurity/items/v2/domestic/${encodeURIComponent(symbol)}/price-snapshot`,
-    { ttlMs: 7_000, staleMs: 60_000 },
+    { ttlMs: 60_000, staleMs: 10 * 60_000 },
   ).catch(() => null);
 
   const [result, snapshotResult] = await Promise.all([pollingPromise, snapshotPromise]);
