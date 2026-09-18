@@ -199,7 +199,36 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
     return label;
   };
 
+  const domesticSessionTimes = {
+    KRX: {
+      preOpenClosingPrice: ["08:40", "08:50"],
+      openingAuction: ["08:50", "09:00"],
+      regularMarket: ["09:00", "15:20"],
+      closingAuction: ["15:20", "15:30"],
+      regularMarketClosing: ["15:30", "15:40"],
+      afterHoursClosingPrice: ["15:40", "16:00"],
+      afterMarket: ["16:00", "20:00"],
+      afterMarketClosing: ["20:00", "08:40"],
+      closed: ["20:00", "08:40"],
+    },
+    NXT: {
+      preMarket: ["08:00", "08:50"],
+      preMarketClosing: ["08:50", "09:00"],
+      regularMarket: ["09:00", "15:20"],
+      regularMarketClosing: ["15:20", "15:40"],
+      afterMarket: ["15:40", "20:00"],
+      afterMarketClosing: ["20:00", "08:00"],
+      closed: ["20:00", "08:00"],
+    },
+  };
+
   const timeText = (market, status) => {
+    if (market === "KR") {
+      const exchange = String(status?.exchange || "KRX").toUpperCase();
+      const session = String(status?.currentSession || "");
+      const range = domesticSessionTimes[exchange]?.[session];
+      if (Array.isArray(range) && range.length === 2) return range[0] + "~" + range[1];
+    }
     const open = clock(status?.openTimeKst);
     const close = clock(status?.closeTimeKst);
     return open && close ? open + "~" + close : "";
