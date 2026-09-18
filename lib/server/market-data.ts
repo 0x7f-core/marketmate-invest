@@ -528,6 +528,8 @@ export type MarketIndexDetail = MarketIndexQuote & {
   tradingValue?: number;
   high52Week?: number;
   low52Week?: number;
+  high52WeekDate?: string;
+  low52WeekDate?: string;
   cashBuy?: number;
   cashSell?: number;
   send?: number;
@@ -687,8 +689,23 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
     ? { points: [] as ChartPoint[], stale: false }
     : await trackedIndexHistory(meta, "1Y").catch(() => ({ points: [] as ChartPoint[], stale: false }));
   const latest = history.points.at(-1);
-  const high52Week = history.points.length ? Math.max(...history.points.map(point => point.high)) : 0;
-  const low52Week = history.points.length ? Math.min(...history.points.map(point => point.low)) : 0;
+  const high52WeekPoint = history.points.reduce<ChartPoint | null>((best, point) => !best || point.high >= best.high ? point : best, null);
+  const low52WeekPoint = history.points.reduce<ChartPoint | null>((best, point) => !best || point.low <= best.low ? point : best, null);
+  const high52Week = high52WeekPoint?.high ?? 0;
+  const low52Week = low52WeekPoint?.low ?? 0;
+  const indexDate = (time?: number) => {
+    if (!time || !Number.isFinite(time)) return undefined;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Seoul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date(time));
+    const year = parts.find(part => part.type === "year")?.value;
+    const month = parts.find(part => part.type === "month")?.value;
+    const day = parts.find(part => part.type === "day")?.value;
+    return year && month && day ? `${year}-${month}-${day}` : undefined;
+  };
   const referencePrice = values?.referencePrice || fxDetail?.referencePrice || (current.price > 0 ? current.price - current.change : 0);
 
   return {
@@ -705,6 +722,8 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
     tradingValue: values?.tradingValue || undefined,
     high52Week: high52Week || undefined,
     low52Week: low52Week || undefined,
+    high52WeekDate: indexDate(high52WeekPoint?.time),
+    low52WeekDate: indexDate(low52WeekPoint?.time),
     cashBuy: fxDetail?.cashBuy,
     cashSell: fxDetail?.cashSell,
     send: fxDetail?.send,
