@@ -65,10 +65,10 @@ export async function POST(request: Request) {
     const participantId = typeof body.participantId === "string" ? body.participantId.trim() : "";
     const clientOrderId = typeof body.clientOrderId === "string" ? body.clientOrderId.trim() : "";
     const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
-    const requestedName = typeof body.name === "string" ? body.name.trim() : "";
+    const name = typeof body.name === "string" ? body.name.trim() : "";
     let exchange = typeof body.exchange === "string" ? body.exchange.trim() : body.exchange === undefined ? undefined : "";
     const requestedVenue = body.venue === "KRX" || body.venue === "NXT" ? body.venue : undefined;
-    if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !requestedName || requestedName.length > 80 ||
+    if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !name || name.length > 80 ||
         (exchange !== undefined && (!exchange || exchange.length > 40 || /[\u0000-\u001F\u007F]/.test(exchange))) ||
         (body.venue !== undefined && !requestedVenue) || (requestedVenue && body.market !== "KR") ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       if (!exchange) return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
     }
     const symbol = normalizeNaverMarketSymbol(body.market, rawSymbol);
-    const name = body.market === "CRYPTO" ? canonicalCryptoDisplayName(symbol, requestedName) : requestedName;
+    const canonicalName = body.market === "CRYPTO" ? canonicalCryptoDisplayName(symbol, name) : name;
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
       return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
     }
@@ -143,7 +143,7 @@ export async function POST(request: Request) {
          WHEN instruments.market='KR' AND instruments.exchange IN ('KOSPI','KOSDAQ','KONEX') THEN instruments.exchange
          ELSE excluded.exchange
        END,is_active=1`
-    ).bind(instrumentId, body.market, symbol, name, quote.currency, instrumentExchange).run();
+    ).bind(instrumentId, body.market, symbol, canonicalName, quote.currency, instrumentExchange).run();
     await persistQuoteSnapshot(quote);
 
     const position = await env.DB!.prepare(
