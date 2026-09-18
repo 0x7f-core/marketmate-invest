@@ -84,6 +84,15 @@ export async function GET(request: Request) {
     await enforceRateLimit(request, "watchlist_read", 20, 60_000, user.id);
     const result = await env.DB!.prepare(watchlistSql).bind(user.id).all<WatchlistRow>();
     const rows = result.results;
+    const mode = new URL(request.url).searchParams.get("mode");
+    if (mode === "fast") {
+      const items = rows.map(item => normalizeCryptoNamedItem(item));
+      return Response.json(
+        { items, refreshing: rows.some(item => !item.receivedAt || item.receivedAt < Date.now() - 15_000) },
+        { headers: { "cache-control": "private, max-age=3" } },
+      );
+    }
+
     const stale = rows.filter(item => !item.receivedAt || item.receivedAt < Date.now() - 15_000).slice(0, 6);
 
     if (!stale.length) {
