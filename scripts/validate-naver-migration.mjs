@@ -247,6 +247,14 @@ if (dashboard.includes("setInterval(load,10_000)") || !dashboard.includes("polli
 if (!dashboard.includes("setMarketSession(LOADING_MARKET_SESSION)")) {
   failures.push("market switches must fail closed in the UI until the new Naver market status arrives");
 }
+if (
+  !dashboard.includes("DOMESTIC_TRADING_SCHEDULE")
+  || !dashboard.includes("DomesticTradingSchedule")
+  || !dashboard.includes("domestic-schedule-row")
+  || !dashboard.includes("isScheduleCurrent")
+) {
+  failures.push("competition tab must expose the live KRX/NXT trading timetable");
+}
 
 const newsRoute = await source("app/api/news/route.ts");
 if (!newsRoute.includes("return 0;") || /Date\.now\(\)\s*-\s*index/.test(newsRoute)) {
