@@ -56,7 +56,7 @@
 .marketmate-v2 .np-trading{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start}
 .marketmate-v2 .np-trading-main{display:flex;flex-direction:column;gap:12px;min-width:0}
 .marketmate-v2 .np-trading>aside{position:sticky;top:14px}
-.marketmate-v2 .np-market-tabs{height:48px;display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--np-line);border-radius:10px;background:#fff;overflow:hidden}
+.marketmate-v2 .np-market-tabs{height:48px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--np-line);border-radius:10px;background:#fff;overflow:hidden}
 .marketmate-v2 .np-market-tabs button{position:relative;border:0;border-right:1px solid #edf0f2;background:#fff;color:#6b7684;font-size:14px;font-weight:700}
 .marketmate-v2 .np-market-tabs button:last-child{border-right:0}
 .marketmate-v2 .np-market-tabs button.active{background:#17191c;color:#fff}
