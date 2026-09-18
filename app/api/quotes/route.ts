@@ -1,4 +1,4 @@
-import { type Market } from "@/lib/server/market-data";
+import { type DomesticTradingVenue, type Market } from "@/lib/server/market-data";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticListingMarket, normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { matchPendingOrders } from "@/lib/server/pending-orders";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
 
 function isQuoteUnavailable(error: unknown) {
-  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE"].includes(error.message));
+  return isNaverStockUnavailable(error) || (error instanceof Error && ["NAVER_FX_UNAVAILABLE", "NAVER_EMPTY_QUOTE", "NAVER_INVALID_QUOTE", "NAVER_NXT_TIMESTAMP_UNAVAILABLE", "NAVER_NXT_UNAVAILABLE"].includes(error.message));
 }
 
 function persistenceStatements(quote: TradingQuote, requestedExchange?: string) {
@@ -59,8 +59,15 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const market = url.searchParams.get("market") as Market | null;
     const exchange = url.searchParams.get("exchange") ?? undefined;
+    const rawVenue = url.searchParams.get("venue")?.toUpperCase();
+    const requestedVenue = rawVenue === "KRX" || rawVenue === "NXT" ? rawVenue as DomesticTradingVenue : undefined;
     const symbolsRaw = url.searchParams.get("symbols") ?? "";
-    if (symbolsRaw.length > 700 || (exchange !== undefined && !EXCHANGE.test(exchange))) {
+    if (
+      symbolsRaw.length > 700
+      || (exchange !== undefined && !EXCHANGE.test(exchange))
+      || (rawVenue !== undefined && !requestedVenue)
+      || (requestedVenue && market !== "KR")
+    ) {
       return Response.json({ error: "시세 요청값을 확인해주세요." }, { status: 400 });
     }
     const symbols = symbolsRaw.split(",").filter(Boolean).slice(0, 20);
@@ -73,9 +80,18 @@ export async function GET(request: Request) {
       return Response.json({ error: "종목코드를 확인해주세요." }, { status: 400 });
     }
 
-    const results = await Promise.allSettled(normalizedSymbols.map(symbol =>
-      getTradingQuote(market, symbol, normalizedSymbols.length === 1 ? exchange : undefined),
-    ));
+    const results = await Promise.allSettled(normalizedSymbols.map(async symbol => {
+      const symbolExchange = normalizedSymbols.length === 1 ? exchange : undefined;
+      const venue = normalizedSymbols.length === 1 ? requestedVenue : undefined;
+      try {
+        return await getTradingQuote(market, symbol, symbolExchange, undefined, venue);
+      } catch (error) {
+        if (market === "KR" && venue === "NXT" && error instanceof Error && error.message === "NAVER_NXT_UNAVAILABLE") {
+          return getTradingQuote(market, symbol, symbolExchange, undefined, "KRX");
+        }
+        throw error;
+      }
+    }));
     const resolved = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
     const quotes = resolved.filter(quote => !quote.stale);
 
