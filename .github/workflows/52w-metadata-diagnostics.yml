@@ -13,14 +13,18 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          for url in             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=dayCandle&startDateTime=20250918&endDateTime=20260918'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&startDateTime=20250918&endDateTime=20260918'
+          for url in             'https://m.stock.naver.com/front-api/stock/domestic/integration?code=005930&endType=stock'             'https://m.stock.naver.com/front-api/stock/domestic/basic?code=005930&endType=stock'
           do
             echo "===== $url ====="
-            curl -sS --max-time 25 -H 'accept: application/json,*/*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0' "$url" -o /tmp/b
+            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://m.stock.naver.com/' -A 'Mozilla/5.0' "$url" || true)
+            echo "HTTP $code"
             python3 - <<'PY'
-          import json
-          j=json.load(open('/tmp/b'))
-          rows=j.get('priceInfos',[]) if isinstance(j,dict) else []
-          print('rows',len(rows),'first',rows[0] if rows else None,'last',rows[-1] if rows else None)
-          PY
+import json
+try:
+    data=json.load(open('/tmp/b'))
+    print(json.dumps(data,ensure_ascii=False)[:50000])
+except Exception:
+    print(open('/tmp/b',encoding='utf-8',errors='ignore').read()[:50000])
+PY
+            echo
           done
