@@ -67,9 +67,21 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
   const [libraryMessage, setLibraryMessage] = useState("");
   const [dataMessage, setDataMessage] = useState("");
   const [retryToken, setRetryToken] = useState(0);
+  const [fxPageLoadToken, setFxPageLoadToken] = useState("");
   const isFxImageChart = indexId === "USDKRW";
   const fxRange = range === "1M" || range === "1Y" ? range : "3M";
-  const fxImageUrl = fxChartImages?.[fxRange] || DEFAULT_FX_CHART_IMAGES[fxRange];
+  const fxImageBaseUrl = fxChartImages?.[fxRange] || DEFAULT_FX_CHART_IMAGES[fxRange];
+  const fxImageUrl = fxPageLoadToken
+    ? `${fxImageBaseUrl}${fxImageBaseUrl.includes("?") ? "&" : "?"}v=${fxPageLoadToken}`
+    : "";
+
+  useEffect(() => {
+    if (!isFxImageChart || fxPageLoadToken) return;
+    const pageLoadToken = typeof performance !== "undefined" && Number.isFinite(performance.timeOrigin)
+      ? Math.round(performance.timeOrigin)
+      : Date.now();
+    setFxPageLoadToken(String(pageLoadToken));
+  }, [isFxImageChart, fxPageLoadToken]);
 
   useEffect(() => {
     if (isFxImageChart) {
@@ -198,7 +210,7 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
             className="naver-fx-chart-image"
             role="img"
             aria-label={`${quote.name} ${fxRange} 차트`}
-            style={{ backgroundImage: `url("${fxImageUrl}")` }}
+            style={{ backgroundImage: fxImageUrl ? `url("${fxImageUrl}")` : "none" }}
           />
         </div>
       </section>
