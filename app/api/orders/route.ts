@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { canonicalCryptoDisplayName, normalizeCryptoNamedItem } from "@/lib/crypto-display-name";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticSecurityClassification } from "@/lib/server/domestic-security-type";
 import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
@@ -33,8 +34,10 @@ export async function GET(request: Request) {
     const result = await env.DB!.prepare(`SELECT o.id,o.side,o.order_type AS orderType,o.quantity_micros AS quantityMicros,
       o.limit_price_micros AS limitPriceMicros,o.filled_quantity_micros AS filledQuantityMicros,o.status,o.rejection_reason AS rejectionReason,
       o.venue,o.created_at AS createdAt,o.updated_at AS updatedAt,i.market,i.symbol,i.name,i.currency
-      FROM orders o JOIN instruments i ON i.id=o.instrument_id WHERE o.participant_id=? ORDER BY o.created_at DESC LIMIT 100`).bind(participantId).all();
-    return Response.json({ orders: result.results }, { headers: { "cache-control": "no-store" } });
+      FROM orders o JOIN instruments i ON i.id=o.instrument_id WHERE o.participant_id=? ORDER BY o.created_at DESC LIMIT 100`)
+      .bind(participantId).all<{market:Market;symbol:string;name:string} & Record<string, unknown>>();
+    const orders = result.results.map(item => normalizeCryptoNamedItem(item));
+    return Response.json({ orders }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
 
@@ -62,10 +65,10 @@ export async function POST(request: Request) {
     const participantId = typeof body.participantId === "string" ? body.participantId.trim() : "";
     const clientOrderId = typeof body.clientOrderId === "string" ? body.clientOrderId.trim() : "";
     const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim() : "";
-    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const requestedName = typeof body.name === "string" ? body.name.trim() : "";
     let exchange = typeof body.exchange === "string" ? body.exchange.trim() : body.exchange === undefined ? undefined : "";
     const requestedVenue = body.venue === "KRX" || body.venue === "NXT" ? body.venue : undefined;
-    if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !name || name.length > 80 ||
+    if (!SAFE_ID.test(participantId) || !SAFE_ID.test(clientOrderId) || !body.market || !rawSymbol || !requestedName || requestedName.length > 80 ||
         (exchange !== undefined && (!exchange || exchange.length > 40 || /[\u0000-\u001F\u007F]/.test(exchange))) ||
         (body.venue !== undefined && !requestedVenue) || (requestedVenue && body.market !== "KR") ||
         !["KR", "US", "CRYPTO"].includes(body.market) || !["buy", "sell"].includes(body.side ?? "") ||
@@ -78,6 +81,7 @@ export async function POST(request: Request) {
       if (!exchange) return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
     }
     const symbol = normalizeNaverMarketSymbol(body.market, rawSymbol);
+    const name = body.market === "CRYPTO" ? canonicalCryptoDisplayName(symbol, requestedName) : requestedName;
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
       return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
     }
