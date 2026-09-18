@@ -228,6 +228,9 @@ export async function POST(request: Request) {
       securityType: domesticSecurity?.type, executedAt: now,
     } }, { status: 201 });
   } catch (error) {
+    if (error instanceof Error && error.message === "NAVER_NXT_UNAVAILABLE") {
+      return Response.json({ error: "이 종목은 NXT 거래를 지원하지 않습니다." }, { status: 409, headers: { "cache-control": "no-store" } });
+    }
     if (isQuoteUnavailable(error)) {
       return Response.json({ error: "네이버증권 실시간 시세를 확인할 수 없어 주문을 중단했습니다." }, { status: 503, headers: { "retry-after": "30" } });
     }
