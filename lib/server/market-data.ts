@@ -235,8 +235,9 @@ export async function resolveReutersCode(symbol: string, exchange?: string) {
   }
   if (looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
   const normalizedExchange = (exchange ?? "").toUpperCase();
-  const suffix = normalizedExchange.includes("NYS") || normalizedExchange.includes("NYSE") ? ".N"
-    : normalizedExchange.includes("AMS") || normalizedExchange.includes("AMEX") ? ".A" : ".O";
+  const suffix = normalizedExchange.includes("ARCA") ? ".P"
+    : normalizedExchange.includes("NYS") || normalizedExchange === "NYSE" ? ".N"
+      : normalizedExchange.includes("AMS") || normalizedExchange.includes("AMEX") ? ".A" : ".O";
   return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
