@@ -252,8 +252,13 @@ if (
   || !dashboard.includes("DomesticTradingSchedule")
   || !dashboard.includes("domestic-schedule-row")
   || !dashboard.includes("isScheduleCurrent")
+  || !dashboard.includes("ScheduleRows")
+  || !dashboard.includes("schedule-rows-viewport")
 ) {
   failures.push("competition tab must expose the live KRX/NXT trading timetable");
+}
+if (!dashboard.includes("CryptoTradingSchedule") || !dashboard.includes("네이버증권 시세 기준")) {
+  failures.push("competition tab must keep the crypto 24-hour trading guide separate from stock schedules");
 }
 if (
   !dashboard.includes("UsTradingSchedule")
