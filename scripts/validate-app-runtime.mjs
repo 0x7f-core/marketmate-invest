@@ -145,6 +145,17 @@ assert(Array.isArray(overview.data?.quotes), "market overview missing quotes[]")
 assert(Number(overview.data?.pollingInterval) >= 2_000, "market overview pollingInterval invalid");
 console.log(`PASS market overview through app route (${overview.data.quotes.length} fresh quotes)`);
 
+const popular = await jsonRequest("/api/popular-stocks", { headers: authHeaders, cache: "no-store" });
+assert(popular.response.status === 200, `popular stocks expected 200, got ${popular.response.status}: ${JSON.stringify(popular.data)}`);
+for (const [label, items] of [["domestic", popular.data?.domestic], ["us", popular.data?.us]]) {
+  assert(Array.isArray(items), `popular stocks missing ${label}[]`);
+  assert(items.length > 0 && items.length <= 10, `popular stocks ${label} must contain 1-10 items: ${JSON.stringify(items)}`);
+  assert(items.every((item, index) => item?.rank === index + 1 && Number(item?.price) > 0), `popular stocks ${label} rank/price invalid: ${JSON.stringify(items)}`);
+}
+assert(popular.data.domestic.every(item => item?.market === "KR"), `popular domestic contains non-KR rows: ${JSON.stringify(popular.data.domestic)}`);
+assert(popular.data.us.every(item => item?.market === "US"), `popular US contains non-US rows: ${JSON.stringify(popular.data.us)}`);
+console.log(`PASS Naver popular stocks (KR ${popular.data.domestic.length}, US ${popular.data.us.length})`);
+
 for (const market of ["KR", "US", "CRYPTO"]) {
   for (const category of ["tradingValue", "volume", "up", "down", "marketCap"]) {
     const ranking = await jsonRequest(`/api/market-rankings?market=${market}&category=${category}`, { headers: authHeaders, cache: "no-store" });
