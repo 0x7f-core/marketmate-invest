@@ -73,14 +73,25 @@
 .marketmate-v2 .instrument-logo.lg{width:52px;height:52px;flex:0 0 52px}
 .marketmate-v2 .live-pill{border:1px solid #d7f3e3;background:#fff;color:#00a64b;border-radius:999px;padding:6px 9px;font-size:11px;white-space:nowrap}
 .marketmate-v2 .live-pill i{background:var(--np-green)}
+.marketmate-v2 .np-domestic-venue-switch{margin:18px 24px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.marketmate-v2 .np-domestic-venue-switch>span{color:#8b95a1;font-size:11px;font-weight:600}
+.marketmate-v2 .np-domestic-venue-switch>div,.marketmate-v2 .order-venue-selector>div{display:flex;padding:3px;border-radius:9px;background:#f2f4f6}
+.marketmate-v2 .np-domestic-venue-switch button,.marketmate-v2 .order-venue-selector button{min-width:54px;height:30px;padding:0 12px;border:0;border-radius:7px;background:transparent;color:#7b8490;font-size:12px;font-weight:800}
+.marketmate-v2 .np-domestic-venue-switch button.active,.marketmate-v2 .order-venue-selector button.active{background:#fff;color:#191f28;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.marketmate-v2 .np-domestic-venue-switch button:disabled,.marketmate-v2 .order-venue-selector button:disabled{opacity:.35;cursor:not-allowed}
 .marketmate-v2 .np-price{padding:28px 24px 20px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
 .marketmate-v2 .np-price>strong{font-size:35px;line-height:1;font-weight:800;letter-spacing:-.055em;color:#111827}
 .marketmate-v2 .np-price>span{font-size:14px;font-weight:800}
+.marketmate-v2 .np-price>small{margin-left:auto;color:#8b95a1;font-size:11px;font-weight:700}
 .marketmate-v2 .np-stats{margin:0 24px 14px;border-top:1px solid #eef0f2;border-bottom:1px solid #eef0f2;display:grid;grid-template-columns:repeat(4,1fr)}
-.marketmate-v2 .np-stats>span{min-height:54px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;color:var(--np-sub);font-size:12px;border-right:1px solid #eef0f2}
-.marketmate-v2 .np-stats>span:first-child{padding-left:4px}
-.marketmate-v2 .np-stats>span:last-child{border-right:0;padding-right:4px}
-.marketmate-v2 .np-stats b{color:#191f28;font-size:12px}
+.marketmate-v2 .np-stats>span{min-height:54px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--np-sub);font-size:12px;border-right:1px solid #eef0f2}
+.marketmate-v2 .np-stats>span:nth-child(-n+4){border-bottom:1px solid #eef0f2}
+.marketmate-v2 .np-stats>span:nth-child(4n){border-right:0}
+.marketmate-v2 .np-stats>span:last-child{border-right:0}
+.marketmate-v2 .np-stats b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#191f28;font-size:12px}
+.marketmate-v2 .order-venue-selector{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 0 10px}
+.marketmate-v2 .order-venue-selector>span{color:#7b8490;font-size:12px;font-weight:700}
+.marketmate-v2 .order-venue-selector button{min-width:48px;height:28px;padding:0 10px}
 .marketmate-v2 .np-chart{padding:0 24px 22px}
 
 /* chart surface */
@@ -147,13 +158,19 @@
   .marketmate-v2 .stock-title h1{font-size:21px}
   .marketmate-v2 .stock-title h1 svg{width:19px;height:19px}
   .marketmate-v2 .live-pill{padding:5px 8px;font-size:10px}
-  .marketmate-v2 .np-price{padding:28px 16px 18px;display:block}
+  .marketmate-v2 .np-domestic-venue-switch{margin:16px 16px 0}
+  .marketmate-v2 .np-domestic-venue-switch>span{font-size:10px}
+  .marketmate-v2 .np-domestic-venue-switch button{min-width:50px;height:29px;padding:0 10px}
+  .marketmate-v2 .np-price{padding:24px 16px 18px;display:block}
   .marketmate-v2 .np-price>strong{display:block;font-size:31px;line-height:1.05}
   .marketmate-v2 .np-price>span{display:block;margin-top:11px;font-size:14px}
+  .marketmate-v2 .np-price>small{display:block;margin:7px 0 0;font-size:10px}
   .marketmate-v2 .np-stats{margin:0 16px 14px;grid-template-columns:1fr 1fr;border:1px solid #edf0f2;border-radius:0}
   .marketmate-v2 .np-stats>span{min-height:46px;padding:0 10px!important;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2}
+  .marketmate-v2 .np-stats>span:nth-child(4n){border-right:1px solid #edf0f2}
   .marketmate-v2 .np-stats>span:nth-child(2n){border-right:0}
-  .marketmate-v2 .np-stats>span:nth-last-child(-n+2){border-bottom:0}
+  .marketmate-v2 .np-stats>span:nth-last-child(-n+2){border-bottom:1px solid #edf0f2}
+  .marketmate-v2 .np-stats>span:last-child{grid-column:1/-1;border-right:0;border-bottom:0}
 
   .marketmate-v2 .np-chart{padding:0;border-top:10px solid #f4f5f6}
   .marketmate-v2 .naver-light-chart{padding:0 0 8px}
