@@ -28,6 +28,7 @@ export function normalizeUsListingExchange(value: unknown): UsListingExchange | 
   ) return "ARCA";
   if (
     normalized.includes("NYSEAMERICAN")
+    || normalized.includes("NYSEMKT")
     || normalized.includes("AMERICANSTOCKEXCHANGE")
     || normalized.includes("AMEX")
     || ["AMS", "ASE"].includes(normalized)
