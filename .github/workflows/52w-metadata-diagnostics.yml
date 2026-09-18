@@ -13,18 +13,9 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          curl -sS --max-time 30 -H 'accept: text/html,*/*' -A 'Mozilla/5.0' 'https://stock.naver.com/domestic/stock/005930' -o /tmp/page
-          echo '===== page matches ====='
-          python3 - <<'PY'
-          text=open('/tmp/page',encoding='utf-8',errors='ignore').read()
-          for needle in ['52주 최고','highPriceOf52Weeks','week52HighPrice','380000','374500']:
-              print('\n--',needle,'--')
-              start=0
-              found=0
-              while found<8:
-                  i=text.find(needle,start)
-                  if i<0: break
-                  print(text[max(0,i-400):i+900])
-                  start=i+len(needle)
-                  found+=1
-          PY
+          for url in             'https://stock.naver.com/api/stockSecurity/items/v2/domestic/prices?itemCodes=005930&recurring=false'             'https://stock.naver.com/api/stockSecurity/items/v2/domestic/prices?itemCodes=005930&recurring=true'             'https://stock.naver.com/api/stockSecurity/items/v2/domestic/005930/price-snapshot'
+          do
+            echo "===== $url ====="
+            curl -sS --max-time 25 -H 'accept: application/json,*/*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0' "$url"
+            echo
+          done
