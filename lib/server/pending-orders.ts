@@ -4,7 +4,7 @@ import { getDomesticSecurityClassification } from "@/lib/server/domestic-securit
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isExecutableTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
 
-type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; quantityMicros: number; limitPriceMicros: number };
+type PendingOrder = { id: string; participantId: string; side: "buy" | "sell"; venue?: "KRX" | "NXT" | null; quantityMicros: number; limitPriceMicros: number };
 
 export async function matchPendingOrders(quote: TradingQuote) {
   if (!env.DB || !isExecutableTradingQuote(quote)) return;
@@ -14,19 +14,23 @@ export async function matchPendingOrders(quote: TradingQuote) {
 
   // Most quote refreshes have no executable pending order. Check D1 first so
   // normal price rendering does not pay for an additional market-session lookup.
+  const domesticVenue = quote.market === "KR" ? quote.venue ?? "KRX" : null;
   const candidate = await env.DB.prepare(`SELECT id FROM orders
     WHERE instrument_id=? AND status='pending'
+      AND (? IS NULL OR COALESCE(venue,'KRX')=?)
       AND ((side='buy' AND limit_price_micros>=?) OR (side='sell' AND limit_price_micros<=?))
-    LIMIT 1`).bind(instrumentId, nativePriceMicros, nativePriceMicros).first<{ id: string }>();
+    LIMIT 1`).bind(instrumentId, domesticVenue, domesticVenue, nativePriceMicros, nativePriceMicros).first<{ id: string }>();
   if (!candidate) return;
 
-  const session = await getCheckedMarketSession(quote.market);
+  const session = await getCheckedMarketSession(quote.market, domesticVenue ?? undefined);
   if (!session.isOpen || session.stale || !isExecutableTradingQuote(quote)) return;
   if (quote.market === "KR" && quote.venue && session.exchange && quote.venue !== session.exchange) return;
 
-  const rows = await env.DB.prepare(`SELECT id,participant_id AS participantId,side,quantity_micros AS quantityMicros,limit_price_micros AS limitPriceMicros
-    FROM orders WHERE instrument_id=? AND status='pending' AND ((side='buy' AND limit_price_micros>=?) OR (side='sell' AND limit_price_micros<=?))
-    ORDER BY created_at LIMIT 20`).bind(instrumentId, nativePriceMicros, nativePriceMicros).all<PendingOrder>();
+  const rows = await env.DB.prepare(`SELECT id,participant_id AS participantId,side,venue,quantity_micros AS quantityMicros,limit_price_micros AS limitPriceMicros
+    FROM orders WHERE instrument_id=? AND status='pending'
+      AND (? IS NULL OR COALESCE(venue,'KRX')=?)
+      AND ((side='buy' AND limit_price_micros>=?) OR (side='sell' AND limit_price_micros<=?))
+    ORDER BY created_at LIMIT 20`).bind(instrumentId, domesticVenue, domesticVenue, nativePriceMicros, nativePriceMicros).all<PendingOrder>();
   for (const order of rows.results) await fillPendingOrder(order, quote, nativePriceMicros);
 }
 
@@ -42,7 +46,7 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
   const priceKrwMicros = Math.round(quote.price * quote.exchangeRate * 1_000_000);
   const tradeValueKrw = Number((BigInt(order.quantityMicros) * BigInt(priceKrwMicros) + BigInt(500_000_000_000)) / BigInt(1_000_000_000_000));
   const isBuy = order.side === "buy";
-  const executionExchange = quote.venue ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market === "KR" ? "KRX" : "US");
+  const executionExchange = order.venue ?? quote.venue ?? (quote.market === "CRYPTO" ? "UPBIT" : quote.market === "KR" ? "KRX" : "US");
   const domesticSecurity = quote.market === "KR" && !isBuy
     ? await getDomesticSecurityClassification(quote.symbol)
     : null;
@@ -77,17 +81,14 @@ async function fillPendingOrder(order: PendingOrder, quote: TradingQuote, native
   const statements = [
     env.DB!.prepare("UPDATE participants SET cash_krw=?,realized_pnl_krw=realized_pnl_krw+? WHERE id=? AND cash_krw=?").bind(nextCash, realized, order.participantId, participant!.cashKrw),
     env.DB!.prepare("UPDATE orders SET status='filled',filled_quantity_micros=quantity_micros,updated_at=? WHERE id=? AND status='partial' AND changes()>0").bind(now, order.id),
-    env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
-      SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='filled')`).bind(fillId, order.id, order.participantId, instrumentId, order.side, order.quantityMicros, nativePriceMicros, Math.round(quote.exchangeRate * 1_000_000), costs.totalCostKrw, now, order.id),
+    env.DB!.prepare(`INSERT INTO fills (id,order_id,participant_id,instrument_id,side,venue,quantity_micros,price_micros,fx_rate_micros,fee_krw,executed_at)
+      SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='filled')`).bind(fillId, order.id, order.participantId, instrumentId, order.side, order.venue ?? (quote.market === "KR" ? quote.venue ?? "KRX" : null), order.quantityMicros, nativePriceMicros, Math.round(quote.exchangeRate * 1_000_000), costs.totalCostKrw, now, order.id),
     env.DB!.prepare(`INSERT INTO positions (id,participant_id,instrument_id,quantity_micros,average_price_micros,realized_pnl_krw,updated_at)
       SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?) ON CONFLICT(participant_id,instrument_id) DO UPDATE SET quantity_micros=excluded.quantity_micros,average_price_micros=excluded.average_price_micros,realized_pnl_krw=positions.realized_pnl_krw+?,updated_at=excluded.updated_at`)
       .bind(crypto.randomUUID(), order.participantId, instrumentId, nextQty, nextAvg, realized, now, fillId, realized),
     env.DB!.prepare(`INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at)
       SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM fills WHERE id=?)`).bind(crypto.randomUUID(), order.participantId, order.side, ledgerAmount, fillId, nextCash, now, fillId),
   ];
-  if (quote.market === "KR" && quote.venue) {
-    statements.push(env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=? AND EXISTS(SELECT 1 FROM fills WHERE id=?)").bind(quote.venue, instrumentId, fillId));
-  }
   const result = await env.DB!.batch(statements);
   if ((result[0].meta.changes ?? 0) !== 1) await env.DB!.prepare("UPDATE orders SET status='pending',updated_at=? WHERE id=? AND status='partial'").bind(Date.now(), order.id).run();
 }
