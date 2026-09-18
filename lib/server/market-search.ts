@@ -372,10 +372,11 @@ function searchRank(item: SearchInstrument, query: string) {
 
 export async function searchNaverMarket(query: string, market?: Market) {
   const initialSearch = market !== "US" && market !== "CRYPTO" && hasHangulInitialQuery(query);
-  const pureInitialSearch = initialSearch && isPureHangulInitialQuery(query);
   const target = market === "CRYPTO" ? "coin" : market === "KR" || market === "US" ? "stock" : "stock,coin";
   const literalPrefix = initialSearch ? literalPrefixBeforeInitial(query) : "";
-  const upstreamQueries = initialSearch ? (literalPrefix ? [literalPrefix] : []) : [query];
+  const upstreamQueries = initialSearch
+    ? [...new Set([query, literalPrefix].filter(Boolean))]
+    : [query];
   const requests = await Promise.allSettled(upstreamQueries.flatMap(upstreamQuery => [
     naverJson<unknown>(
       buildNaverPath("/api/autocomplete/search/autoComplete", { query: upstreamQuery, target }),
@@ -398,12 +399,12 @@ export async function searchNaverMarket(query: string, market?: Market) {
     }
   }
 
-  // Mixed queries such as "대한ㄱ" usually resolve from Naver autocomplete using
-  // the literal prefix ("대한"). Only fall back to the full domestic catalog
-  // when autocomplete found no matching domestic row. Pure initial queries have
-  // no literal prefix, so they use the cached catalog directly.
+  // Naver autocomplete is queried with the original choseong/mixed string first.
+  // This avoids rebuilding the domestic catalog on Worker cold starts when
+  // Naver already returns a valid initial-consonant match. The catalog remains
+  // a completeness fallback only when autocomplete yields no verified KR row.
   let catalog: Awaited<ReturnType<typeof searchDomesticInitialCatalog>> | null = null;
-  if (initialSearch && (pureInitialSearch || unique.size === 0)) {
+  if (initialSearch && unique.size === 0) {
     catalog = await searchDomesticInitialCatalog(query).catch(() => null);
     if (catalog) {
       for (const item of catalog.instruments) {
