@@ -93,7 +93,7 @@ function sessionDetails(status: NaverStatus) {
 function sessionLabel(type: string, market: Market) {
   const normalized = type.toLocaleLowerCase("en-US");
   if (normalized.includes("closing")) {
-    if (normalized.includes("after")) return "애프터마켓 마감";
+    if (normalized.includes("after")) return "장 마감";
     if (normalized.includes("regular") || normalized.includes("main") || normalized.includes("normal")) return "정규장 마감";
     if (normalized.includes("pre")) return "프리마켓 마감";
     return "마감 세션";
@@ -138,14 +138,25 @@ export function getDomesticVenueClockSession(venue: DomesticTradingVenue): Domes
     return { exchange: venue, isOpen: false, label: "장 마감", currentSession: "closed" };
   }
 
-  if (minutes < 8 * 60 || minutes >= 20 * 60) {
+  if (venue === "NXT" && (minutes < 8 * 60 || minutes >= 20 * 60)) {
     return {
       exchange: venue,
       isOpen: false,
-      label: "애프터마켓 마감",
+      label: "장 마감",
       currentSession: "afterMarketClosing",
       openTimeKst: "20:00",
       closeTimeKst: "08:00",
+    };
+  }
+
+  if (venue === "KRX" && (minutes < 8 * 60 + 40 || minutes >= 20 * 60)) {
+    return {
+      exchange: venue,
+      isOpen: false,
+      label: "장 마감",
+      currentSession: "afterMarketClosing",
+      openTimeKst: "20:00",
+      closeTimeKst: "08:40",
     };
   }
 
@@ -157,7 +168,6 @@ export function getDomesticVenueClockSession(venue: DomesticTradingVenue): Domes
     return { exchange: venue, isOpen: true, label: "애프터마켓", currentSession: "afterMarket", openTimeKst: "15:40", closeTimeKst: "20:00" };
   }
 
-  if (minutes < 8 * 60 + 40) return { exchange: venue, isOpen: false, label: "장 마감", currentSession: "closed" };
   if (minutes < 8 * 60 + 50) return { exchange: venue, isOpen: true, label: "장전 시간외 종가", currentSession: "preOpenClosingPrice", openTimeKst: "08:40", closeTimeKst: "08:50" };
   if (minutes < 9 * 60) return { exchange: venue, isOpen: false, label: "장전 동시호가", currentSession: "openingAuction", openTimeKst: "08:50", closeTimeKst: "09:00" };
   if (minutes < 15 * 60 + 20) return { exchange: venue, isOpen: true, label: "정규장", currentSession: "regularMarket", openTimeKst: "09:00", closeTimeKst: "15:20" };
@@ -212,7 +222,7 @@ function isSupportedTradingSession(market: Market, detail: ReturnType<typeof ses
 function domesticNotice(session: DomesticVenueClockSession) {
   const schedule = session.openTimeKst && session.closeTimeKst ? ` · ${session.openTimeKst}~${session.closeTimeKst} KST` : "";
   if (session.currentSession === "afterMarketClosing") {
-    return `${session.exchange} 애프터마켓이 마감되었습니다${schedule}.`;
+    return `${session.exchange} 장 마감${schedule}.`;
   }
   if (!session.isOpen) {
     return `${session.exchange} ${session.label} 구간에는 모의주문을 받지 않습니다${schedule}.`;
@@ -307,7 +317,7 @@ export async function getCheckedMarketSession(
     const label = detail.holiday
       ? "휴장일"
       : afterMarketCutoffReached
-        ? "애프터마켓 마감"
+        ? "장 마감"
         : isOpen
           ? sessionName
           : excludedOpenSession
