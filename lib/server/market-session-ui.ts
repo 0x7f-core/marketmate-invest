@@ -1,4 +1,4 @@
-import { getCheckedMarketSession } from "@/lib/server/market-hours";
+import { getCheckedMarketSession, getDomesticOverviewClockSession } from "@/lib/server/market-hours";
 import type { Market } from "@/lib/server/market-data";
 
 function localClock(timeZone: string) {
@@ -66,76 +66,27 @@ function quickFallback(market: Market) {
     };
   }
 
-  const now = localClock("Asia/Seoul");
-  const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(now.weekday);
-  const nxtPre = weekday && now.minutes >= 8 * 60 && now.minutes < 8 * 60 + 50;
-  const openingAuction = weekday && now.minutes >= 8 * 60 + 50 && now.minutes < 9 * 60;
-  const regular = weekday && now.minutes >= 9 * 60 && now.minutes < 15 * 60 + 20;
-  const closingAuction = weekday && now.minutes >= 15 * 60 + 20 && now.minutes < 15 * 60 + 30;
-  const nxtAfternoon = weekday && now.minutes >= 15 * 60 + 30 && now.minutes < 16 * 60;
-  const krxAfter = weekday && now.minutes >= 16 * 60 && now.minutes < 20 * 60;
-  const isOpen = nxtPre || regular || nxtAfternoon || krxAfter;
-  const exchange = regular || krxAfter ? "KRX" : (nxtPre || nxtAfternoon) ? "NXT" : "KRX";
-  const currentSession = nxtPre
-    ? "preMarket"
-    : regular
-      ? "regularMarket"
-      : (nxtAfternoon || krxAfter)
-        ? "afterMarket"
-        : openingAuction
-          ? "openingAuction"
-          : closingAuction
-            ? "closingAuction"
-            : "closed";
-  const session = nxtPre
-    ? "프리마켓"
-    : regular
-      ? "정규장"
-      : (nxtAfternoon || krxAfter)
-        ? "애프터마켓"
-        : (openingAuction || closingAuction)
-          ? "동시호가"
-          : "장 마감";
-  const openTimeKst = nxtPre
-    ? "08:00"
-    : regular
-      ? "09:00"
-      : nxtAfternoon
-        ? "15:30"
-        : krxAfter
-          ? "16:00"
-          : openingAuction
-            ? "08:50"
-            : closingAuction
-              ? "15:20"
-              : "20:00";
-  const closeTimeKst = nxtPre
-    ? "08:50"
-    : regular
-      ? "15:20"
-      : nxtAfternoon
-        ? "16:00"
-        : krxAfter
-          ? "20:00"
-          : openingAuction
-            ? "09:00"
-            : closingAuction
-              ? "15:30"
-              : "08:00";
+  const domestic = getDomesticOverviewClockSession();
+  const schedule = domestic.openTimeKst && domestic.closeTimeKst
+    ? ` · ${domestic.openTimeKst}~${domestic.closeTimeKst} KST`
+    : "";
+  const auction = domestic.currentSession === "openingAuction" || domestic.currentSession === "closingAuction";
+  const notice = auction
+    ? `${domestic.exchange} ${domestic.label} 시간에는 모의주문을 받지 않습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+    : domestic.currentSession === "afterMarketClosing"
+      ? `${domestic.exchange} 애프터마켓이 마감되었습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+      : domestic.isOpen
+        ? `${domestic.exchange} ${domestic.label} 빠른 시간 판정입니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+        : "현재 선택 가능한 국내 거래 세션이 없습니다 · KRX/NXT 장 상태는 주문 시 네이버증권에서 다시 확인합니다.";
+
   return {
-    isOpen,
-    label: isOpen ? `${session} · ${exchange}` : session,
-    notice: openingAuction
-      ? "국내주식은 08:50~09:00 KST 동시호가 시간에는 주문할 수 없습니다. 09:00 KST부터 다시 주문할 수 있습니다."
-      : closingAuction
-        ? "국내주식은 15:20~15:30 KST 동시호가 시간에는 주문할 수 없습니다. 15:30 KST부터 다시 주문할 수 있습니다."
-        : isOpen
-          ? `${exchange} ${session} 빠른 시간 판정입니다 · ${openTimeKst}~${closeTimeKst} KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-          : "국내주식 거래시간 밖입니다 · NXT 프리마켓 08:00~08:50 / 08:50~09:00 동시호가 주문 불가 / KRX 09:00~15:20 주문 가능 / 15:20~15:30 동시호가 주문 불가 / NXT 애프터마켓 15:30~16:00 / KRX 애프터마켓 16:00~20:00 KST · 주문 시 네이버증권 장 상태를 다시 확인합니다.",
-    exchange,
-    currentSession,
-    openTimeKst,
-    closeTimeKst,
+    isOpen: domestic.isOpen,
+    label: `${domestic.label} · ${domestic.exchange}`,
+    notice,
+    exchange: domestic.exchange,
+    currentSession: domestic.currentSession,
+    openTimeKst: domestic.openTimeKst,
+    closeTimeKst: domestic.closeTimeKst,
     source: "NAVER" as const,
     stale: true,
   };
