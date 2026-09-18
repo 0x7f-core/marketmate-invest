@@ -41,7 +41,7 @@ function quickFallback(market: Market) {
     const after = afterWindow && now.minutes < 19 * 60 + 50;
     const afterCutoff = afterWindow && !after;
     const isOpen = pre || regular || after;
-    const session = pre ? "프리마켓" : regular ? "정규장" : after ? "애프터마켓" : afterCutoff ? "애프터마켓 마감" : "장 마감";
+    const session = pre ? "프리마켓" : regular ? "정규장" : after ? "애프터마켓" : "장 마감";
     const currentSession = pre ? "preMarket" : regular ? "regularMarket" : after ? "afterMarket" : afterCutoff ? "afterMarketClosing" : "closed";
     const isDst = now.zone.toUpperCase().includes("EDT");
     const fullHours = isDst ? ["17:00", "08:50"] : ["18:00", "09:50"];
@@ -71,7 +71,7 @@ function quickFallback(market: Market) {
     ? ` · ${domestic.openTimeKst}~${domestic.closeTimeKst} KST`
     : "";
   const notice = domestic.currentSession === "afterMarketClosing"
-    ? `${domestic.exchange} 애프터마켓이 마감되었습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+    ? `${domestic.exchange} 장 마감${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
     : domestic.isOpen
       ? `${domestic.exchange} ${domestic.label} 빠른 시간 판정입니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
       : `${domestic.exchange} ${domestic.label} 구간에는 모의주문을 받지 않습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`;
