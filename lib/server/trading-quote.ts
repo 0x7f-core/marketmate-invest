@@ -1,7 +1,6 @@
-import { getLiveQuote, type LiveQuote, type Market } from "@/lib/server/market-data";
+import { getLiveQuote, type DomesticTradingVenue, type LiveQuote, type Market } from "@/lib/server/market-data";
 import { getCheckedMarketSession, type MarketSession } from "@/lib/server/market-hours";
 import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
-import { getNxtLiveQuote } from "@/lib/server/naver-nxt";
 import { getNaverUsOverMarketQuote, isUsExtendedSession } from "@/lib/server/naver-us-overmarket";
 
 export type TradingQuote = LiveQuote & { venue?: "KRX" | "NXT" | "UPBIT" };
@@ -41,8 +40,19 @@ function withExchangeRate<T extends TradingQuote>(quote: T, exchangeRate: number
 }
 
 function newerQuote(base: TradingQuote, candidate: TradingQuote | null) {
-  if (!candidate) return base;
-  return sourceTimestampMs(candidate) > sourceTimestampMs(base) ? candidate : base;
+  if (!candidate || sourceTimestampMs(candidate) <= sourceTimestampMs(base)) return base;
+  return {
+    ...base,
+    ...candidate,
+    open: candidate.open ?? base.open,
+    high: candidate.high ?? base.high,
+    low: candidate.low ?? base.low,
+    volume: candidate.volume ?? base.volume,
+    tradingValue: candidate.tradingValue ?? base.tradingValue,
+    high52Week: candidate.high52Week ?? base.high52Week,
+    low52Week: candidate.low52Week ?? base.low52Week,
+    availableVenues: candidate.availableVenues ?? base.availableVenues,
+  };
 }
 
 export async function getTradingQuote(
@@ -50,6 +60,7 @@ export async function getTradingQuote(
   symbol: string,
   exchange?: string,
   knownSession?: MarketSession,
+  preferredDomesticVenue?: DomesticTradingVenue,
 ): Promise<TradingQuote> {
   if (market === "US") {
     // Warm the Naver quote cache while FX/session checks are running. After FX is
@@ -86,20 +97,32 @@ export async function getTradingQuote(
 
   if (market !== "KR") return normalizeTradingTimestamp(await getLiveQuote(market, symbol, exchange));
 
+  if (preferredDomesticVenue) {
+    return normalizeTradingTimestamp(Object.assign(
+      await getLiveQuote(market, symbol, exchange, undefined, preferredDomesticVenue),
+      { venue: preferredDomesticVenue },
+    ));
+  }
+
   if (knownSession) {
-    if (knownSession.isOpen && !knownSession.stale && knownSession.exchange === "NXT") {
-      return normalizeTradingTimestamp(Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const }));
-    }
-    return normalizeTradingTimestamp(Object.assign(await getLiveQuote(market, symbol, exchange), { venue: "KRX" as const }));
+    const venue: DomesticTradingVenue = knownSession.isOpen && !knownSession.stale && knownSession.exchange === "NXT" ? "NXT" : "KRX";
+    return normalizeTradingTimestamp(Object.assign(
+      await getLiveQuote(market, symbol, exchange, undefined, venue),
+      { venue },
+    ));
   }
 
   // KRX is the common path. Start its quote request while the market-status request
   // is in flight so a cold quote no longer pays two Naver round trips serially.
-  const regularPrefetch = getLiveQuote(market, symbol, exchange);
+  const regularPrefetch = getLiveQuote(market, symbol, exchange, undefined, "KRX");
   const session = await getCheckedMarketSession("KR");
-  if (session.isOpen && !session.stale && session.exchange === "NXT") {
-    regularPrefetch.catch(() => undefined);
-    return normalizeTradingTimestamp(Object.assign(await getNxtLiveQuote(symbol), { venue: "NXT" as const }));
+  const venue: DomesticTradingVenue = session.isOpen && !session.stale && session.exchange === "NXT" ? "NXT" : "KRX";
+  if (venue === "KRX") {
+    return normalizeTradingTimestamp(Object.assign(await regularPrefetch, { venue }));
   }
-  return normalizeTradingTimestamp(Object.assign(await regularPrefetch, { venue: "KRX" as const }));
+  regularPrefetch.catch(() => undefined);
+  return normalizeTradingTimestamp(Object.assign(
+    await getLiveQuote(market, symbol, exchange, undefined, venue),
+    { venue },
+  ));
 }
