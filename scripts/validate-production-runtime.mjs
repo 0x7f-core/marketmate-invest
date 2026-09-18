@@ -61,18 +61,26 @@ async function searchInstrument(cookie, market, query, expectedSymbol) {
   return instrument;
 }
 
-async function quoteInstrument(cookie, instrument) {
+async function quoteInstrument(cookie, instrument, venue) {
   const params = new URLSearchParams({ market: instrument.market, symbols: instrument.symbol });
   if (instrument.exchange) params.set("exchange", instrument.exchange);
+  if (venue) params.set("venue", venue);
   const result = await jsonRequest(`/api/quotes?${params.toString()}`, { headers: authHeaders(cookie), cache: "no-store" });
   assert(result.response.status === 200, `${instrument.market} quote expected 200, got ${result.response.status}: ${JSON.stringify(result.data)}`);
   assert(result.data?.source === "NAVER", `${instrument.market} quote source is not NAVER`);
   assert(Array.isArray(result.data?.quotes) && Number(result.data.quotes[0]?.price) > 0, `${instrument.market} quote missing positive price`);
   const quote = result.data.quotes[0];
+  for (const field of ["open", "high", "low", "volume", "tradingValue", "high52Week", "low52Week"]) {
+    assert(Number(quote?.[field]) > 0, `${instrument.market} quote missing ${field}: ${JSON.stringify(quote)}`);
+  }
+  if (instrument.market === "KR" && venue) {
+    assert(quote?.tradingVenue === venue, `KR requested ${venue} but received ${quote?.tradingVenue}`);
+    assert(quote?.venue === "KOSPI", `KR listing market should remain KOSPI, got ${quote?.venue}`);
+  }
   const timestamp = Number(quote?.timestamp);
   const ageMs = Number.isFinite(timestamp) && timestamp > 0 ? Date.now() - timestamp : null;
   const timestampText = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : "none";
-  console.log(`PASS ${instrument.market} quote (${quote.price}, ${result.elapsedMs}ms, timestamp=${timestampText}, ageMs=${ageMs}, verified=${Boolean(quote.timestampVerified)}, polling=${quote.pollingInterval ?? "n/a"})`);
+  console.log(`PASS ${instrument.market}${venue ? ` ${venue}` : ""} quote + statistics (${quote.price}, ${result.elapsedMs}ms, timestamp=${timestampText}, ageMs=${ageMs}, verified=${Boolean(quote.timestampVerified)}, polling=${quote.pollingInterval ?? "n/a"})`);
   return quote;
 }
 
@@ -115,7 +123,10 @@ assert(me.response.status === 200 && me.data?.user?.nickname === nickname, "prod
 console.log(`PASS production D1 session readback (${me.elapsedMs}ms)`);
 
 const kr = await searchInstrument(cookie, "KR", "삼성전자", "005930");
-await quoteInstrument(cookie, kr);
+const krxQuote = await quoteInstrument(cookie, kr, "KRX");
+if (Array.isArray(krxQuote.availableVenues) && krxQuote.availableVenues.includes("NXT")) {
+  await quoteInstrument(cookie, kr, "NXT");
+}
 
 const us = await searchInstrument(cookie, "US", "AAPL");
 await quoteInstrument(cookie, us);
@@ -123,12 +134,15 @@ await quoteInstrument(cookie, us);
 const crypto = await searchInstrument(cookie, "CRYPTO", "BTC");
 await quoteInstrument(cookie, crypto);
 
-for (const market of ["KR", "US"]) {
-  const status = await jsonRequest(`/api/market-status?market=${market}`, { headers: authHeaders(cookie), cache: "no-store" });
-  assert(status.response.status === 200, `${market} market status expected 200, got ${status.response.status}: ${JSON.stringify(status.data)}`);
-  assert(status.data?.source === "NAVER", `${market} market status source is not NAVER`);
-  console.log(`PASS ${market} market status (${status.data?.label ?? "unknown"}, ${status.elapsedMs}ms)`);
+for (const venue of ["KRX", "NXT"]) {
+  const status = await jsonRequest(`/api/market-status?market=KR&live=1&venue=${venue}`, { headers: authHeaders(cookie), cache: "no-store" });
+  assert(status.response.status === 200, `KR ${venue} market status expected 200, got ${status.response.status}: ${JSON.stringify(status.data)}`);
+  assert(status.data?.source === "NAVER" && status.data?.exchange === venue, `KR ${venue} status mismatch: ${JSON.stringify(status.data)}`);
+  console.log(`PASS KR ${venue} market status (${status.data?.label ?? "unknown"}, ${status.elapsedMs}ms)`);
 }
+const usStatus = await jsonRequest("/api/market-status?market=US", { headers: authHeaders(cookie), cache: "no-store" });
+assert(usStatus.response.status === 200 && usStatus.data?.source === "NAVER", `US market status invalid: ${JSON.stringify(usStatus.data)}`);
+console.log(`PASS US market status (${usStatus.data?.label ?? "unknown"}, ${usStatus.elapsedMs}ms)`);
 
 const chartParams = new URLSearchParams({ market: "KR", symbol: "005930", exchange: kr.exchange || "KRX", range: "1M" });
 const chart = await jsonRequest(`/api/chart?${chartParams.toString()}`, { headers: authHeaders(cookie), cache: "no-store" });
