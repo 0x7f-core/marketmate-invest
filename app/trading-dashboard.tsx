@@ -455,8 +455,11 @@ function OrderPanel({ quote, participantId, availableCashKrw, heldQuantityMicros
 }
 
 const NAVER_STOCK_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
+const NAVER_CRYPTO_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/crypto/";
+const UPBIT_CRYPTO_LOGO_BASE="https://static.upbit.com/logos/";
 function normalizeNaverLogoCode(symbol:string){let clean=String(symbol??"").trim().replaceAll("\\","/");const tail=clean.split("/").filter(Boolean).pop()??"";clean=tail.replace(/\.svg$/i,"").replace(/^(?:Stock)+/i,"");return clean.replace(/[^A-Za-z0-9._-]/g,"");}
-function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO")return["/favicon.svg"];const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([resolver,`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}
+function normalizeCryptoLogoTicker(symbol:string){return String(symbol??"").trim().toUpperCase().replace(/^KRW[-_]/,"").replace(/_KRW_(?:UPBIT|BITHUMB)$/,"").replace(/[^A-Z0-9]/g,"");}
+function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO"){const ticker=normalizeCryptoLogoTicker(instrument.symbol);if(!ticker)return[];return[`${UPBIT_CRYPTO_LOGO_BASE}${encodeURIComponent(ticker)}.png`,`${NAVER_CRYPTO_LOGO_BASE}Crypto${ticker}.svg`];}const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([resolver,`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}
 // Observed Naver search results group fallback colors into six recurring hues.
 const INSTRUMENT_FALLBACK_COLORS=["#cf6530","#dc9a24","#50896a","#4d75a8","#8e4ca4","#be3b7c"] as const;
 function instrumentFallbackSeed(instrument:Pick<Instrument,"market"|"symbol"|"name">){const code=normalizeNaverLogoCode(instrument.symbol).replace(/\.(?:O|K|N|P|A)$/i,"").normalize("NFKC").trim();return code||instrument.name.normalize("NFKC").trim();}
