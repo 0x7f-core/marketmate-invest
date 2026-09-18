@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { persistQuoteSnapshot, type Market } from "@/lib/server/market-data";
 import { getTradingQuote } from "@/lib/server/trading-quote";
+import { getUsListingExchange } from "@/lib/server/us-listing-exchange";
 
 type StaleInstrument = {
   id: string;
@@ -21,10 +22,15 @@ async function refreshLeaderboardQuote(instrument: StaleInstrument, refreshStart
   }
 
   try {
-    const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
+    const usListing = instrument.market === "US"
+      ? await getUsListingExchange(instrument.symbol, instrument.exchange)
+      : "";
+    const quote = await getTradingQuote(instrument.market, instrument.symbol, usListing || instrument.exchange);
     if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
     if (instrument.market === "KR" && quote.venue) {
       await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(quote.venue, instrument.id).run();
+    } else if (instrument.market === "US" && usListing && usListing !== instrument.exchange) {
+      await env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(usListing, instrument.id).run();
     }
     await persistQuoteSnapshot(quote);
   } catch {
