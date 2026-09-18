@@ -70,8 +70,12 @@ async function quoteInstrument(cookie, instrument, venue) {
   assert(result.data?.source === "NAVER", `${instrument.market} quote source is not NAVER`);
   assert(Array.isArray(result.data?.quotes) && Number(result.data.quotes[0]?.price) > 0, `${instrument.market} quote missing positive price`);
   const quote = result.data.quotes[0];
-  for (const field of ["referencePrice", "open", "high", "low", "volume", "tradingValue", "high52Week", "low52Week"]) {
+  for (const field of ["referencePrice", "high52Week", "low52Week"]) {
     assert(Number(quote?.[field]) > 0, `${instrument.market} quote missing ${field}: ${JSON.stringify(quote)}`);
+  }
+  for (const field of ["open", "high", "low", "volume", "tradingValue"]) {
+    const value = Number(quote?.[field]);
+    assert(Number.isFinite(value) && value >= 0, `${instrument.market} quote invalid ${field}: ${JSON.stringify(quote)}`);
   }
   if (instrument.market === "KR" && venue) {
     assert(quote?.tradingVenue === venue, `KR requested ${venue} but received ${quote?.tradingVenue}`);
