@@ -18,10 +18,15 @@ export type MarketSession = {
 type NaverStatus = Record<string, unknown>;
 
 const US_AFTER_MARKET_CUTOFF_MINUTES_ET = 19 * 60 + 50;
-const KR_NXT_PREMARKET_CLOSE_MINUTES = 8 * 60 + 50;
-const KR_KRX_REGULAR_OPEN_MINUTES = 9 * 60;
-const KR_CLOSING_AUCTION_START_MINUTES = 15 * 60 + 20;
-const KR_CLOSING_AUCTION_END_MINUTES = 15 * 60 + 30;
+
+export type DomesticVenueClockSession = {
+  exchange: DomesticTradingVenue;
+  isOpen: boolean;
+  label: "프리마켓" | "동시호가" | "정규장" | "애프터마켓" | "애프터마켓 마감" | "장 마감";
+  currentSession: "preMarket" | "openingAuction" | "regularMarket" | "closingAuction" | "afterMarket" | "afterMarketClosing" | "closed";
+  openTimeKst?: string;
+  closeTimeKst?: string;
+};
 
 function asRecord(value: unknown): NaverStatus | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as NaverStatus : null;
@@ -99,9 +104,10 @@ function sessionLabel(type: string, market: Market) {
   return type || (market === "US" ? "미국장" : "국내장");
 }
 
-function clockMinutesNow(timeZone: string) {
+function clockPartsNow(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
+    weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
@@ -109,21 +115,64 @@ function clockMinutesNow(timeZone: string) {
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
   const hour = Number(value("hour"));
   const minute = Number(value("minute"));
-  return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1;
+  return {
+    weekday: value("weekday"),
+    minutes: Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : -1,
+  };
+}
+
+function clockMinutesNow(timeZone: string) {
+  return clockPartsNow(timeZone).minutes;
 }
 
 function newYorkMinutesNow() {
   return clockMinutesNow("America/New_York");
 }
 
-function isKrMorningBreak() {
-  const minutes = clockMinutesNow("Asia/Seoul");
-  return minutes >= KR_NXT_PREMARKET_CLOSE_MINUTES && minutes < KR_KRX_REGULAR_OPEN_MINUTES;
+export function getDomesticVenueClockSession(venue: DomesticTradingVenue): DomesticVenueClockSession {
+  const now = clockPartsNow("Asia/Seoul");
+  const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(now.weekday);
+  const minutes = now.minutes;
+
+  if (!weekday || minutes < 0) {
+    return { exchange: venue, isOpen: false, label: "장 마감", currentSession: "closed" };
+  }
+
+  if (minutes < 8 * 60 || minutes >= 20 * 60) {
+    return {
+      exchange: venue,
+      isOpen: false,
+      label: "애프터마켓 마감",
+      currentSession: "afterMarketClosing",
+      openTimeKst: "20:00",
+      closeTimeKst: "08:00",
+    };
+  }
+
+  if (venue === "NXT") {
+    if (minutes < 8 * 60 + 50) return { exchange: venue, isOpen: true, label: "프리마켓", currentSession: "preMarket", openTimeKst: "08:00", closeTimeKst: "08:50" };
+    if (minutes < 9 * 60) return { exchange: venue, isOpen: false, label: "동시호가", currentSession: "openingAuction", openTimeKst: "08:50", closeTimeKst: "09:00" };
+    if (minutes < 15 * 60 + 20) return { exchange: venue, isOpen: true, label: "정규장", currentSession: "regularMarket", openTimeKst: "09:00", closeTimeKst: "15:20" };
+    if (minutes < 15 * 60 + 40) return { exchange: venue, isOpen: false, label: "동시호가", currentSession: "closingAuction", openTimeKst: "15:20", closeTimeKst: "15:40" };
+    return { exchange: venue, isOpen: true, label: "애프터마켓", currentSession: "afterMarket", openTimeKst: "15:40", closeTimeKst: "20:00" };
+  }
+
+  if (minutes < 8 * 60 + 50) return { exchange: venue, isOpen: false, label: "장 마감", currentSession: "closed" };
+  if (minutes < 9 * 60) return { exchange: venue, isOpen: false, label: "동시호가", currentSession: "openingAuction", openTimeKst: "08:50", closeTimeKst: "09:00" };
+  if (minutes < 15 * 60 + 20) return { exchange: venue, isOpen: true, label: "정규장", currentSession: "regularMarket", openTimeKst: "09:00", closeTimeKst: "15:20" };
+  if (minutes < 15 * 60 + 30) return { exchange: venue, isOpen: false, label: "장 마감", currentSession: "closed" };
+  if (minutes < 16 * 60) return { exchange: venue, isOpen: false, label: "동시호가", currentSession: "closingAuction", openTimeKst: "15:30", closeTimeKst: "16:00" };
+  return { exchange: venue, isOpen: true, label: "애프터마켓", currentSession: "afterMarket", openTimeKst: "16:00", closeTimeKst: "20:00" };
 }
 
-function isKrClosingAuction() {
-  const minutes = clockMinutesNow("Asia/Seoul");
-  return minutes >= KR_CLOSING_AUCTION_START_MINUTES && minutes < KR_CLOSING_AUCTION_END_MINUTES;
+export function getDomesticOverviewClockSession() {
+  const krx = getDomesticVenueClockSession("KRX");
+  const nxt = getDomesticVenueClockSession("NXT");
+  if (krx.isOpen) return krx;
+  if (nxt.isOpen) return nxt;
+  if (krx.currentSession !== "closed") return krx;
+  if (nxt.currentSession !== "closed") return nxt;
+  return krx;
 }
 
 function beforeUsAfterMarketCutoff() {
@@ -152,11 +201,27 @@ function usAfterMarketCloseKst(detail: ReturnType<typeof sessionDetails>) {
 
 function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen || !detail.currentType) return false;
-  if (market === "KR") return !isKrMorningBreak() && !isKrClosingAuction();
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
   if (market === "US") return !type.includes("after") || beforeUsAfterMarketCutoff();
   return true;
+}
+
+function domesticNotice(session: DomesticVenueClockSession, naverOpen: boolean) {
+  const schedule = session.openTimeKst && session.closeTimeKst ? ` · ${session.openTimeKst}~${session.closeTimeKst} KST` : "";
+  if (session.currentSession === "openingAuction" || session.currentSession === "closingAuction") {
+    return `${session.exchange} ${session.label} 시간에는 모의주문을 받지 않습니다${schedule}.`;
+  }
+  if (session.currentSession === "afterMarketClosing") {
+    return `${session.exchange} 애프터마켓이 마감되었습니다${schedule}.`;
+  }
+  if (!session.isOpen) {
+    return `${session.exchange} 현재 거래 가능 시간이 아닙니다.`;
+  }
+  if (!naverOpen) {
+    return `현재 시간은 ${session.exchange} ${session.label} 구간이지만 네이버증권 장 상태가 열림으로 확인되지 않아 안전을 위해 주문을 중단합니다${schedule}.`;
+  }
+  return `${session.exchange} ${session.label} 주문 가능${schedule}.`;
 }
 
 function closedFallback(market: Market, stale = false): MarketSession {
@@ -179,34 +244,6 @@ export async function getCheckedMarketSession(
     return { isOpen: true, label: "24시간", notice: "가상자산은 네이버증권 시세 기준으로 24시간 주문할 수 있습니다.", source: "NAVER" };
   }
 
-  if (market === "KR" && !preferredDomesticVenue && isKrMorningBreak()) {
-    return {
-      isOpen: false,
-      label: "동시호가",
-      notice: "국내주식은 08:50~09:00 KST 동시호가 시간에는 모의투자 주문을 받지 않습니다. 09:00 KST부터 다시 주문할 수 있습니다.",
-      exchange: "NXT",
-      currentSession: "openingAuction",
-      openTimeKst: "09:00",
-      closeTimeKst: "15:30",
-      source: "NAVER",
-      stale: false,
-    };
-  }
-
-  if (market === "KR" && !preferredDomesticVenue && isKrClosingAuction()) {
-    return {
-      isOpen: false,
-      label: "동시호가",
-      notice: "국내주식은 15:20~15:30 KST 동시호가 시간에는 모의투자 주문을 받지 않습니다. 15:30 KST부터 다시 주문할 수 있습니다.",
-      exchange: "KRX",
-      currentSession: "closingAuction",
-      openTimeKst: "15:30",
-      closeTimeKst: "20:00",
-      source: "NAVER",
-      stale: false,
-    };
-  }
-
   const exchanges = market === "KR" ? ["krx", "nxt"] : ["nasdaq"];
   try {
     const result = await naverJson<unknown>(buildNaverPath("/api/stockSecurity/market-status/current", { exchanges }), { ttlMs: 5_000, staleMs: 120_000 });
@@ -220,21 +257,52 @@ export async function getCheckedMarketSession(
       const detail = sessionDetails(status);
       return { status, exchange, detail, tradable: isSupportedTradingSession(market, exchange, detail) };
     });
-    const preferredExchange = preferredDomesticVenue?.toLocaleLowerCase("en-US");
-    const selected = market === "KR"
-      ? preferredExchange
-        ? detailed.find(item => item.exchange === preferredExchange)
-          ?? detailed.find(item => item.exchange === "krx")
-          ?? detailed[0]
-        : detailed.find(item => item.exchange === "krx" && item.tradable)
-          ?? detailed.find(item => item.exchange === "nxt" && item.tradable)
-          ?? detailed.find(item => item.exchange === "krx" && !item.detail.holiday)
-          ?? detailed.find(item => !item.detail.holiday)
-          ?? detailed[0]
-      : detailed.find(item => item.tradable) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
+
+    if (market === "KR") {
+      const withClock = detailed
+        .filter(item => item.exchange === "krx" || item.exchange === "nxt")
+        .map(item => {
+          const venue = item.exchange.toUpperCase() as DomesticTradingVenue;
+          const clock = getDomesticVenueClockSession(venue);
+          const tradable = !item.detail.holiday && clock.isOpen && item.detail.isOpen;
+          return { ...item, venue, clock, tradable };
+        });
+
+      const preferredExchange = preferredDomesticVenue?.toLocaleLowerCase("en-US");
+      const selected = preferredExchange
+        ? withClock.find(item => item.exchange === preferredExchange)
+        : withClock.find(item => item.venue === "KRX" && item.tradable)
+          ?? withClock.find(item => item.venue === "NXT" && item.tradable)
+          ?? withClock.find(item => item.venue === "KRX" && !item.detail.holiday && item.clock.currentSession !== "closed")
+          ?? withClock.find(item => item.venue === "NXT" && !item.detail.holiday && item.clock.currentSession !== "closed")
+          ?? withClock.find(item => item.venue === "KRX" && !item.detail.holiday)
+          ?? withClock.find(item => !item.detail.holiday)
+          ?? withClock[0];
+
+      if (!selected) return closedFallback(market);
+
+      const { venue, clock, detail } = selected;
+      const isOpen = selected.tradable;
+      return {
+        isOpen,
+        label: `${detail.holiday ? "휴장일" : clock.label} · ${venue}`,
+        notice: detail.holiday
+          ? `네이버증권 기준 ${venue} 휴장일로 주문할 수 없습니다.`
+          : domesticNotice(clock, detail.isOpen),
+        exchange: venue,
+        isHoliday: detail.holiday,
+        currentSession: clock.currentSession,
+        openTimeKst: clock.openTimeKst,
+        closeTimeKst: clock.closeTimeKst,
+        source: "NAVER",
+        stale: false,
+      };
+    }
+
+    const selected = detailed.find(item => item.tradable) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
     const exchange = stringValue(selected.status, ["exchange"]).toUpperCase();
     const rawDetail = selected.detail;
-    const afterMarket = market === "US" && isUsAfterMarket(rawDetail.currentType);
+    const afterMarket = isUsAfterMarket(rawDetail.currentType);
     const detail = afterMarket ? { ...rawDetail, closeTimeKst: usAfterMarketCloseKst(rawDetail) } : rawDetail;
     const isOpen = selected.tradable;
     const afterMarketCutoffReached = afterMarket && rawDetail.isOpen && !isOpen && !beforeUsAfterMarketCutoff();
@@ -250,7 +318,7 @@ export async function getCheckedMarketSession(
             ? sessionName
             : "장 마감";
     const schedule = detail.openTimeKst && detail.closeTimeKst ? ` · ${detail.openTimeKst}~${detail.closeTimeKst} KST` : "";
-    const dst = market === "US" && detail.daylight !== undefined ? ` · ${detail.daylight ? "서머타임" : "표준시"}` : "";
+    const dst = detail.daylight !== undefined ? ` · ${detail.daylight ? "서머타임" : "표준시"}` : "";
     return {
       isOpen,
       label: `${label}${exchange ? ` · ${exchange}` : ""}`,
