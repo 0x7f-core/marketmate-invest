@@ -7,6 +7,7 @@ import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote, isExecutableTradingQuote } from "@/lib/server/trading-quote";
+import { getUsListingExchange } from "@/lib/server/us-listing-exchange";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 import { calculateTradingCosts } from "@/lib/trading-costs";
 
@@ -79,6 +80,10 @@ export async function POST(request: Request) {
     const symbol = normalizeNaverMarketSymbol(body.market, rawSymbol);
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
       return Response.json({ error: "한국·미국주식과 가상자산만 거래할 수 있습니다." }, { status: 400 });
+    }
+    if (body.market === "US") {
+      const listing = await getUsListingExchange(symbol, exchange);
+      if (listing) exchange = listing;
     }
 
     const participant = await env.DB!.prepare(
