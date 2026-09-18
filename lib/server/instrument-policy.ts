@@ -42,7 +42,7 @@ export function normalizeSupportedExchange(market: SupportedMarket, value: strin
   }
 
   if (compact.includes("NYSEARCA") || compact === "ARCA" || compact === "PSE") return "ARCA";
-  if (compact.includes("NYSEAMERICAN") || compact.includes("AMEX") || ["AMS", "ASE"].includes(compact)) return "AMS";
+  if (compact.includes("NYSEAMERICAN") || compact.includes("NYSEMKT") || compact.includes("AMEX") || ["AMS", "ASE"].includes(compact)) return "AMS";
   if (compact.includes("CBOE") || compact.includes("BATS") || compact.includes("BZX") || compact.includes("EDGX")) return "CBOE";
   if (compact.includes("OTCQX") || compact.includes("OTCQB") || compact.includes("OTCMARKETS") || compact.includes("PINK") || compact === "OTC") return "OTC";
   if (compact.includes("NYSE") || ["NYS", "NYQ"].includes(compact)) return "NYS";
