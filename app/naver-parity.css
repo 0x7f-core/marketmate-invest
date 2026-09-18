@@ -89,6 +89,9 @@
 .marketmate-v2 .np-stats>span:nth-child(4n){border-right:0}
 .marketmate-v2 .np-stats>span:last-child{border-right:0}
 .marketmate-v2 .np-stats b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#191f28;font-size:12px}
+.marketmate-v2 .np-stats>span.np-stat-dated{min-height:62px}
+.marketmate-v2 .np-stat-label{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:3px;line-height:1.15}
+.marketmate-v2 .np-stat-label small{color:#aeb5bd;font-size:10px;font-weight:500;line-height:1.15;white-space:nowrap}
 .marketmate-v2 .order-venue-selector{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:2px 0 10px}
 .marketmate-v2 .order-venue-selector>span{color:#7b8490;font-size:12px;font-weight:700}
 .marketmate-v2 .order-venue-selector button{min-width:48px;height:28px;padding:0 10px}
@@ -167,6 +170,8 @@
   .marketmate-v2 .np-price>small{display:block;margin:7px 0 0;font-size:10px}
   .marketmate-v2 .np-stats{margin:0 16px 14px;grid-template-columns:1fr 1fr;border:1px solid #edf0f2;border-radius:0}
   .marketmate-v2 .np-stats>span{min-height:46px;padding:0 10px!important;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2}
+  .marketmate-v2 .np-stats>span.np-stat-dated{min-height:58px}
+  .marketmate-v2 .np-stat-label small{font-size:9px}
   .marketmate-v2 .np-stats>span:nth-child(4n){border-right:1px solid #edf0f2}
   .marketmate-v2 .np-stats>span:nth-child(2n){border-right:0}
   .marketmate-v2 .np-stats>span:nth-last-child(-n+2){border-bottom:1px solid #edf0f2}
