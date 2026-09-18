@@ -23,6 +23,7 @@ export type UsdKrwMarketIndexDetail = {
   cashSell?: number;
   send?: number;
   receive?: number;
+  chartImages?: Partial<Record<"1M" | "3M" | "1Y", string>>;
 };
 
 export type UsdKrwHistoryPoint = {
@@ -209,7 +210,13 @@ export async function getNaverUsdKrwMarketIndexDetail(): Promise<UsdKrwMarketInd
     naverMarketIndexJson("/marketindex/exchange/FX_USDKRW", 30_000, 10 * 60_000),
     getNaverUsdKrwMarketIndexHistory(12).catch(() => null),
   ]);
-  const detail = records(detailResult.data).find(record =>
+  const root = detailResult.data && typeof detailResult.data === "object"
+    ? detailResult.data as Record<string, unknown>
+    : {};
+  const exchangeInfo = root.exchangeInfo && typeof root.exchangeInfo === "object" && !Array.isArray(root.exchangeInfo)
+    ? root.exchangeInfo as Record<string, unknown>
+    : null;
+  const detail = exchangeInfo ?? records(detailResult.data).find(record =>
     asNumber(record.closePrice, record.currentPrice, record.price, record.value) > 0,
   ) ?? records(detailResult.data)[0];
   const latest = historyResult?.points.at(-1);
@@ -220,6 +227,17 @@ export async function getNaverUsdKrwMarketIndexDetail(): Promise<UsdKrwMarketInd
   const timestamp = detail
     ? parseTime(detail.localTradedAt ?? detail.tradeDate ?? detail.date, detailResult.fetchedAt)
     : detailResult.fetchedAt;
+  const rawImages = detail?.imageCharts && typeof detail.imageCharts === "object" && !Array.isArray(detail.imageCharts)
+    ? detail.imageCharts as Record<string, unknown>
+    : {};
+  const rawImageInfo = detail?.imageChartUrlInfo && typeof detail.imageChartUrlInfo === "object" && !Array.isArray(detail.imageChartUrlInfo)
+    ? detail.imageChartUrlInfo as Record<string, unknown>
+    : {};
+  const rawLine = rawImageInfo.line && typeof rawImageInfo.line === "object" && !Array.isArray(rawImageInfo.line)
+    ? rawImageInfo.line as Record<string, unknown>
+    : {};
+  const image = (...values: unknown[]) => values.find(value => typeof value === "string" && /^https:\/\//i.test(value)) as string | undefined;
+
   return {
     rate,
     change,
@@ -230,5 +248,10 @@ export async function getNaverUsdKrwMarketIndexDetail(): Promise<UsdKrwMarketInd
     cashSell: latest?.cashSell,
     send: latest?.send,
     receive: latest?.receive,
+    chartImages: {
+      "1M": image(rawLine.month, rawImages.areaMonth),
+      "3M": image(rawLine.month3, rawImages.areaMonthThree),
+      "1Y": image(rawLine.year, rawImages.areaYear),
+    },
   };
 }
