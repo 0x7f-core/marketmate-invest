@@ -91,6 +91,9 @@
 .np-popular-primary>em{font-size:14px;font-style:normal;font-weight:900;text-align:right;white-space:nowrap}
 .np-popular-expand{display:grid;place-items:center;border:0;background:#fff;color:#16b85b}
 .np-popular-expand>svg{width:18px;height:18px}
+.np-popular-rank,.np-popular-name,.np-popular-rate{animation:popularTickerIn .22s ease-out}
+@keyframes popularTickerIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.np-popular-rank,.np-popular-name,.np-popular-rate{animation:none}}
 
 .popular-stocks-layer{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.42)}
 .popular-stocks-sheet{width:min(520px,calc(100vw - 40px));max-height:min(82vh,740px);display:flex;flex-direction:column;overflow:hidden;border-radius:24px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.2)}
