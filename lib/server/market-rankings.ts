@@ -104,7 +104,7 @@ function normalizeSymbol(market: RankingMarket, row: Row) {
   const raw = textValue(row, market === "KR"
     ? ["itemCode", "stockCode", "symbolCode", "symbol", "code"]
     : market === "US"
-      ? ["reutersCode", "symbolCode", "symbol", "ticker", "stockCode", "code"]
+      ? ["reutersCode", "symbolCode", "symbol", "ticker", "stockCode", "itemCode", "itemcode", "code"]
       : ["ticker", "symbol", "coinCode", "code", "nfTicker", "fqnfTicker"]);
   if (!raw) return "";
   if (market === "KR") return raw.replace(/^A(?=\d{6}$)/, "").toUpperCase();
@@ -404,7 +404,7 @@ async function legacyPopular(market: PopularStockMarket) {
 
 export async function getPopularStocks(market: PopularStockMarket): Promise<PopularStocksResult> {
   let result = await popularAggregate(market);
-  let rows = aggregatePopularRows(result.data, market);
+  const rows = aggregatePopularRows(result.data, market);
   let normalized = uniqueItems(market, rows.length ? rows : result.data);
 
   if (!normalized.length) {
