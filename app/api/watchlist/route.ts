@@ -90,7 +90,10 @@ export async function GET(request: Request) {
     }
 
     const refreshed = await Promise.allSettled(stale.map(async item => {
-      const quote = await getTradingQuote(item.market, item.symbol, item.exchange);
+      const resolvedExchange = item.market === "US"
+        ? await getUsListingExchange(item.symbol, item.exchange) || item.exchange
+        : item.exchange;
+      const quote = await getTradingQuote(item.market, item.symbol, resolvedExchange);
       if (quote.stale) return null;
       return { watchlistId: item.id, quote, receivedAt: Date.now() } satisfies RefreshedWatchlistQuote;
     }));
