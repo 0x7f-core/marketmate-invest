@@ -443,7 +443,7 @@ const DOMESTIC_TRADING_SCHEDULE:{venue:DomesticVenue;rows:DomesticScheduleRow[]}
     {label:"정규장 마감",start:"15:30",end:"15:40",tradable:false},
     {label:"장후 시간외 종가",start:"15:40",end:"16:00",tradable:true},
     {label:"애프터마켓",start:"16:00",end:"20:00",tradable:true},
-    {label:"애프터마켓 마감",start:"20:00",end:"08:00",tradable:false},
+    {label:"장 마감",start:"20:00",end:"08:40",tradable:false},
   ]},
   {venue:"NXT",rows:[
     {label:"프리마켓",start:"08:00",end:"08:50",tradable:true},
@@ -451,7 +451,7 @@ const DOMESTIC_TRADING_SCHEDULE:{venue:DomesticVenue;rows:DomesticScheduleRow[]}
     {label:"정규장",start:"09:00",end:"15:20",tradable:true},
     {label:"정규장 마감",start:"15:20",end:"15:40",tradable:false},
     {label:"애프터마켓",start:"15:40",end:"20:00",tradable:true},
-    {label:"애프터마켓 마감",start:"20:00",end:"08:00",tradable:false},
+    {label:"장 마감",start:"20:00",end:"08:00",tradable:false},
   ]},
 ];
 function scheduleMinutes(value:string){const[hour,minute]=value.split(":").map(Number);return hour*60+minute;}
@@ -479,12 +479,12 @@ function usTradingScheduleRows(isDst:boolean):DomesticScheduleRow[]{
     {label:"프리마켓",start:"17:00",end:"22:30",tradable:true},
     {label:"정규장",start:"22:30",end:"05:00",tradable:true},
     {label:"애프터마켓",start:"05:00",end:"08:50",tradable:true},
-    {label:"애프터마켓 마감",start:"08:50",end:"17:00",tradable:false},
+    {label:"장 마감",start:"08:50",end:"17:00",tradable:false},
   ]:[
     {label:"프리마켓",start:"18:00",end:"23:30",tradable:true},
     {label:"정규장",start:"23:30",end:"06:00",tradable:true},
     {label:"애프터마켓",start:"06:00",end:"09:50",tradable:true},
-    {label:"애프터마켓 마감",start:"09:50",end:"18:00",tradable:false},
+    {label:"장 마감",start:"09:50",end:"18:00",tradable:false},
   ];
 }
 function newYorkDaylightSavingNow(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",timeZoneName:"short"}).formatToParts(new Date());const zone=parts.find(part=>part.type==="timeZoneName")?.value??"";return zone.toUpperCase().includes("EDT");}
