@@ -85,7 +85,7 @@ export default function MobileInstrumentSearch() {
 
   const loadWatchlist = useCallback(async () => {
     try {
-      const response = await fetch("/api/watchlist", { cache: "no-store" });
+      const response = await fetch("/api/watchlist?mode=fast", { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json() as { items?: WatchlistItem[] };
       setWatchlist(payload.items ?? []);
