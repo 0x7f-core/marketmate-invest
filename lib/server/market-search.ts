@@ -105,7 +105,7 @@ function normalize(record: Record<string, unknown>): SearchInstrument | null {
       : normalizeSupportedExchange(market, exchangeRaw)
         || (nationKind === "US" ? "USA" : "");
   if (!exchange) return null;
-  return { market, symbol: normalizedSymbol, name, exchange, currency: market === "US" ? "USD" : "KRW" };
+  return { market, symbol: normalizedSymbol, name: market === "CRYPTO" ? canonicalCryptoDisplayName(normalizedSymbol, name) : name, exchange, currency: market === "US" ? "USD" : "KRW" };
 }
 
 function searchableSymbol(item: SearchInstrument) {
