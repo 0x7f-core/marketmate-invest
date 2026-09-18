@@ -18,6 +18,7 @@ export type LiveQuote = {
   source: "NAVER";
   stale?: boolean;
   pollingInterval?: number;
+  referencePrice?: number;
   open?: number;
   high?: number;
   low?: number;
@@ -163,10 +164,20 @@ function quoteValues(row: Record<string, unknown>) {
   const price = asNumber(row.closePrice, row.currentPrice, row.nowPrice, row.tradePrice, row.price, row.lastPrice, row.last);
   const change = asNumber(row.compareToPreviousClosePrice, row.changePrice, row.changeValue, row.change, row.netChange, row.prevChange);
   const changeRate = asNumber(row.fluctuationsRatio, row.changeRate, row.changeRatio, row.rate, row.prevChangeRate);
+  const referencePrice = asNumber(
+    row.referencePrice,
+    row.standardPrice,
+    row.previousClosePrice,
+    row.prevClosePrice,
+    row.previousClosingPrice,
+    row.prevClosingPrice,
+    row.basePrice,
+  ) || (price > 0 ? price - change : 0);
   return {
     price,
     change,
     changeRate,
+    referencePrice,
     open: asNumber(row.openPrice, row.open, row.openingPrice),
     high: asNumber(row.highPrice, row.high, row.highestPrice),
     low: asNumber(row.lowPrice, row.low, row.lowestPrice),
@@ -268,7 +279,8 @@ async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"
     selected = over ?? nxtSnapshot ?? {};
   }
 
-  const baseValues = quoteValues(selected);
+  const krxValues = quoteValues(row);
+  const baseValues = venue === "NXT" ? quoteValues(selected) : krxValues;
   const price = venue === "NXT"
     ? asNumber(selected.overPrice, selected.currentPrice, selected.closePrice, selected.tradePrice, selected.price)
     : baseValues.price;
@@ -279,6 +291,16 @@ async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"
     ? asNumber(selected.fluctuationsRatio, selected.changeRate, selected.changeRatio, selected.rate)
     : baseValues.changeRate;
   if (price <= 0) throw new Error("NAVER_INVALID_QUOTE");
+
+  const referencePrice = asNumber(
+    krxSnapshot?.referencePrice,
+    krxSnapshot?.standardPrice,
+    krxSnapshot?.previousClosePrice,
+    krxSnapshot?.prevClosePrice,
+    krxSnapshot?.previousClosingPrice,
+    krxSnapshot?.prevClosingPrice,
+    krxSnapshot?.basePrice,
+  ) || krxValues.referencePrice;
 
   const integratedOpen = asNumber(
     integrated?.openPrice,
@@ -329,6 +351,7 @@ async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"
     price,
     change,
     changeRate,
+    referencePrice: referencePrice || undefined,
     open: integratedOpen || undefined,
     high: integratedHigh || undefined,
     low: integratedLow || undefined,
