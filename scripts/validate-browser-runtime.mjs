@@ -253,14 +253,16 @@ async function main() {
       venueButtons: document.querySelectorAll('.np-domestic-venue-switch button').length,
       orderVenueButtons: document.querySelectorAll('.np-trading > aside .order-venue-selector button').length,
       statItems: document.querySelectorAll('.np-quote .np-stats > span').length,
-      statText: document.querySelector('.np-quote .np-stats')?.textContent || ''
+      statText: document.querySelector('.np-quote .np-stats')?.textContent || '',
+      dateItemCount: document.querySelectorAll('.np-quote .np-stat-label small').length
     }))()`);
     assert(domesticQuoteControls?.venueButtons === 2, `Domestic KRX/NXT quote switch missing: ${JSON.stringify(domesticQuoteControls)}`);
     assert(domesticQuoteControls?.orderVenueButtons === 2, `Domestic KRX/NXT order switch missing: ${JSON.stringify(domesticQuoteControls)}`);
-    assert(domesticQuoteControls?.statItems === 7, `Expected 7 quote statistics: ${JSON.stringify(domesticQuoteControls)}`);
-    for (const label of ['시가','고가','저가','거래량','거래대금','52주 최고','52주 최저']) {
+    assert(domesticQuoteControls?.statItems === 8, `Expected 8 quote statistics: ${JSON.stringify(domesticQuoteControls)}`);
+    for (const label of ['기준가','시가','고가','저가','거래량','거래대금','52주 최고','52주 최저']) {
       assert(domesticQuoteControls.statText.includes(label), `Quote statistic missing label: ${label}`);
     }
+    assert(domesticQuoteControls?.dateItemCount === 2, '52-week date labels are missing');
     await client.screenshot(`${ARTIFACT_DIR}/desktop-market.png`);
     console.log(`PASS desktop chart + news + KRX/NXT controls + expanded stats (${Math.round(desktopChart.width)}x${Math.round(desktopChart.height)})`);
 
