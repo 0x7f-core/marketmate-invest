@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
+import { getNaverUsdKrwMarketIndexDetail, getNaverUsdKrwMarketIndexHistory } from "@/lib/server/naver-market-index";
 import { buildNaverPath, naverJson, naverPolling } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
@@ -527,6 +528,10 @@ export type MarketIndexDetail = MarketIndexQuote & {
   tradingValue?: number;
   high52Week?: number;
   low52Week?: number;
+  cashBuy?: number;
+  cashSell?: number;
+  send?: number;
+  receive?: number;
 };
 
 export function isTrackedMarketIndexId(value: string): value is TrackedMarketIndexId {
@@ -582,16 +587,30 @@ async function trackedIndexHistory(meta: TrackedMarketIndexMeta, range: string) 
     return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
   }
 
-  const starts = days > 120 ? [0, 100, 200, 300] : [0];
-  const pages = await Promise.all(starts.map(startIdx => naverJson<unknown>(
-    buildNaverPath("/api/domestic/exchange/USD/list", { startIdx, pageSize: 100 }),
-    { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 },
-  )));
-  const points = pages
-    .flatMap(page => normalizeIndexPoints(page.data, page.fetchedAt))
-    .sort((a, b) => a.time - b.time)
-    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
-  return { points, stale: pages.some(page => page.stale) };
+  try {
+    const fx = await getNaverUsdKrwMarketIndexHistory(days);
+    const points: ChartPoint[] = fx.points.map(point => ({
+      time: point.time,
+      open: point.close,
+      high: point.close,
+      low: point.close,
+      close: point.close,
+    }));
+    return { points, stale: fx.stale };
+  } catch {
+    // Current Naver market-index JSON is preferred for USD/KRW. Keep the
+    // stock.naver.com exchange list as a compatibility fallback.
+    const starts = days > 120 ? [0, 100, 200, 300] : [0];
+    const pages = await Promise.all(starts.map(startIdx => naverJson<unknown>(
+      buildNaverPath("/api/domestic/exchange/USD/list", { startIdx, pageSize: 100 }),
+      { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 },
+    )));
+    const points = pages
+      .flatMap(page => normalizeIndexPoints(page.data, page.fetchedAt))
+      .sort((a, b) => a.time - b.time)
+      .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
+    return { points, stale: pages.some(page => page.stale) };
+  }
 }
 
 export async function getTrackedMarketIndexChartSeries(id: TrackedMarketIndexId, range: string) {
@@ -613,6 +632,7 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
   let current: MarketIndexQuote;
   let values: ReturnType<typeof quoteValues> | null = null;
   let pollingInterval: number | undefined;
+  let fxDetail: Awaited<ReturnType<typeof getNaverUsdKrwMarketIndexDetail>> | null = null;
 
   if (meta.kind === "domestic") {
     const result = await naverPolling<unknown>(
@@ -639,18 +659,26 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
     current = quote;
     pollingInterval = result.pollingInterval;
   } else {
-    const fx = await getNaverUsdKrwRate();
+    const [liveFx, marketIndexFx] = await Promise.all([
+      getNaverUsdKrwRate().catch(() => null),
+      getNaverUsdKrwMarketIndexDetail().catch(() => null),
+    ]);
+    fxDetail = marketIndexFx;
+    const price = liveFx?.rate || marketIndexFx?.rate || 0;
+    if (price <= 0) throw new Error("NAVER_FX_UNAVAILABLE");
+    const change = liveFx?.change ?? marketIndexFx?.change ?? 0;
+    const rate = liveFx?.changeRate ?? marketIndexFx?.changeRate ?? 0;
     current = {
       id: meta.id,
       name: meta.name,
       market: meta.market,
-      price: fx.rate,
-      change: fx.change,
-      rate: fx.changeRate,
+      price,
+      change,
+      rate,
       unit: meta.unit,
       source: "NAVER",
-      timestamp: fx.fetchedAt,
-      stale: fx.stale,
+      timestamp: liveFx?.fetchedAt ?? marketIndexFx?.timestamp ?? Date.now(),
+      stale: liveFx?.stale ?? false,
     };
   }
 
@@ -658,7 +686,7 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
   const latest = history.points.at(-1);
   const high52Week = history.points.length ? Math.max(...history.points.map(point => point.high)) : 0;
   const low52Week = history.points.length ? Math.min(...history.points.map(point => point.low)) : 0;
-  const referencePrice = values?.referencePrice || (current.price > 0 ? current.price - current.change : 0);
+  const referencePrice = values?.referencePrice || fxDetail?.referencePrice || (current.price > 0 ? current.price - current.change : 0);
 
   return {
     ...current,
@@ -674,6 +702,10 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
     tradingValue: values?.tradingValue || undefined,
     high52Week: high52Week || undefined,
     low52Week: low52Week || undefined,
+    cashBuy: fxDetail?.cashBuy,
+    cashSell: fxDetail?.cashSell,
+    send: fxDetail?.send,
+    receive: fxDetail?.receive,
   };
 }
 
