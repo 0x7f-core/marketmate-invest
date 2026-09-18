@@ -490,20 +490,22 @@ function formatPopularPrice(item:PopularStock){
 function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:PopularStock[];onSelect:(item:PopularStock)=>void}){
   const[open,setOpen]=useState(false);
   const[tab,setTab]=useState<"KR"|"US">("KR");
-  const top=domestic[0]??us[0]??null;
+  const top=domestic[0]??null;
   const rows=tab==="KR"?domestic:us;
   const choose=(item:PopularStock)=>{setOpen(false);onSelect(item);};
   return <><section className="np-popular-stocks">
-    <button type="button" className="np-popular-compact" onClick={()=>setOpen(true)} aria-label="인기 종목 1위부터 10위까지 보기">
-      <span className="np-popular-badge">인기 종목</span>
-      {top?<><b>1</b><strong>{top.name}</strong><em className={top.changeRate>=0?"up":"down"}>{top.changeRate>=0?"+":""}{top.changeRate.toFixed(2)}%</em></>:<><b>1</b><strong>인기 종목 불러오는 중</strong><em>-</em></>}
-      <ChevronDown aria-hidden="true"/>
-    </button>
+    <div className="np-popular-compact">
+      <button type="button" className="np-popular-primary" onClick={()=>top&&onSelect(top)} disabled={!top} aria-label={top?`${top.name} 시세 보기`:"인기 종목 불러오는 중"}>
+        <span className="np-popular-badge">인기 종목</span>
+        {top?<><b>1</b><strong>{top.name}</strong><em className={top.changeRate>=0?"up":"down"}>{top.changeRate>=0?"+":""}{top.changeRate.toFixed(2)}%</em></>:<><b>1</b><strong>인기 종목 불러오는 중</strong><em>-</em></>}
+      </button>
+      <button type="button" className="np-popular-expand" onClick={()=>setOpen(true)} aria-label="인기 종목 1위부터 10위까지 보기"><ChevronDown aria-hidden="true"/></button>
+    </div>
   </section>
   <Dialog open={open} onOpenChange={setOpen}>
     <DialogContent className="popular-stocks-dialog" showCloseButton>
       <DialogHeader className="popular-stocks-dialog-head">
-        <DialogTitle>인기 종목 <span aria-hidden="true">ⓘ</span></DialogTitle>
+        <DialogTitle>인기 종목</DialogTitle>
         <DialogDescription className="sr-only">네이버증권 인기 종목 국내·미국 1위부터 10위까지</DialogDescription>
       </DialogHeader>
       <Tabs value={tab} onValueChange={value=>setTab(value as "KR"|"US")} className="popular-stocks-tabs">
@@ -517,7 +519,7 @@ function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:P
             <span className="popular-stock-logo"><InstrumentLogo instrument={item} size="md"/><i aria-hidden="true"><Flame/></i></span>
             <span className="popular-stock-name"><strong>{item.name}</strong><small>{displaySymbol(item.market,item.symbol)}</small></span>
             <span className="popular-stock-price"><strong>{formatPopularPrice(item)}</strong><em className={item.changeRate>=0?"up":"down"}>{item.change>=0?"+":""}{item.change.toLocaleString(item.currency==="USD"?"en-US":"ko-KR",{maximumFractionDigits:item.currency==="USD"?2:0})} ({Math.abs(item.changeRate).toFixed(2)}%)</em></span>
-          </button>):<p className="np-empty">인기 종목을 불러오는 중입니다.</p>}
+          </button>):<p className="np-empty">{tab==="KR"?"국내 인기 종목을 불러오는 중입니다.":"미국 인기 종목을 불러오는 중입니다."}</p>}
         </TabsContent>
       </Tabs>
     </DialogContent>
