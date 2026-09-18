@@ -110,8 +110,16 @@ if (!marketOverview.includes("Math.max(2_000") || !marketOverview.includes("Math
 }
 
 const marketHours = await source("lib/server/market-hours.ts");
-const krxPriority = marketHours.indexOf('item.exchange === "krx" && item.tradable');
-const nxtPriority = marketHours.indexOf('item.exchange === "nxt" && item.tradable');
+const krxPriorityCandidates = [
+  marketHours.indexOf('item.exchange === "krx" && item.tradable'),
+  marketHours.indexOf('item.venue === "KRX" && item.tradable'),
+].filter(index => index >= 0);
+const nxtPriorityCandidates = [
+  marketHours.indexOf('item.exchange === "nxt" && item.tradable'),
+  marketHours.indexOf('item.venue === "NXT" && item.tradable'),
+].filter(index => index >= 0);
+const krxPriority = krxPriorityCandidates.length ? Math.min(...krxPriorityCandidates) : -1;
+const nxtPriority = nxtPriorityCandidates.length ? Math.min(...nxtPriorityCandidates) : -1;
 if (krxPriority < 0 || nxtPriority < 0 || krxPriority > nxtPriority) {
   failures.push("KR trading-session priority must prefer KRX before NXT");
 }
