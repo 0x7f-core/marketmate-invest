@@ -7,9 +7,10 @@ type QuoteLike = { market: Market; symbol: string; name: string; exchange: strin
 type ChartPoint = { time: number; open: number; high: number; low: number; close: number; volume?: number };
 type ChartResponse = { points?: ChartPoint[]; range?: string; source?: string; stale?: boolean; error?: string };
 type CandleRow = { time: number; open: number; high: number; low: number; close: number };
-type CandleSeries = { setData: (rows: CandleRow[]) => void };
-type ChartApi = { addSeries: (seriesType: unknown, options: Record<string, unknown>) => CandleSeries; remove: () => void; timeScale: () => { fitContent: () => void } };
-type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown };
+type LineRow = { time: number; value: number };
+type ChartSeries = { setData: (rows: CandleRow[] | LineRow[]) => void };
+type ChartApi = { addSeries: (seriesType: unknown, options: Record<string, unknown>) => ChartSeries; remove: () => void; timeScale: () => { fitContent: () => void } };
+type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown; LineSeries: unknown };
 
 declare global {
   interface Window { LightweightCharts?: LightweightChartsApi }
@@ -49,7 +50,7 @@ function loadLightweightCharts() {
 export default function MarketChart({ quote, indexId }: { quote: QuoteLike; indexId?: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ChartApi | null>(null);
-  const seriesRef = useRef<CandleSeries | null>(null);
+  const seriesRef = useRef<ChartSeries | null>(null);
   const [chartReady, setChartReady] = useState(false);
   const [range, setRange] = useState<(typeof RANGES)[number]>("3M");
   const [points, setPoints] = useState<ChartPoint[]>([]);
@@ -86,16 +87,22 @@ export default function MarketChart({ quote, indexId }: { quote: QuoteLike; inde
         crosshair: { vertLine: { labelBackgroundColor: "#374151" }, horzLine: { labelBackgroundColor: "#374151" } },
         localization: { locale: "ko-KR" },
       });
-      const series = chart.addSeries(library.CandlestickSeries, {
-        upColor: "#f04452",
-        downColor: "#3182f6",
-        borderUpColor: "#f04452",
-        borderDownColor: "#3182f6",
-        wickUpColor: "#f04452",
-        wickDownColor: "#3182f6",
-        priceLineVisible: true,
-        lastValueVisible: true,
-      });
+      const series = indexId === "USDKRW"
+        ? chart.addSeries(library.LineSeries, {
+          lineWidth: 2,
+          priceLineVisible: true,
+          lastValueVisible: true,
+        })
+        : chart.addSeries(library.CandlestickSeries, {
+          upColor: "#f04452",
+          downColor: "#3182f6",
+          borderUpColor: "#f04452",
+          borderDownColor: "#3182f6",
+          wickUpColor: "#f04452",
+          wickDownColor: "#3182f6",
+          priceLineVisible: true,
+          lastValueVisible: true,
+        });
       chartRef.current = chart;
       seriesRef.current = series;
       setChartReady(true);
@@ -112,18 +119,21 @@ export default function MarketChart({ quote, indexId }: { quote: QuoteLike; inde
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [retryToken]);
+  }, [retryToken, indexId]);
 
   useEffect(() => {
     const series = seriesRef.current;
     const chart = chartRef.current;
     if (!chartReady || !series || !chart) return;
-    const rows = points
-      .filter(point => Number.isFinite(point.time) && point.time > 0 && point.open > 0 && point.high > 0 && point.low > 0 && point.close > 0)
-      .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
+    const valid = points.filter(point => Number.isFinite(point.time) && point.time > 0 && point.close > 0);
+    const rows = indexId === "USDKRW"
+      ? valid.map(point => ({ time: Math.floor(point.time / 1_000), value: point.close }))
+      : valid
+        .filter(point => point.open > 0 && point.high > 0 && point.low > 0)
+        .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
     series.setData(rows);
     if (rows.length) chart.timeScale().fitContent();
-  }, [points, chartReady]);
+  }, [points, chartReady, indexId]);
 
   useEffect(() => {
     const controller = new AbortController();
