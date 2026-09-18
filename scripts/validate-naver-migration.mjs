@@ -255,6 +255,17 @@ if (
 ) {
   failures.push("competition tab must expose the live KRX/NXT trading timetable");
 }
+if (
+  !dashboard.includes("UsTradingSchedule")
+  || !dashboard.includes("usTradingScheduleRows")
+  || !dashboard.includes("서머타임")
+  || !dashboard.includes("표준시")
+  || !dashboard.includes('{label:"프리마켓",start:"17:00",end:"22:30",tradable:true}')
+  || !dashboard.includes('{label:"정규장",start:"22:30",end:"05:00",tradable:true}')
+  || !dashboard.includes('{label:"애프터마켓",start:"05:00",end:"08:50",tradable:true}')
+) {
+  failures.push("competition tab must expose the DST-aware live US trading timetable");
+}
 
 const newsRoute = await source("app/api/news/route.ts");
 if (!newsRoute.includes("return 0;") || /Date\.now\(\)\s*-\s*index/.test(newsRoute)) {
