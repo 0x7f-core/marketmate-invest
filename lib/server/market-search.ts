@@ -1,3 +1,4 @@
+import { canonicalCryptoDisplayName } from "@/lib/crypto-display-name";
 import { normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
