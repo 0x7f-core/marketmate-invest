@@ -490,9 +490,22 @@ function formatPopularPrice(item:PopularStock){
 function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:PopularStock[];onSelect:(item:PopularStock)=>void}){
   const[open,setOpen]=useState(false);
   const[tab,setTab]=useState<"KR"|"US">("KR");
-  const top=domestic[0]??null;
+  const[featuredIndex,setFeaturedIndex]=useState(0);
+  const featuredRows=domestic.slice(0,10);
+  const featured=featuredRows[featuredIndex]??featuredRows[0]??null;
   const rows=tab==="KR"?domestic:us;
   const choose=(item:PopularStock)=>{setOpen(false);onSelect(item);};
+
+  useEffect(()=>{
+    if(featuredIndex<featuredRows.length)return;
+    setFeaturedIndex(0);
+  },[featuredIndex,featuredRows.length]);
+
+  useEffect(()=>{
+    if(open||featuredRows.length<2)return;
+    const timer=setInterval(()=>setFeaturedIndex(index=>(index+1)%featuredRows.length),3000);
+    return()=>clearInterval(timer);
+  },[open,featuredRows.length]);
 
   useEffect(()=>{
     if(!open)return;
@@ -505,9 +518,9 @@ function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:P
 
   return <><section className="np-popular-stocks">
     <div className="np-popular-compact">
-      <button type="button" className="np-popular-primary" onClick={()=>top&&onSelect(top)} disabled={!top} aria-label={top?`${top.name} 시세 보기`:"인기 종목 불러오는 중"}>
+      <button type="button" className="np-popular-primary" onClick={()=>featured&&onSelect(featured)} disabled={!featured} aria-label={featured?`${featured.rank}위 ${featured.name} 시세 보기`:"인기 종목 불러오는 중"}>
         <span className="np-popular-badge">인기 종목</span>
-        {top?<><b>1</b><strong>{top.name}</strong><em className={top.changeRate>=0?"up":"down"}>{top.changeRate>=0?"+":""}{top.changeRate.toFixed(2)}%</em></>:<><b>1</b><strong>인기 종목 불러오는 중</strong><em>-</em></>}
+        {featured?<><b className="np-popular-rank" key={`rank:${featured.market}:${featured.symbol}`}>{featured.rank}</b><strong className="np-popular-name" key={`name:${featured.market}:${featured.symbol}`}>{featured.name}</strong><em className={`np-popular-rate ${featured.changeRate>=0?"up":"down"}`} key={`rate:${featured.market}:${featured.symbol}`}>{featured.changeRate>=0?"+":""}{featured.changeRate.toFixed(2)}%</em></>:<><b>1</b><strong>인기 종목 불러오는 중</strong><em>-</em></>}
       </button>
       <button type="button" className="np-popular-expand" onClick={()=>setOpen(true)} aria-label="인기 종목 1위부터 10위까지 보기"><ChevronDown aria-hidden="true"/></button>
     </div>
