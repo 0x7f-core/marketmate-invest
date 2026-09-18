@@ -16,70 +16,6 @@ export const metadata: Metadata = {
   },
 };
 
-// InstrumentLogo still uses the app favicon as its crypto placeholder. Naver's
-// public crypto profile data exposes the native logo URL as
-// /imgstock/fn/real/logo/crypto/Crypto{ticker}.svg. Replace only favicon images
-// inside instrument-logo elements, deriving the plain ticker from the nearby
-// normalized KRW symbol. If Naver has no logo, React's existing image error
-// fallback still takes over.
-const NAVER_CRYPTO_LOGO = String.raw`(() => {
-  const logoBase = "https://ssl.pstatic.net/imgstock/fn/real/logo/crypto/Crypto";
-
-  const tickerFromText = (text) => {
-    const value = String(text || "").toUpperCase();
-    const marketSymbol = value.match(/\bKRW[-_]([A-Z0-9]{2,15})\b/);
-    if (marketSymbol) return marketSymbol[1];
-    const fqnfTicker = value.match(/\b([A-Z0-9]{2,15})_KRW_(?:UPBIT|BITHUMB)\b/);
-    if (fqnfTicker) return fqnfTicker[1];
-    return "";
-  };
-
-  const tickerForImage = (image) => {
-    let node = image.closest(".instrument-logo");
-    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
-      const ticker = tickerFromText(node.textContent);
-      if (ticker) return ticker;
-    }
-    return "";
-  };
-
-  const apply = () => {
-    document.querySelectorAll(".instrument-logo img").forEach((image) => {
-      if (!(image instanceof HTMLImageElement)) return;
-      const source = image.currentSrc || image.src || "";
-      if (!/\/favicon\.svg(?:[?#]|$)/i.test(source)) return;
-      const ticker = tickerForImage(image);
-      if (!ticker) return;
-      const target = logoBase + ticker + ".svg";
-      if (image.src !== target) image.src = target;
-    });
-  };
-
-  const start = () => {
-    let scheduled = false;
-    const schedule = () => {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(() => {
-        scheduled = false;
-        apply();
-      });
-    };
-    apply();
-    const observer = new MutationObserver(schedule);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: ["src"],
-    });
-  };
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-  else start();
-})();`;
-
 // U.S. ETF/ETN names are often much wider than the order card. The old enhancer
 // depended entirely on the quote header meta text (symbol · exchange), so a
 // transient stale header during instrument switching could leave the full fund
@@ -495,7 +431,6 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <head>
-        <script dangerouslySetInnerHTML={{ __html: NAVER_CRYPTO_LOGO }} />
         <script dangerouslySetInnerHTML={{ __html: US_ETF_ORDER_BUTTON_LABEL }} />
         <script dangerouslySetInnerHTML={{ __html: TRADING_FEE_GUIDE }} />
         <script dangerouslySetInnerHTML={{ __html: LIVE_MARKET_STATUS_BOARD }} />
