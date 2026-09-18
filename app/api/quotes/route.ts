@@ -83,12 +83,15 @@ export async function GET(request: Request) {
 
     const results = await Promise.allSettled(normalizedSymbols.map(async symbol => {
       const symbolExchange = normalizedSymbols.length === 1 ? exchange : undefined;
+      const resolvedExchange = market === "US"
+        ? await getUsListingExchange(symbol, symbolExchange) || symbolExchange
+        : symbolExchange;
       const venue = normalizedSymbols.length === 1 ? requestedVenue : undefined;
       try {
-        return await getTradingQuote(market, symbol, symbolExchange, undefined, venue);
+        return await getTradingQuote(market, symbol, resolvedExchange, undefined, venue);
       } catch (error) {
         if (market === "KR" && venue === "NXT" && error instanceof Error && error.message === "NAVER_NXT_UNAVAILABLE") {
-          return getTradingQuote(market, symbol, symbolExchange, undefined, "KRX");
+          return getTradingQuote(market, symbol, resolvedExchange, undefined, "KRX");
         }
         throw error;
       }
