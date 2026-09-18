@@ -54,6 +54,10 @@ async function domesticExtremaDates(symbol: string, high52Week: number, low52Wee
   let cursor: string | undefined;
   let high52WeekDate = "";
   let low52WeekDate = "";
+  let krxHighDate = "";
+  let krxLowDate = "";
+  let krxHigh = -Infinity;
+  let krxLow = Infinity;
   const cutoff = kstDate(-370);
 
   for (let page = 0; page < 4; page += 1) {
@@ -75,9 +79,18 @@ async function domesticExtremaDates(symbol: string, high52Week: number, low52Wee
       if (!row) continue;
       const date = normalizeDate(row.tradingDateKst ?? row.tradingDate ?? row.date);
       if (date) oldestDate = date;
+      const high = numberValue(row.highPrice);
+      const low = numberValue(row.lowPrice);
+      if (date && high > krxHigh) {
+        krxHigh = high;
+        krxHighDate = date;
+      }
+      if (date && low > 0 && low < krxLow) {
+        krxLow = low;
+        krxLowDate = date;
+      }
       if (!high52WeekDate && samePrice(row.highPrice, high52Week)) high52WeekDate = date;
       if (!low52WeekDate && samePrice(row.lowPrice, low52Week)) low52WeekDate = date;
-      if (high52WeekDate && low52WeekDate) break;
     }
 
     if (high52WeekDate && low52WeekDate) break;
@@ -88,9 +101,14 @@ async function domesticExtremaDates(symbol: string, high52Week: number, low52Wee
     cursor = nextCursor.trim();
   }
 
+  // Naver's domestic headline 52-week values are KRX+NXT integrated, but the
+  // public daily-history endpoint is KRX daily data. If NXT extended the exact
+  // high/low beyond KRX on that trading day, the integrated price will not
+  // exactly match a KRX candle. In that case use the KRX 52-week extreme's
+  // trading date, which is the date context Naver exposes for domestic history.
   return {
-    high52WeekDate: high52WeekDate || undefined,
-    low52WeekDate: low52WeekDate || undefined,
+    high52WeekDate: high52WeekDate || krxHighDate || undefined,
+    low52WeekDate: low52WeekDate || krxLowDate || undefined,
   };
 }
 
