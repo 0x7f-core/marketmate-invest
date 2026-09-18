@@ -17,6 +17,13 @@ declare global {
 }
 
 const RANGES = ["1W", "1M", "3M", "1Y"] as const;
+const FX_RANGES = ["1M", "3M", "1Y"] as const;
+type FxChartImages = Partial<Record<(typeof FX_RANGES)[number], string>>;
+const DEFAULT_FX_CHART_IMAGES: Record<(typeof FX_RANGES)[number], string> = {
+  "1M": "https://financial-vn.pstatic.net/chart/mobile/marketindex/month/FX_USDKRW_end.png",
+  "3M": "https://financial-vn.pstatic.net/chart/mobile/marketindex/month3/FX_USDKRW_end.png",
+  "1Y": "https://financial-vn.pstatic.net/chart/mobile/marketindex/year/FX_USDKRW_end.png",
+};
 const LIGHTWEIGHT_CHARTS_URL = "https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js";
 let chartLibraryPromise: Promise<LightweightChartsApi> | null = null;
 
@@ -47,7 +54,7 @@ function loadLightweightCharts() {
   return chartLibraryPromise;
 }
 
-export default function MarketChart({ quote, indexId }: { quote: QuoteLike; indexId?: string }) {
+export default function MarketChart({ quote, indexId, fxChartImages }: { quote: QuoteLike; indexId?: string; fxChartImages?: FxChartImages }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const seriesRef = useRef<ChartSeries | null>(null);
@@ -60,8 +67,18 @@ export default function MarketChart({ quote, indexId }: { quote: QuoteLike; inde
   const [libraryMessage, setLibraryMessage] = useState("");
   const [dataMessage, setDataMessage] = useState("");
   const [retryToken, setRetryToken] = useState(0);
+  const isFxImageChart = indexId === "USDKRW";
+  const fxRange = range === "1M" || range === "1Y" ? range : "3M";
+  const fxImageUrl = fxChartImages?.[fxRange] || DEFAULT_FX_CHART_IMAGES[fxRange];
 
   useEffect(() => {
+    if (isFxImageChart) {
+      chartRef.current?.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      setChartReady(false);
+      return;
+    }
     const container = containerRef.current;
     if (!container) return;
     let cancelled = false;
@@ -119,9 +136,10 @@ export default function MarketChart({ quote, indexId }: { quote: QuoteLike; inde
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [retryToken, indexId]);
+  }, [retryToken, indexId, isFxImageChart]);
 
   useEffect(() => {
+    if (isFxImageChart) return;
     const series = seriesRef.current;
     const chart = chartRef.current;
     if (!chartReady || !series || !chart) return;
@@ -133,9 +151,10 @@ export default function MarketChart({ quote, indexId }: { quote: QuoteLike; inde
         .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
     series.setData(rows);
     if (rows.length) chart.timeScale().fitContent();
-  }, [points, chartReady, indexId]);
+  }, [points, chartReady, indexId, isFxImageChart]);
 
   useEffect(() => {
+    if (isFxImageChart) return;
     const controller = new AbortController();
     setDataStatus("loading");
     setDataMessage("");
@@ -160,7 +179,31 @@ export default function MarketChart({ quote, indexId }: { quote: QuoteLike; inde
         setDataStatus("error");
       });
     return () => controller.abort();
-  }, [quote.market, quote.symbol, quote.exchange, indexId, range, retryToken]);
+  }, [quote.market, quote.symbol, quote.exchange, indexId, range, retryToken, isFxImageChart]);
+
+  if (isFxImageChart) {
+    return (
+      <section className="naver-light-chart naver-fx-image-chart" aria-label={`${quote.name} 차트`}>
+        <div className="naver-light-chart-toolbar">
+          <div>
+            <b>차트</b>
+            <small>네이버증권</small>
+          </div>
+          <div className="naver-light-chart-ranges" role="tablist" aria-label="차트 기간">
+            {FX_RANGES.map(item => <button key={item} className={fxRange === item ? "active" : ""} onClick={() => setRange(item)}>{item}</button>)}
+          </div>
+        </div>
+        <div className="naver-light-chart-stage naver-fx-image-stage">
+          <div
+            className="naver-fx-chart-image"
+            role="img"
+            aria-label={`${quote.name} ${fxRange} 차트`}
+            style={{ backgroundImage: `url("${fxImageUrl}")` }}
+          />
+        </div>
+      </section>
+    );
+  }
 
   const loading = libraryStatus === "loading" || dataStatus === "loading";
   const errorMessage = libraryStatus === "error" ? libraryMessage : dataStatus === "error" ? dataMessage : "";
