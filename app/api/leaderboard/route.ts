@@ -87,11 +87,37 @@ export async function GET(request: Request) {
        WHERE p.competition_id=? GROUP BY p.id,u.nickname,p.cash_krw,p.realized_pnl_krw,c.initial_cash_krw
        ORDER BY totalAssetKrw DESC,p.joined_at ASC LIMIT 100`
     ).bind(competitionId).all();
-    return Response.json({ leaderboard: rows.results.map((row, index) => ({
-      ...row,
-      rank: index + 1,
-      pricingIncomplete: Number(row.pricingIncomplete ?? 0),
-      unrealizedPnlKrw: Number(row.totalAssetKrw) - Number(row.initialCashKrw) - Number(row.realizedPnlKrw),
-    })) }, { headers: { "cache-control": "no-store" } });
+    const topPicks = await env.DB!.prepare(
+      `SELECT i.market,i.symbol,i.name,i.exchange,i.currency,
+              COUNT(DISTINCT pos.participant_id) AS holderCount,
+              COALESCE(SUM(
+                (pos.quantity_micros / 1000000.0) *
+                (COALESCE(q.price_micros,pos.average_price_micros) / 1000000.0)
+              ),0) AS totalMarketValueKrw
+       FROM positions pos
+       JOIN participants p ON p.id=pos.participant_id
+       JOIN instruments i ON i.id=pos.instrument_id
+       LEFT JOIN quote_snapshots q ON q.instrument_id=pos.instrument_id
+       WHERE p.competition_id=? AND pos.quantity_micros>0
+       GROUP BY i.id,i.market,i.symbol,i.name,i.exchange,i.currency
+       HAVING COUNT(DISTINCT pos.participant_id)>=2
+       ORDER BY holderCount DESC,totalMarketValueKrw DESC,i.name ASC
+       LIMIT 10`
+    ).bind(competitionId).all();
+
+    return Response.json({
+      leaderboard: rows.results.map((row, index) => ({
+        ...row,
+        rank: index + 1,
+        pricingIncomplete: Number(row.pricingIncomplete ?? 0),
+        unrealizedPnlKrw: Number(row.totalAssetKrw) - Number(row.initialCashKrw) - Number(row.realizedPnlKrw),
+      })),
+      topPicks: topPicks.results.map((row, index) => ({
+        ...row,
+        rank: index + 1,
+        holderCount: Number(row.holderCount ?? 0),
+        totalMarketValueKrw: Number(row.totalMarketValueKrw ?? 0),
+      })),
+    }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
 }
