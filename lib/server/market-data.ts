@@ -208,7 +208,7 @@ function collectRecords(value: unknown, depth = 0, output: Array<Record<string, 
 
 const reutersCodeCache = new Map<string, { code: string; expiresAt: number }>();
 
-async function resolveReutersCode(symbol: string, exchange?: string) {
+export async function resolveReutersCode(symbol: string, exchange?: string) {
   if (symbol.includes(".") || looksLikeCaseSensitiveReutersCode(symbol)) return normalizeNaverReutersCode(symbol);
   const key = `${symbol}:${(exchange ?? "").toUpperCase()}`;
   const cached = reutersCodeCache.get(key);
@@ -292,14 +292,17 @@ async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"
     : baseValues.changeRate;
   if (price <= 0) throw new Error("NAVER_INVALID_QUOTE");
 
+  // Naver's domestic "기준가" is the official standard/base price
+  // (전일 KRX 정규장 종가). Do not prefer previousClosingPrice here:
+  // during KRX/NXT sessions that field can represent a different close context.
   const referencePrice = asNumber(
-    krxSnapshot?.referencePrice,
+    krxSnapshot?.basePrice,
     krxSnapshot?.standardPrice,
+    krxSnapshot?.referencePrice,
     krxSnapshot?.previousClosePrice,
     krxSnapshot?.prevClosePrice,
     krxSnapshot?.previousClosingPrice,
     krxSnapshot?.prevClosingPrice,
-    krxSnapshot?.basePrice,
   ) || krxValues.referencePrice;
 
   const integratedOpen = asNumber(
