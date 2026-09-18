@@ -8,17 +8,25 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - shell: bash
         run: |
           set -euo pipefail
-          probe() {
-            echo "===== $1 ====="
-            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://m.stock.naver.com/' -A 'Mozilla/5.0' "$2" || true)
-            echo "HTTP $code"
-            head -c 50000 /tmp/b || true
-            echo
-          }
-          probe integration 'https://m.stock.naver.com/front-api/stock/domestic/integration?code=005930&endType=stock'
-          probe basic 'https://m.stock.naver.com/front-api/stock/domestic/basic?code=005930&endType=stock'
+          curl -sS --max-time 30 -A 'Mozilla/5.0' 'https://stock.naver.com/domestic/stock/005930/price' -o /tmp/page
+          grep -oE 'src="[^"]+\.js[^"]*"' /tmp/page | sed 's/^src="//;s/"$//' | sort -u > /tmp/srcs
+          count=0
+          while IFS= read -r src; do
+            case "$src" in
+              http*) url="$src" ;;
+              /*) url="https://stock.naver.com$src" ;;
+              *) continue ;;
+            esac
+            out="/tmp/chunk_$count.js"
+            curl -sS --max-time 20 -A 'Mozilla/5.0' "$url" -o "$out" || true
+            if grep -Eq 'daily-prices|price-snapshot|integratedPriceInfo|highPriceOf52Weeks|stockExchangeType.*NXT|exchangeType.*NXT|codeType.*NXT' "$out"; then
+              echo "===== MATCH $url ====="
+              grep -oE '.{0,350}(daily-prices|price-snapshot|integratedPriceInfo|highPriceOf52Weeks|exchangeType.?[:=].?["'\'' ]?NXT|codeType.?[:=].?["'\'' ]?NXT).{0,900}' "$out" | head -40 || true
+            fi
+            count=$((count+1))
+          done < /tmp/srcs
