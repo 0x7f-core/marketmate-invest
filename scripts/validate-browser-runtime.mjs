@@ -249,8 +249,20 @@ async function main() {
     assert(desktopChart?.width > 500 && desktopChart?.height > 250 && desktopChart?.canvasWidth > 400, `Desktop chart sizing invalid: ${JSON.stringify(desktopChart)}`);
     assert(desktopChart.attribution.includes("TradingView"), "TradingView attribution is missing");
     assert(await client.evaluate(visibleExpression(".np-news")), "Market news panel is not visible on desktop");
+    const domesticQuoteControls = await client.evaluate(`(() => ({
+      venueButtons: document.querySelectorAll('.np-domestic-venue-switch button').length,
+      orderVenueButtons: document.querySelectorAll('.np-trading > aside .order-venue-selector button').length,
+      statItems: document.querySelectorAll('.np-quote .np-stats > span').length,
+      statText: document.querySelector('.np-quote .np-stats')?.textContent || ''
+    }))()`);
+    assert(domesticQuoteControls?.venueButtons === 2, `Domestic KRX/NXT quote switch missing: ${JSON.stringify(domesticQuoteControls)}`);
+    assert(domesticQuoteControls?.orderVenueButtons === 2, `Domestic KRX/NXT order switch missing: ${JSON.stringify(domesticQuoteControls)}`);
+    assert(domesticQuoteControls?.statItems === 7, `Expected 7 quote statistics: ${JSON.stringify(domesticQuoteControls)}`);
+    for (const label of ['시가','고가','저가','거래량','거래대금','52주 최고','52주 최저']) {
+      assert(domesticQuoteControls.statText.includes(label), `Quote statistic missing label: ${label}`);
+    }
     await client.screenshot(`${ARTIFACT_DIR}/desktop-market.png`);
-    console.log(`PASS desktop chart + news render (${Math.round(desktopChart.width)}x${Math.round(desktopChart.height)})`);
+    console.log(`PASS desktop chart + news + KRX/NXT controls + expanded stats (${Math.round(desktopChart.width)}x${Math.round(desktopChart.height)})`);
 
     // Switch the same hydrated application to a 390px mobile viewport.
     await client.setViewport(390, 844, true);
@@ -291,6 +303,8 @@ async function main() {
     console.log("PASS mobile instrument search overlay");
     assert(await client.evaluate(visibleExpression(".np-mobile-order")), "Mobile order panel is not visible");
     assert(await client.evaluate(hiddenExpression(".np-trading > aside")), "Desktop order rail should be hidden on mobile");
+    const mobileVenueButtons = await client.evaluate("document.querySelectorAll('.np-mobile-order .order-venue-selector button').length");
+    assert(mobileVenueButtons === 2, `Mobile KRX/NXT order switch missing: ${mobileVenueButtons}`);
     const mobileChart = await client.evaluate(`(() => {
       const chart = document.querySelector('.np-chart');
       const canvas = document.querySelector('.naver-light-chart-canvas canvas');
