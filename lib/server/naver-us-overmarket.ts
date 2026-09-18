@@ -30,8 +30,9 @@ function stringValue(record: Row | null, keys: string[]) {
 function reutersCode(symbol: string, exchange?: string) {
   if (symbol.includes(".")) return normalizeNaverReutersCode(symbol);
   const venue = (exchange ?? "").toUpperCase();
-  const suffix = venue.includes("NYS") || venue.includes("NYSE") ? ".N"
-    : venue.includes("AMS") || venue.includes("AMEX") ? ".A" : ".O";
+  const suffix = venue.includes("ARCA") ? ".P"
+    : venue.includes("NYS") || venue === "NYSE" ? ".N"
+      : venue.includes("AMS") || venue.includes("AMEX") ? ".A" : ".O";
   return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
