@@ -1,6 +1,7 @@
 import { getDomesticListingMarket, normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
+import { getUsListingExchange, normalizeUsListingExchange, usExchangeFromReutersCode } from "@/lib/server/us-listing-exchange";
 
 export type RankingMarket = "KR" | "US" | "CRYPTO";
 export type RankingCategory = "tradingValue" | "volume" | "up" | "down" | "marketCap";
@@ -119,29 +120,12 @@ function domesticExchange(row: Row) {
   return textValue(row, ["marketType", "exchange", "tradeType", "marketName"]) || "KRX";
 }
 
-function normalizeUsExchange(value: string) {
-  const normalized = value.trim().toUpperCase().replace(/[\s_-]+/g, "");
-  if (!normalized || normalized === "USA" || normalized === "US" || normalized === "UNITEDSTATES") return "";
-  if (normalized === "NAS" || normalized.includes("NASDAQ") || ["NMS", "NGM", "NCM", "NSQ"].includes(normalized)) return "NAS";
-  if (normalized === "NYS" || normalized === "NYSE" || normalized.includes("NEWYORKSTOCKEXCHANGE")) return "NYS";
-  if (normalized === "ASE" || normalized === "AMEX" || normalized.includes("NYSEAMERICAN") || normalized.includes("AMERICANSTOCKEXCHANGE")) return "ASE";
-  return value.trim();
-}
-
-function usExchangeFromSymbol(symbol: string) {
-  const suffix = symbol.toUpperCase().match(/\.([OKNPA])$/)?.[1];
-  if (suffix === "O" || suffix === "K") return "NAS";
-  if (suffix === "N" || suffix === "P") return "NYS";
-  if (suffix === "A") return "ASE";
-  return "USA";
-}
-
 function usExchange(row: Row, symbol: string) {
   for (const key of ["exchangeCode", "exchangeName", "exchange", "stockExchangeType", "exchangeType", "tradeType", "marketType", "marketName"]) {
-    const exchange = normalizeUsExchange(textValue(row, [key]));
+    const exchange = normalizeUsListingExchange(textValue(row, [key]));
     if (exchange) return exchange;
   }
-  return usExchangeFromSymbol(symbol);
+  return usExchangeFromReutersCode(symbol) || "USA";
 }
 
 function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, "rank"> | null {
@@ -212,7 +196,7 @@ function needsUsName(item: MarketRankingItem) {
 }
 
 function needsUsExchange(item: MarketRankingItem) {
-  return !normalizeUsExchange(item.exchange);
+  return !normalizeUsListingExchange(item.exchange);
 }
 
 async function enrichUsMetadata(items: MarketRankingItem[]) {
@@ -221,23 +205,27 @@ async function enrichUsMetadata(items: MarketRankingItem[]) {
     const fillName = needsUsName(item);
     const fillExchange = needsUsExchange(item);
     if (!fillName && !fillExchange) return item;
-    try {
-      const basic = await naverJson<Row>(`/api/securityService/stock/${item.symbol}/basic`, {
-        ttlMs: 6 * 60 * 60_000,
-        staleMs: 7 * 24 * 60 * 60_000,
-      });
-      const name = fillName
-        ? textValue(basic.data, ["stockName", "stockNameKo", "stockNameKor", "koreanName", "stockNameEng"])
-        : "";
-      const exchange = fillExchange ? usExchange(basic.data, item.symbol) : item.exchange;
-      return {
-        ...item,
-        ...(name ? { name } : {}),
-        ...(exchange ? { exchange } : {}),
-      };
-    } catch {
-      return fillExchange ? { ...item, exchange: usExchangeFromSymbol(item.symbol) } : item;
+
+    const resolvedExchange = fillExchange
+      ? await getUsListingExchange(item.symbol, item.exchange)
+      : normalizeUsListingExchange(item.exchange);
+
+    let name = "";
+    if (fillName) {
+      try {
+        const basic = await naverJson<Row>(`/api/securityService/stock/${item.symbol}/basic`, {
+          ttlMs: 6 * 60 * 60_000,
+          staleMs: 7 * 24 * 60 * 60_000,
+        });
+        name = textValue(basic.data, ["stockName", "stockNameKo", "stockNameKor", "koreanName", "stockNameEng"]);
+      } catch {}
     }
+
+    return {
+      ...item,
+      ...(name ? { name } : {}),
+      ...(resolvedExchange ? { exchange: resolvedExchange } : {}),
+    };
   }));
 }
 
