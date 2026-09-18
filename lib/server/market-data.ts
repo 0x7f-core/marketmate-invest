@@ -249,127 +249,6 @@ function positiveMin(...values: number[]) {
   return positives.length ? Math.min(...positives) : 0;
 }
 
-export type Week52DateMetadata = {
-  high52WeekDate?: string;
-  low52WeekDate?: string;
-};
-
-function normalizeDateOnly(value: unknown) {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  const clean = value.trim();
-  const compact = clean.match(/^((?:19|20)\d{2})(\d{2})(\d{2})$/);
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
-  const separated = clean.match(/^((?:19|20)\d{2})[.\/-](\d{1,2})[.\/-](\d{1,2})/);
-  if (separated) return `${separated[1]}-${separated[2].padStart(2, "0")}-${separated[3].padStart(2, "0")}`;
-  const iso = clean.match(/^((?:19|20)\d{2}-\d{2}-\d{2})/);
-  return iso?.[1];
-}
-
-function extremeDatesFromRows(rows: Array<Record<string, unknown>>, dateKeys: string[]): Week52DateMetadata {
-  const cutoff = Date.now() - 367 * 86_400_000;
-  let highest = -Infinity;
-  let lowest = Infinity;
-  let high52WeekDate: string | undefined;
-  let low52WeekDate: string | undefined;
-
-  for (const row of rows) {
-    const date = normalizeDateOnly(stringValue(row, dateKeys));
-    if (!date) continue;
-    const timestamp = Date.parse(`${date}T12:00:00Z`);
-    if (Number.isFinite(timestamp) && timestamp < cutoff) continue;
-
-    const high = asNumber(row.highPrice, row.high, row.highestPrice);
-    const low = asNumber(row.lowPrice, row.low, row.lowestPrice);
-    if (high > 0 && high > highest) {
-      highest = high;
-      high52WeekDate = date;
-    }
-    if (low > 0 && low < lowest) {
-      lowest = low;
-      low52WeekDate = date;
-    }
-  }
-  return { high52WeekDate, low52WeekDate };
-}
-
-async function domestic52WeekDates(symbol: string): Promise<Week52DateMetadata> {
-  const rows: Array<Record<string, unknown>> = [];
-  let cursor: string | undefined;
-
-  for (let page = 0; page < 4; page += 1) {
-    const result = await naverJson<unknown>(buildNaverPath(
-      `/api/stockSecurity/items/v2/domestic/${encodeURIComponent(symbol)}/daily-prices`,
-      { size: 100, cursor },
-    ), { ttlMs: 60 * 60_000, staleMs: 12 * 60 * 60_000, timeoutMs: 10_000 });
-    const root = asRecord(result.data);
-    const items = root && Array.isArray(root.items)
-      ? root.items.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item))
-      : [];
-    rows.push(...items);
-
-    const nextCursor = root ? stringValue(root, ["cursor"]) : "";
-    if (!nextCursor || nextCursor === cursor || items.length === 0) break;
-    cursor = nextCursor;
-
-    const lastDate = normalizeDateOnly(stringValue(items[items.length - 1], ["tradingDateKst", "localDate"]));
-    if (lastDate) {
-      const oldest = Date.parse(`${lastDate}T12:00:00Z`);
-      if (Number.isFinite(oldest) && oldest < Date.now() - 370 * 86_400_000) break;
-    }
-  }
-
-  return extremeDatesFromRows(rows, ["tradingDateKst", "localDate", "tradeBaseAt"]);
-}
-
-function totalInfoRecord(payload: unknown, code: string) {
-  const root = asRecord(payload);
-  const infos = root && Array.isArray(root.stockItemTotalInfos) ? root.stockItemTotalInfos : [];
-  for (const item of infos) {
-    const row = asRecord(item);
-    if (row && String(row.code ?? "") === code) return row;
-  }
-  return null;
-}
-
-function totalInfoDate(payload: unknown, code: string) {
-  const row = totalInfoRecord(payload, code);
-  return normalizeDateOnly(row?.keyDesc ?? row?.valueDesc);
-}
-
-async function foreign52WeekDates(symbol: string, exchange?: string): Promise<Week52DateMetadata> {
-  const code = await resolveReutersCode(symbol, exchange);
-  const basic = await naverJson<unknown>(`/api/securityService/stock/${encodeURIComponent(code)}/basic`, {
-    ttlMs: 60_000,
-    staleMs: 10 * 60_000,
-  });
-  return {
-    high52WeekDate: totalInfoDate(basic.data, "highPriceOf52Weeks"),
-    low52WeekDate: totalInfoDate(basic.data, "lowPriceOf52Weeks"),
-  };
-}
-
-async function crypto52WeekDates(symbol: string): Promise<Week52DateMetadata> {
-  const ticker = cryptoTicker(symbol);
-  const to = Date.now();
-  const from = to - 367 * 86_400_000;
-  const kstLocalIso = (value: number) => new Date(value + 9 * 60 * 60_000).toISOString().slice(0, 19);
-  const result = await naverJson<unknown>(buildNaverPath(
-    `/api/coin/candle/UPBIT/KRW/${encodeURIComponent(ticker)}/days`,
-    { from: kstLocalIso(from), to: kstLocalIso(to) },
-  ), { ttlMs: 60 * 60_000, staleMs: 12 * 60 * 60_000, timeoutMs: 10_000 });
-  const rows = Array.isArray(result.data)
-    ? result.data.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item))
-    : [];
-  return extremeDatesFromRows(rows, ["tradeBaseAt", "localTradedAt", "localDate"]);
-}
-
-export async function get52WeekDateMetadata(market: Market, symbol: string, exchange?: string): Promise<Week52DateMetadata> {
-  if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
-  if (market === "KR") return domestic52WeekDates(symbol.toUpperCase());
-  if (market === "US") return foreign52WeekDates(symbol, exchange);
-  return crypto52WeekDates(symbol);
-}
-
 async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"): Promise<LiveQuote> {
   const pollingPromise = naverPolling<unknown>(
     buildNaverPath("/api/polling/domestic/stock", { itemCodes: symbol }),
@@ -498,7 +377,14 @@ async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"
 }
 
 function totalInfoNumber(payload: unknown, code: string) {
-  return asNumber(totalInfoRecord(payload, code)?.value);
+  const root = asRecord(payload);
+  const infos = root && Array.isArray(root.stockItemTotalInfos) ? root.stockItemTotalInfos : [];
+  for (const item of infos) {
+    const row = asRecord(item);
+    if (!row || String(row.code ?? "") !== code) continue;
+    return asNumber(row.value);
+  }
+  return 0;
 }
 
 async function foreignQuote(symbol: string, exchange?: string, exchangeRateOverride?: number): Promise<LiveQuote> {
