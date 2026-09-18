@@ -123,6 +123,19 @@ const nxtPriority = nxtPriorityCandidates.length ? Math.min(...nxtPriorityCandid
 if (krxPriority < 0 || nxtPriority < 0 || krxPriority > nxtPriority) {
   failures.push("KR trading-session priority must prefer KRX before NXT");
 }
+for (const token of [
+  '"장전 시간외 종가"',
+  '"08:40"',
+  '"장전 동시호가"',
+  '"장후 동시호가"',
+  '"정규장 마감"',
+  '"장후 시간외 종가"',
+  '"프리마켓 마감"',
+  '"15:40"',
+  '"애프터마켓 마감"',
+]) {
+  if (!marketHours.includes(token)) failures.push(`domestic KRX/NXT session schedule is missing: ${token}`);
+}
 if (!marketHours.includes('const exchanges = market === "KR" ? ["krx", "nxt"] : ["nasdaq"]') || !marketHours.includes('{ exchanges }')) {
   failures.push("Naver market-status requests must use repeated lowercase exchange parameters");
 }
