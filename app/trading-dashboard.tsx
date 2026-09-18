@@ -493,6 +493,16 @@ function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:P
   const top=domestic[0]??null;
   const rows=tab==="KR"?domestic:us;
   const choose=(item:PopularStock)=>{setOpen(false);onSelect(item);};
+
+  useEffect(()=>{
+    if(!open)return;
+    const previous=document.body.style.overflow;
+    const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape")setOpen(false);};
+    document.body.style.overflow="hidden";
+    window.addEventListener("keydown",onKey);
+    return()=>{document.body.style.overflow=previous;window.removeEventListener("keydown",onKey);};
+  },[open]);
+
   return <><section className="np-popular-stocks">
     <div className="np-popular-compact">
       <button type="button" className="np-popular-primary" onClick={()=>top&&onSelect(top)} disabled={!top} aria-label={top?`${top.name} 시세 보기`:"인기 종목 불러오는 중"}>
@@ -502,12 +512,12 @@ function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:P
       <button type="button" className="np-popular-expand" onClick={()=>setOpen(true)} aria-label="인기 종목 1위부터 10위까지 보기"><ChevronDown aria-hidden="true"/></button>
     </div>
   </section>
-  <Dialog open={open} onOpenChange={setOpen}>
-    <DialogContent className="popular-stocks-dialog" showCloseButton>
-      <DialogHeader className="popular-stocks-dialog-head">
-        <DialogTitle>인기 종목</DialogTitle>
-        <DialogDescription className="sr-only">네이버증권 인기 종목 국내·미국 1위부터 10위까지</DialogDescription>
-      </DialogHeader>
+  {open&&<div className="popular-stocks-layer" role="presentation" onMouseDown={()=>setOpen(false)}>
+    <section className="popular-stocks-sheet" role="dialog" aria-modal="true" aria-labelledby="popular-stocks-title" onMouseDown={event=>event.stopPropagation()}>
+      <div className="popular-stocks-sheet-head">
+        <h2 id="popular-stocks-title">인기 종목</h2>
+        <button type="button" className="popular-stocks-close" onClick={()=>setOpen(false)} aria-label="인기 종목 닫기"><X/></button>
+      </div>
       <Tabs value={tab} onValueChange={value=>setTab(value as "KR"|"US")} className="popular-stocks-tabs">
         <TabsList className="popular-stocks-tab-list">
           <TabsTrigger value="KR">국내</TabsTrigger>
@@ -522,8 +532,8 @@ function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:P
           </button>):<p className="np-empty">{tab==="KR"?"국내 인기 종목을 불러오는 중입니다.":"미국 인기 종목을 불러오는 중입니다."}</p>}
         </TabsContent>
       </Tabs>
-    </DialogContent>
-  </Dialog></>;
+    </section>
+  </div>}</>;
 }
 
 function RankingPanel({rows,participantId,onSelect}:{rows:LeaderboardRow[];participantId:string|null;onSelect:(row:LeaderboardRow)=>void}){return <section className="np-panel np-ranking"><div className="np-section-title"><h2>실시간 대회 순위</h2><span>{rows.length}명</span></div><div className="ranking-head"><span>순위·참가자</span><span>총자산</span><span>수익률</span></div>{rows.length?rows.map(row=>{const value=returnRate(row.totalAssetKrw,row.initialCashKrw);return <button className={row.participantId===participantId?"mine":""} onClick={()=>onSelect(row)} key={row.participantId}><b>{row.rank}</b><span><strong>{row.nickname}</strong><small>{displayRecentSymbols(row.recentSymbols)}</small></span><span>{formatKrw(row.totalAssetKrw)}</span><em className={value>=0?"up":"down"}>{value>=0?"+":""}{value.toFixed(2)}%</em><ChevronRight/></button>}):<p className="np-empty">대회를 만들거나 초대코드로 참가해주세요.</p>}</section>;}
