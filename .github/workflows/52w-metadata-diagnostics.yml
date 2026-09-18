@@ -13,11 +13,11 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          for url in             'https://m.stock.naver.com/api/stock/005930/integration'             'https://m.stock.naver.com/api/stock/005930/basic'             'https://stock.naver.com/api/securityService/stock/TSLA.O/basic'             'https://stock.naver.com/api/securityService/stock/TSLA.O/price?page=1&pageSize=5'             'https://stock.naver.com/api/coin/price/UPBIT/BTC'
+          for url in             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=day&stockExchangeType=NXT'             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=day&tradeType=NXT'             'https://stock.naver.com/api/securityService/chart/domestic/item/005930?periodType=day&exchangeType=NXT'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&stockExchangeType=NXT'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&tradeType=NXT'             'https://api.stock.naver.com/chart/domestic/item/005930?periodType=dayCandle&exchangeType=NXT'
           do
             echo "===== $url ====="
             code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0' "$url" || true)
             echo "HTTP $code"
-            head -c 30000 /tmp/b || true
+            head -c 1200 /tmp/b || true
             echo
           done
