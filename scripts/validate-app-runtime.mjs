@@ -99,8 +99,22 @@ for (const field of ["open", "high", "low", "volume", "tradingValue", "high52Wee
   assert(Number(krxQuote?.[field]) > 0, `Samsung integrated quote missing ${field}: ${JSON.stringify(krxQuote)}`);
 }
 assert(Array.isArray(krxQuote?.availableVenues) && krxQuote.availableVenues.includes("KRX"), "Samsung availableVenues missing KRX");
+assert(Number(krxQuote?.referencePrice) > 0, `Samsung Naver reference price missing: ${JSON.stringify(krxQuote)}`);
 assert(quote.data?.source === "NAVER", "quote source is not NAVER");
-console.log(`PASS KR KRX quote + integrated statistics (${krxQuote.price}, KOSPI)`);
+console.log(`PASS KR KRX quote + Naver reference/integrated statistics (${krxQuote.price}, ref=${krxQuote.referencePrice}, KOSPI)`);
+
+const extremaParams = new URLSearchParams({
+  market: "KR",
+  symbol: "005930",
+  exchange: "KOSPI",
+  high: String(krxQuote.high52Week),
+  low: String(krxQuote.low52Week),
+});
+const extrema = await jsonRequest(`/api/quote-extrema-dates?${extremaParams.toString()}`, { headers: authHeaders, cache: "no-store" });
+assert(extrema.response.status === 200, `52-week date metadata expected 200, got ${extrema.response.status}: ${JSON.stringify(extrema.data)}`);
+assert(/^\d{4}-\d{2}-\d{2}$/.test(extrema.data?.high52WeekDate ?? ""), `52-week high date missing: ${JSON.stringify(extrema.data)}`);
+assert(/^\d{4}-\d{2}-\d{2}$/.test(extrema.data?.low52WeekDate ?? ""), `52-week low date missing: ${JSON.stringify(extrema.data)}`);
+console.log(`PASS KR 52-week high/low dates (${extrema.data.high52WeekDate}, ${extrema.data.low52WeekDate})`);
 
 if (krxQuote.availableVenues.includes("NXT")) {
   const nxtQuoteResult = await jsonRequest("/api/quotes?market=KR&symbols=005930&exchange=KOSPI&venue=NXT", { headers: authHeaders, cache: "no-store" });
