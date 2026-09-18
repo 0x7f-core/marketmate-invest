@@ -121,7 +121,7 @@ function formatDate(id: string, points: Point[]) {
 function formatPrice(card: CardQuote) {
   if (!card.price) return "-";
   if (card.id === "BTC") return `${Math.round(card.price).toLocaleString("ko-KR")}`;
-  if (card.id === "USDKRW") return card.price.toLocaleString("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  if (card.id === "USDKRW") return card.price.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return card.price.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
