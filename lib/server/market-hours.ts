@@ -1,5 +1,5 @@
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
-import type { Market } from "@/lib/server/market-data";
+import type { DomesticTradingVenue, Market } from "@/lib/server/market-data";
 
 export type MarketSession = {
   isOpen: boolean;
@@ -72,14 +72,17 @@ function sessionDetails(status: NaverStatus) {
   const current = asRecord(status.currentSession);
   const sessions = Array.isArray(status.sessions) ? status.sessions.map(asRecord).filter((item): item is NaverStatus => Boolean(item)) : [];
   const currentType = sessionType(current);
+  const detailType = stringValue(current, ["marketStatusDetailType", "detailType"]).toLocaleLowerCase("en-US");
   const state = stringValue(current, ["marketState", "legacyState", "state", "status"]).toUpperCase();
-  const explicitOpen = ["OPEN", "OPENED", "TRADING", "TRADE", "RUNNING"].includes(state);
+  const stateOpen = ["OPEN", "OPENED", "TRADING", "TRADE", "RUNNING"].includes(state);
+  const nonTradingDetail = ["preopen", "break", "close", "closed"].includes(detailType);
+  const explicitOpen = stateOpen && !nonTradingDetail;
   const holiday = booleanValue(status, ["isHoliday", "holiday"]) ?? false;
   const matchingSession = sessions.find(item => sessionType(item) === currentType) ?? sessions[0] ?? null;
   const openTimeKst = stringValue(current, ["openTimeKst", "openTime"]) || stringValue(matchingSession, ["openTimeKst", "openTime"]);
   const closeTimeKst = stringValue(current, ["closeTimeKst", "closeTime"]) || stringValue(matchingSession, ["closeTimeKst", "closeTime"]);
   const daylight = booleanValue(status, ["isDaylightSavingTime"]) ?? booleanValue(current, ["isDaylightSavingTime"]);
-  return { currentType, state, isOpen: !holiday && explicitOpen, holiday, openTimeKst, closeTimeKst, daylight };
+  return { currentType, detailType, state, isOpen: !holiday && explicitOpen, holiday, openTimeKst, closeTimeKst, daylight };
 }
 
 function sessionLabel(type: string, market: Market) {
@@ -168,12 +171,15 @@ function closedFallback(market: Market, stale = false): MarketSession {
   };
 }
 
-export async function getCheckedMarketSession(market: Market): Promise<MarketSession> {
+export async function getCheckedMarketSession(
+  market: Market,
+  preferredDomesticVenue?: DomesticTradingVenue,
+): Promise<MarketSession> {
   if (market === "CRYPTO") {
     return { isOpen: true, label: "24시간", notice: "가상자산은 네이버증권 시세 기준으로 24시간 주문할 수 있습니다.", source: "NAVER" };
   }
 
-  if (market === "KR" && isKrMorningBreak()) {
+  if (market === "KR" && !preferredDomesticVenue && isKrMorningBreak()) {
     return {
       isOpen: false,
       label: "동시호가",
@@ -187,7 +193,7 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
     };
   }
 
-  if (market === "KR" && isKrClosingAuction()) {
+  if (market === "KR" && !preferredDomesticVenue && isKrClosingAuction()) {
     return {
       isOpen: false,
       label: "동시호가",
@@ -214,12 +220,17 @@ export async function getCheckedMarketSession(market: Market): Promise<MarketSes
       const detail = sessionDetails(status);
       return { status, exchange, detail, tradable: isSupportedTradingSession(market, exchange, detail) };
     });
+    const preferredExchange = preferredDomesticVenue?.toLocaleLowerCase("en-US");
     const selected = market === "KR"
-      ? detailed.find(item => item.exchange === "krx" && item.tradable)
-        ?? detailed.find(item => item.exchange === "nxt" && item.tradable)
-        ?? detailed.find(item => item.exchange === "krx" && !item.detail.holiday)
-        ?? detailed.find(item => !item.detail.holiday)
-        ?? detailed[0]
+      ? preferredExchange
+        ? detailed.find(item => item.exchange === preferredExchange)
+          ?? detailed.find(item => item.exchange === "krx")
+          ?? detailed[0]
+        : detailed.find(item => item.exchange === "krx" && item.tradable)
+          ?? detailed.find(item => item.exchange === "nxt" && item.tradable)
+          ?? detailed.find(item => item.exchange === "krx" && !item.detail.holiday)
+          ?? detailed.find(item => !item.detail.holiday)
+          ?? detailed[0]
       : detailed.find(item => item.tradable) ?? detailed.find(item => !item.detail.holiday) ?? detailed[0];
     const exchange = stringValue(selected.status, ["exchange"]).toUpperCase();
     const rawDetail = selected.detail;
