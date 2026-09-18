@@ -43,9 +43,12 @@ export async function getNaverUsdKrwRate() {
   const rate = exact ? numberValue(exact.currentPrice, exact.closePrice, exact.price, exact.value, exact.nowPrice) : 0;
   if (rate <= 0) throw new Error("NAVER_FX_UNAVAILABLE");
   const change = exact ? numberValue(
+    exact.fluctuations,
     exact.compareToPreviousClosePrice,
+    exact.compareToPreviousPrice,
     exact.changePrice,
     exact.changeValue,
+    exact.priceChange,
     exact.change,
     exact.netChange,
     exact.prevChange,
