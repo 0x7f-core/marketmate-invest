@@ -407,10 +407,16 @@ export async function getPopularStocks(market: PopularStockMarket): Promise<Popu
   const rows = aggregatePopularRows(result.data, market);
   let normalized = uniqueItems(market, rows.length ? rows : result.data);
 
+  if (!normalized.length && market === "KR") {
+    console.warn("POPULAR_KR_PRIMARY_RAW", JSON.stringify(result.data).slice(0, 12000));
+  }
   if (!normalized.length) {
     result = market === "KR" ? await popularAggregate("KR") : await legacyPopular("US");
     const fallbackRows = aggregatePopularRows(result.data, market);
     normalized = uniqueItems(market, fallbackRows.length ? fallbackRows : result.data);
+    if (!normalized.length && market === "KR") {
+      console.warn("POPULAR_KR_FALLBACK_RAW", JSON.stringify(result.data).slice(0, 12000));
+    }
   }
 
   let items = normalized.slice(0, 10).map((item, index) => ({ ...item, rank: index + 1 }));
