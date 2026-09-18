@@ -6,6 +6,7 @@ import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safet
 import { type Market } from "@/lib/server/market-data";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
+import { getUsListingExchange, normalizeUsListingExchange } from "@/lib/server/us-listing-exchange";
 
 const watchlistSql = `SELECT w.id,i.market,i.symbol,i.name,i.exchange,i.currency,
   q.price_micros AS priceKrwMicros,q.change_rate_ppm AS changeRatePpm,q.fx_rate_micros AS fxRateMicros,q.received_at AS receivedAt
@@ -54,13 +55,20 @@ function snapshotStatement(item: RefreshedWatchlistQuote) {
     );
 }
 
-async function repairDomesticListings(items: WatchlistRow[]) {
+async function repairListingExchanges(items: WatchlistRow[]) {
   const repaired = await Promise.all(items.map(async item => {
-    if (item.market !== "KR") return item;
-    const listing = await getDomesticListingMarket(item.symbol, item.exchange);
-    return listing ? { ...item, exchange: listing } : item;
+    if (item.market === "KR") {
+      const listing = await getDomesticListingMarket(item.symbol, item.exchange);
+      return listing ? { ...item, exchange: listing } : item;
+    }
+    if (item.market === "US") {
+      const normalized = normalizeUsListingExchange(item.exchange);
+      const listing = normalized || await getUsListingExchange(item.symbol, item.exchange);
+      return listing ? { ...item, exchange: listing } : item;
+    }
+    return item;
   }));
-  const changed = repaired.filter((item, index) => item.market === "KR" && item.exchange !== items[index].exchange);
+  const changed = repaired.filter((item, index) => item.exchange !== items[index].exchange);
   if (changed.length) {
     await env.DB!.batch(changed.map(item =>
       env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(item.exchange, `${item.market}:${item.symbol}`),
@@ -78,7 +86,7 @@ export async function GET(request: Request) {
     const stale = rows.filter(item => !item.receivedAt || item.receivedAt < Date.now() - 15_000).slice(0, 6);
 
     if (!stale.length) {
-      return Response.json({ items: await repairDomesticListings(rows) }, { headers: { "cache-control": "no-store" } });
+      return Response.json({ items: await repairListingExchanges(rows) }, { headers: { "cache-control": "no-store" } });
     }
 
     const refreshed = await Promise.allSettled(stale.map(async item => {
@@ -105,7 +113,7 @@ export async function GET(request: Request) {
         receivedAt,
       };
     });
-    const items = await repairDomesticListings(refreshedItems);
+    const items = await repairListingExchanges(refreshedItems);
 
     return Response.json({ items }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
@@ -128,6 +136,8 @@ export async function POST(request: Request) {
     }
     if (body.market === "KR") {
       exchange = await getDomesticListingMarket(symbol, exchange) || exchange;
+    } else if (body.market === "US") {
+      exchange = await getUsListingExchange(symbol, exchange) || exchange;
     }
     const instrumentId = `${body.market}:${symbol}`;
     await env.DB!.batch([
