@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import MarketChart from "@/app/market-chart";
 import { OTPInputContext } from "input-otp";
 import { ChevronRight, DoorOpen, Home, LineChart, LogOut, Newspaper, RefreshCw, Search, ShieldCheck, Star, Trash2, Trophy, WalletCards, X } from "lucide-react";
@@ -460,7 +460,7 @@ function seoulClock(){const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asi
 function ScheduleRows({rows,minutes,prefix}:{rows:DomesticScheduleRow[];minutes:number|null;prefix:string}){
   const viewportRef=useRef<HTMLDivElement|null>(null);
   const currentIndex=minutes===null?-1:rows.findIndex(row=>isScheduleCurrent(row,minutes));
-  useEffect(()=>{if(currentIndex<0||typeof window==="undefined"||!window.matchMedia("(max-width:760px)").matches)return;const viewport=viewportRef.current;if(!viewport)return;const frame=window.requestAnimationFrame(()=>{const current=viewport.querySelector<HTMLElement>(".domestic-schedule-row.current");if(!current)return;const top=current.offsetTop-(viewport.clientHeight-current.offsetHeight)/2;viewport.scrollTo({top:Math.max(0,top),behavior:"auto"});});return()=>window.cancelAnimationFrame(frame);},[currentIndex]);
+  useLayoutEffect(()=>{if(currentIndex<0||typeof window==="undefined"||!window.matchMedia("(max-width:760px)").matches)return;const viewport=viewportRef.current;if(!viewport)return;const current=viewport.querySelector<HTMLElement>(".domestic-schedule-row.current");if(!current)return;const viewportRect=viewport.getBoundingClientRect();const currentRect=current.getBoundingClientRect();const currentTop=currentRect.top-viewportRect.top+viewport.scrollTop;viewport.scrollTop=Math.max(0,currentTop-(viewport.clientHeight-currentRect.height)/2);},[currentIndex]);
   return <div className="schedule-rows-viewport" ref={viewportRef}>{rows.map(row=>{const current=minutes!==null&&isScheduleCurrent(row,minutes);return <div className={`domestic-schedule-row${current?" current":""}`} key={`${prefix}:${row.label}`}>
     <span className="domestic-session-name">{current&&<i className="schedule-live-dot" aria-label="현재 시간대"/>}<b>{row.label}</b></span>
     <span className="domestic-session-time">{row.start}~{row.end}</span>
