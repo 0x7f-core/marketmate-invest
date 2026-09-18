@@ -445,7 +445,7 @@ const DESKTOP_USDKRW_MARKET_STRIP = String.raw`(() => {
     const value = Number(latest.price || 0);
     const changeRate = Number(latest.rate || 0);
     setText(source, "네이버증권");
-    setText(price, value.toLocaleString("ko-KR", { maximumFractionDigits: 2 }) + String(latest.unit || "원"));
+    setText(price, value.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + String(latest.unit || "원"));
     setText(rate, (changeRate >= 0 ? "+" : "") + changeRate.toFixed(2) + "%");
     const className = changeRate >= 0 ? "up" : "down";
     if (rate.className !== className) rate.className = className;
