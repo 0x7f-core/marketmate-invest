@@ -41,12 +41,15 @@ export function normalizeSupportedExchange(market: SupportedMarket, value: strin
     return "";
   }
 
+  if (compact.includes("NYSEARCA") || compact === "ARCA" || compact === "PSE") return "ARCA";
   if (compact.includes("NYSEAMERICAN") || compact.includes("AMEX") || ["AMS", "ASE"].includes(compact)) return "AMS";
-  if (compact.includes("NYSEARCA") || compact === "ARCA" || compact.includes("CBOE") || compact.includes("BATS") || compact.includes("BZX")) return "USA";
-  if (compact.includes("OTCQX") || compact.includes("OTCQB") || compact === "OTC") return "USA";
+  if (compact.includes("CBOE") || compact.includes("BATS") || compact.includes("BZX") || compact.includes("EDGX")) return "CBOE";
+  if (compact.includes("OTCQX") || compact.includes("OTCQB") || compact.includes("OTCMARKETS") || compact.includes("PINK") || compact === "OTC") return "OTC";
   if (compact.includes("NYSE") || ["NYS", "NYQ"].includes(compact)) return "NYS";
-  if (compact.includes("NASDAQ") || ["NAS", "NSQ", "NMS"].includes(compact)) return "NAS";
-  if (["USA", "US"].includes(compact)) return compact;
+  if (compact.includes("NASDAQ") || ["NAS", "NSQ", "NMS", "NGM", "NCM"].includes(compact)) return "NAS";
+  // Keep generic US labels accepted for legacy persisted rows/input. They are
+  // resolved to a concrete listing exchange by us-listing-exchange before display/persistence.
+  if (["USA", "US"].includes(compact)) return "USA";
   return "";
 }
 
