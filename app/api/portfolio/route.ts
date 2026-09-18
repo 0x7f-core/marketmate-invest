@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { normalizeCryptoNamedItem } from "@/lib/crypto-display-name";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { annotateFillReturns } from "@/lib/server/fill-returns";
@@ -122,7 +123,7 @@ export async function GET(request: Request) {
        LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
        WHERE pos.participant_id=? AND pos.quantity_micros>0 ORDER BY i.market,i.name`
     ).bind(participantId).all<PositionRow>();
-    const repairedPositions = await repairListingExchanges(positions.results);
+    const repairedPositions = (await repairListingExchanges(positions.results)).map(item => normalizeCryptoNamedItem(item));
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.venue,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,
@@ -132,7 +133,7 @@ export async function GET(request: Request) {
        LEFT JOIN quote_snapshots q ON q.instrument_id=f.instrument_id
        WHERE f.participant_id=? ORDER BY f.executed_at ASC,f.id ASC`
     ).bind(participantId).all<FillRow>();
-    const fillsWithReturns = annotateFillReturns(fills.results)
+    const fillsWithReturns = annotateFillReturns(fills.results.map(item => normalizeCryptoNamedItem(item)))
       .sort((a, b) => b.executedAt - a.executedAt)
       .slice(0, 100);
     const reserved = await env.DB!.prepare(`SELECT COALESCE(SUM(
