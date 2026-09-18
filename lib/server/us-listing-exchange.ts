@@ -109,7 +109,12 @@ function exchangeFromRecord(record: Record<string, unknown>) {
 }
 
 function tickerCore(value: string) {
-  return value.normalize("NFKC").trim().toUpperCase().replace(/_[A-Z]+(?:\.|$).*$/, "").replace(/\.[A-Z]{1,4}$/, "");
+  return value
+    .normalize("NFKC")
+    .trim()
+    .toUpperCase()
+    .replace(/\.([OKNPA])$/, "")
+    .replaceAll("_", ".");
 }
 
 function recordIdentity(record: Record<string, unknown>) {
