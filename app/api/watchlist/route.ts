@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { canonicalCryptoDisplayName, normalizeCryptoNamedItem } from "@/lib/crypto-display-name";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { isSupportedUsSymbolInput, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
@@ -86,7 +87,8 @@ export async function GET(request: Request) {
     const stale = rows.filter(item => !item.receivedAt || item.receivedAt < Date.now() - 15_000).slice(0, 6);
 
     if (!stale.length) {
-      return Response.json({ items: await repairListingExchanges(rows) }, { headers: { "cache-control": "no-store" } });
+      const items = (await repairListingExchanges(rows)).map(item => normalizeCryptoNamedItem(item));
+      return Response.json({ items }, { headers: { "cache-control": "no-store" } });
     }
 
     const refreshed = await Promise.allSettled(stale.map(async item => {
@@ -116,7 +118,7 @@ export async function GET(request: Request) {
         receivedAt,
       };
     });
-    const items = await repairListingExchanges(refreshedItems);
+    const items = (await repairListingExchanges(refreshedItems)).map(item => normalizeCryptoNamedItem(item));
 
     return Response.json({ items }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return apiError(error); }
@@ -132,6 +134,7 @@ export async function POST(request: Request) {
       return Response.json({error:"종목 정보를 확인해주세요."},{status:400});
     }
     const symbol = normalizeNaverMarketSymbol(body.market, body.symbol);
+    const name = body.market === "CRYPTO" ? canonicalCryptoDisplayName(symbol, body.name) : body.name.trim().slice(0,80);
     let exchange = normalizeSupportedExchange(body.market, body.exchange);
     const currency = body.market === "US" ? "USD" : "KRW";
     if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !exchange || !body.name.trim() || (body.market === "US" && !isSupportedUsSymbolInput(symbol))) {
@@ -146,7 +149,7 @@ export async function POST(request: Request) {
     await env.DB!.batch([
       env.DB!.prepare(`INSERT INTO instruments (id,market,symbol,name,currency,exchange,is_active) VALUES (?,?,?,?,?,?,1)
         ON CONFLICT(market,symbol) DO UPDATE SET name=excluded.name,currency=excluded.currency,exchange=excluded.exchange,is_active=1`)
-        .bind(instrumentId, body.market, symbol, body.name.trim().slice(0,80), currency, exchange),
+        .bind(instrumentId, body.market, symbol, name, currency, exchange),
       env.DB!.prepare(`INSERT INTO watchlist_items (id,user_id,instrument_id,sort_order,created_at)
         SELECT ?,?,?,COALESCE((SELECT MAX(sort_order)+1 FROM watchlist_items WHERE user_id=?),0),?
         WHERE changes()>0 OR EXISTS(SELECT 1 FROM instruments WHERE id=?) ON CONFLICT(user_id,instrument_id) DO NOTHING`)
