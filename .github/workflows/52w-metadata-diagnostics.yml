@@ -13,11 +13,11 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          for url in             'https://stock.naver.com/api/domestic/detail/005930/siseDay?pageSize=5&bizdate=20260918'             'https://stock.naver.com/api/domestic/detail/005930/siseDay?pageSize=5&bizdate=20260918&tradeType=NXT'             'https://stock.naver.com/api/domestic/detail/005930/siseDay?pageSize=5&bizdate=20260918&codeType=NXT'
+          for url in             'https://m.stock.naver.com/api/stock/005930/integration'             'https://m.stock.naver.com/api/stock/005930/basic'             'https://stock.naver.com/api/securityService/stock/TSLA.O/basic'             'https://stock.naver.com/api/securityService/stock/TSLA.O/price?page=1&pageSize=5'             'https://stock.naver.com/api/coin/price/UPBIT/BTC'
           do
             echo "===== $url ====="
             code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json,*/*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0' "$url" || true)
             echo "HTTP $code"
-            head -c 12000 /tmp/b || true
+            head -c 30000 /tmp/b || true
             echo
           done
