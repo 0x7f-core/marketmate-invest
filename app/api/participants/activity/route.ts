@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { annotateFillReturns } from "@/lib/server/fill-returns";
+import { getUsListingExchange, normalizeUsListingExchange } from "@/lib/server/us-listing-exchange";
 
 type ActivityPosition = {
   market: "KR" | "US" | "CRYPTO";
@@ -32,12 +33,26 @@ type ActivityFill = {
   currentPriceKrwMicros?: number | null;
 };
 
-async function repairDomesticListings(items: ActivityPosition[]) {
-  return Promise.all(items.map(async item => {
-    if (item.market !== "KR") return item;
-    const listing = await getDomesticListingMarket(item.symbol, item.exchange);
-    return listing ? { ...item, exchange: listing } : item;
+async function repairListingExchanges(items: ActivityPosition[]) {
+  const repaired = await Promise.all(items.map(async item => {
+    if (item.market === "KR") {
+      const listing = await getDomesticListingMarket(item.symbol, item.exchange);
+      return listing ? { ...item, exchange: listing } : item;
+    }
+    if (item.market === "US") {
+      const normalized = normalizeUsListingExchange(item.exchange);
+      const listing = normalized || await getUsListingExchange(item.symbol, item.exchange);
+      return listing ? { ...item, exchange: listing } : item;
+    }
+    return item;
   }));
+  const changed = repaired.filter((item, index) => item.exchange !== items[index].exchange);
+  if (changed.length) {
+    await env.DB!.batch(changed.map(item =>
+      env.DB!.prepare("UPDATE instruments SET exchange=? WHERE id=?").bind(item.exchange, `${item.market}:${item.symbol}`),
+    )).catch(() => undefined);
+  }
+  return repaired;
 }
 
 export async function GET(request: Request) {
@@ -64,7 +79,7 @@ export async function GET(request: Request) {
        LEFT JOIN quote_snapshots q ON q.instrument_id=i.id
        WHERE pos.participant_id=? AND pos.quantity_micros>0 ORDER BY i.market,i.name`,
     ).bind(participantId).all<ActivityPosition>();
-    const repairedPositions = await repairDomesticListings(positions.results);
+    const repairedPositions = await repairListingExchanges(positions.results);
     const fills = await env.DB!.prepare(
       `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.venue,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,f.executed_at AS executedAt,
