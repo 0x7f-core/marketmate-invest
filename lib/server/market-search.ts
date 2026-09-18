@@ -2,6 +2,7 @@ import { normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-ma
 import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
+import { getUsListingExchange } from "@/lib/server/us-listing-exchange";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
 
 function text(record: Record<string, unknown>, keys: string[]) {
@@ -149,9 +150,14 @@ export async function searchNaverMarket(query: string, market?: Market) {
     }
   }
 
-  const instruments = [...unique.values()]
+  const ranked = [...unique.values()]
     .sort((a, b) => searchRank(a, query) - searchRank(b, query) || a.name.localeCompare(b.name, "ko"))
     .slice(0, 40);
+  const instruments = await Promise.all(ranked.map(async item => {
+    if (item.market !== "US") return item;
+    const exchange = await getUsListingExchange(item.symbol, item.exchange);
+    return exchange ? { ...item, exchange } : item;
+  }));
 
   return { instruments, stale: successful.some(response => response.value.stale) };
 }
