@@ -491,6 +491,192 @@ export async function getMarketOverview() {
   return quotes;
 }
 
+
+export const TRACKED_MARKET_INDEX_IDS = ["KOSPI", "KOSDAQ", "SPX", "COMP", "USDKRW"] as const;
+export type TrackedMarketIndexId = (typeof TRACKED_MARKET_INDEX_IDS)[number];
+
+type TrackedMarketIndexMeta = {
+  id: TrackedMarketIndexId;
+  name: string;
+  market: Market;
+  unit: string;
+  kind: "domestic" | "foreign" | "fx";
+  code: string;
+  symbol: string;
+  exchange: string;
+  currency: "KRW" | "USD";
+};
+
+const TRACKED_MARKET_INDEXES: Record<TrackedMarketIndexId, TrackedMarketIndexMeta> = {
+  KOSPI: { id: "KOSPI", name: "코스피", market: "KR", unit: "", kind: "domestic", code: "KOSPI", symbol: "KOSPI", exchange: "KRX", currency: "KRW" },
+  KOSDAQ: { id: "KOSDAQ", name: "코스닥", market: "KR", unit: "", kind: "domestic", code: "KOSDAQ", symbol: "KOSDAQ", exchange: "KRX", currency: "KRW" },
+  SPX: { id: "SPX", name: "S&P 500", market: "US", unit: "", kind: "foreign", code: ".INX", symbol: ".INX", exchange: "INDEX", currency: "USD" },
+  COMP: { id: "COMP", name: "나스닥 종합", market: "US", unit: "", kind: "foreign", code: ".IXIC", symbol: ".IXIC", exchange: "INDEX", currency: "USD" },
+  USDKRW: { id: "USDKRW", name: "원/달러 환율", market: "US", unit: "원", kind: "fx", code: "USD", symbol: "USDKRW", exchange: "FX", currency: "KRW" },
+};
+
+export type MarketIndexDetail = MarketIndexQuote & {
+  symbol: string;
+  exchange: string;
+  currency: "KRW" | "USD";
+  referencePrice?: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+  tradingValue?: number;
+  high52Week?: number;
+  low52Week?: number;
+};
+
+export function isTrackedMarketIndexId(value: string): value is TrackedMarketIndexId {
+  return (TRACKED_MARKET_INDEX_IDS as readonly string[]).includes(value);
+}
+
+function marketIndexPriceRows(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
+  if (depth > 6 || output.length > 800 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) marketIndexPriceRows(item, depth + 1, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.some(key => /^(?:closePrice|currentPrice|nowPrice|tradePrice|price|basePrice|openPrice|highPrice|lowPrice)$/i.test(key))) {
+    output.push(record);
+  }
+  for (const child of Object.values(record)) if (child && typeof child === "object") marketIndexPriceRows(child, depth + 1, output);
+  return output;
+}
+
+function marketIndexChartRows(payload: unknown) {
+  const direct = chartRows(payload);
+  return direct.length ? direct : marketIndexPriceRows(payload);
+}
+
+function normalizeIndexPoints(payload: unknown, fetchedAt: number) {
+  return marketIndexChartRows(payload)
+    .map((row, index) => chartPoint(row, fetchedAt - index * 86_400_000))
+    .filter((point): point is ChartPoint => Boolean(point))
+    .sort((a, b) => a.time - b.time)
+    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
+}
+
+async function trackedIndexHistory(meta: TrackedMarketIndexMeta, range: string) {
+  const days = RANGE_DAYS[range];
+  if (!days) throw new Error("INVALID_CHART_RANGE");
+
+  if (meta.kind === "domestic") {
+    const result = await naverJson<unknown>(
+      buildNaverPath(`/api/securityService/chart/domestic/index/${encodeURIComponent(meta.code)}`, { periodType: "day" }),
+      { ttlMs: 60_000, staleMs: 30 * 60_000 },
+    );
+    return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
+  }
+
+  if (meta.kind === "foreign") {
+    const result = await naverJson<unknown>(
+      buildNaverPath(`/api/securityService/chart/foreign/index/${encodeURIComponent(meta.code)}`, { periodType: "day" }),
+      { ttlMs: 60_000, staleMs: 30 * 60_000 },
+    );
+    return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
+  }
+
+  const starts = days > 120 ? [0, 100, 200, 300] : [0];
+  const pages = await Promise.all(starts.map(startIdx => naverJson<unknown>(
+    buildNaverPath("/api/domestic/exchange/USD/list", { startIdx, pageSize: 100 }),
+    { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 },
+  )));
+  const points = pages
+    .flatMap(page => normalizeIndexPoints(page.data, page.fetchedAt))
+    .sort((a, b) => a.time - b.time)
+    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
+  return { points, stale: pages.some(page => page.stale) };
+}
+
+export async function getTrackedMarketIndexChartSeries(id: TrackedMarketIndexId, range: string) {
+  const meta = TRACKED_MARKET_INDEXES[id];
+  const days = RANGE_DAYS[range];
+  if (!meta || !days) throw new Error("INVALID_CHART_RANGE");
+  const result = await trackedIndexHistory(meta, range);
+  const since = Date.now() - days * 86_400_000;
+  const points = result.points
+    .filter(point => range === "1Y" || point.time >= since)
+    .slice(-400);
+  return { points, range, stale: result.stale, source: "NAVER" as const };
+}
+
+export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Promise<MarketIndexDetail> {
+  const meta = TRACKED_MARKET_INDEXES[id];
+  if (!meta) throw new Error("INVALID_INDEX");
+
+  let current: MarketIndexQuote;
+  let values: ReturnType<typeof quoteValues> | null = null;
+  let pollingInterval: number | undefined;
+
+  if (meta.kind === "domestic") {
+    const result = await naverPolling<unknown>(
+      buildNaverPath("/api/polling/domestic/index", { itemCodes: meta.code }),
+      { staleMs: 120_000 },
+    );
+    const row = pollingRow(result.data);
+    if (!row) throw new Error("NAVER_EMPTY_INDEX");
+    values = quoteValues(row);
+    const quote = indexQuote(row, meta.id, meta.name, meta.market, result.fetchedAt, result.stale, result.pollingInterval);
+    if (!quote) throw new Error("NAVER_EMPTY_INDEX");
+    current = quote;
+    pollingInterval = result.pollingInterval;
+  } else if (meta.kind === "foreign") {
+    const result = await naverPolling<unknown>(
+      buildNaverPath("/api/polling/worldstock/index", { reutersCodes: meta.code }),
+      { staleMs: 120_000 },
+    );
+    const row = pollingRow(result.data);
+    if (!row) throw new Error("NAVER_EMPTY_INDEX");
+    values = quoteValues(row);
+    const quote = indexQuote(row, meta.id, meta.name, meta.market, result.fetchedAt, result.stale, result.pollingInterval);
+    if (!quote) throw new Error("NAVER_EMPTY_INDEX");
+    current = quote;
+    pollingInterval = result.pollingInterval;
+  } else {
+    const fx = await getNaverUsdKrwRate();
+    current = {
+      id: meta.id,
+      name: meta.name,
+      market: meta.market,
+      price: fx.rate,
+      change: fx.change,
+      rate: fx.changeRate,
+      unit: meta.unit,
+      source: "NAVER",
+      timestamp: fx.fetchedAt,
+      stale: fx.stale,
+    };
+  }
+
+  const history = await trackedIndexHistory(meta, "1Y").catch(() => ({ points: [] as ChartPoint[], stale: false }));
+  const latest = history.points.at(-1);
+  const high52Week = history.points.length ? Math.max(...history.points.map(point => point.high)) : 0;
+  const low52Week = history.points.length ? Math.min(...history.points.map(point => point.low)) : 0;
+  const referencePrice = values?.referencePrice || (current.price > 0 ? current.price - current.change : 0);
+
+  return {
+    ...current,
+    symbol: meta.symbol,
+    exchange: meta.exchange,
+    currency: meta.currency,
+    pollingInterval: pollingInterval ?? current.pollingInterval,
+    referencePrice: referencePrice || undefined,
+    open: values?.open || latest?.open || undefined,
+    high: values?.high || latest?.high || undefined,
+    low: values?.low || latest?.low || undefined,
+    volume: values?.volume || latest?.volume || undefined,
+    tradingValue: values?.tradingValue || undefined,
+    high52Week: high52Week || undefined,
+    low52Week: low52Week || undefined,
+  };
+}
+
 function chartRows(payload: unknown): Array<Record<string, unknown>> {
   if (Array.isArray(payload)) return payload.filter(item => item && typeof item === "object") as Array<Record<string, unknown>>;
   if (!payload || typeof payload !== "object") return [];
