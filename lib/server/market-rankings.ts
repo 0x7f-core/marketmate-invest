@@ -306,10 +306,10 @@ function domesticV3Rows(
 
 async function isNxtPremarket() {
   try {
-    const session = await getCheckedMarketSession("KR");
+    const session = await getCheckedMarketSession("KR", "NXT");
     return session.isOpen
       && session.exchange?.toUpperCase() === "NXT"
-      && session.currentSession?.toLowerCase().includes("pre") === true;
+      && session.currentSession === "preMarket";
   } catch {
     return false;
   }
@@ -364,7 +364,7 @@ async function cryptoRanking(category: RankingCategory) {
 }
 
 
-function aggregatePopularRows(payload: unknown, market: PopularStockMarket) {
+function aggregatePopularRows(payload: unknown, market: PopularStockMarket, nxtPremarket = false) {
   const root = asRow(payload);
   const rawItems = Array.isArray(payload)
     ? payload
@@ -376,8 +376,10 @@ function aggregatePopularRows(payload: unknown, market: PopularStockMarket) {
     const row = asRow(raw);
     if (!row) return [];
     const price = asRow(row.price);
+    const krx = asRow(price?.krx) ?? asRow(row.krx);
+    const nxt = asRow(price?.nxt) ?? asRow(row.nxt);
     const venue = market === "KR"
-      ? (asRow(price?.krx) ?? asRow(price?.nxt) ?? asRow(row.krx) ?? asRow(row.nxt))
+      ? (nxtPremarket ? (nxt ?? krx) : (krx ?? nxt))
       : undefined;
     return [{ ...row, ...(price ?? {}), ...(venue ?? {}) }];
   });
@@ -405,13 +407,14 @@ async function legacyPopular(market: PopularStockMarket) {
 }
 
 export async function getPopularStocks(market: PopularStockMarket): Promise<PopularStocksResult> {
+  const nxtPremarket = market === "KR" ? await isNxtPremarket() : false;
   let result = await popularAggregate(market);
-  let rows = aggregatePopularRows(result.data, market);
+  let rows = aggregatePopularRows(result.data, market, nxtPremarket);
   let normalized = uniqueItems(market, rows.length ? rows : result.data);
 
   if (!normalized.length) {
     result = await legacyPopular(market);
-    rows = aggregatePopularRows(result.data, market);
+    rows = aggregatePopularRows(result.data, market, nxtPremarket);
     normalized = uniqueItems(market, rows.length ? rows : result.data);
   }
 
