@@ -5,6 +5,7 @@ import { matchPendingOrders } from "@/lib/server/pending-orders";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { getTradingQuote, type TradingQuote } from "@/lib/server/trading-quote";
+import { getUsListingExchange } from "@/lib/server/us-listing-exchange";
 import { env } from "cloudflare:workers";
 
 export const dynamic = "force-dynamic";
@@ -106,16 +107,26 @@ export async function GET(request: Request) {
 
     const requestedExchange = normalizedSymbols.length === 1 ? exchange : undefined;
     const domesticListings = new Map<string, string>();
+    const usListings = new Map<string, string>();
     if (market === "KR") {
       await Promise.all(quotes.map(async quote => {
         const listing = await getDomesticListingMarket(quote.symbol, requestedExchange);
         if (listing) domesticListings.set(quote.symbol, listing);
       }));
+    } else if (market === "US") {
+      await Promise.all(quotes.map(async quote => {
+        const listing = await getUsListingExchange(quote.symbol, requestedExchange);
+        if (listing) usListings.set(quote.symbol, listing);
+      }));
     }
 
     const writes = quotes.flatMap(quote => persistenceStatements(
       quote,
-      quote.market === "KR" ? domesticListings.get(quote.symbol) || requestedExchange : requestedExchange,
+      quote.market === "KR"
+        ? domesticListings.get(quote.symbol) || requestedExchange
+        : quote.market === "US"
+          ? usListings.get(quote.symbol) || requestedExchange
+          : requestedExchange,
     ));
     if (crypto.getRandomValues(new Uint8Array(1))[0] === 0) {
       writes.push(env.DB!.prepare("DELETE FROM price_history WHERE recorded_at<?").bind(Date.now() - 400 * 86_400_000));
@@ -128,10 +139,16 @@ export async function GET(request: Request) {
     await Promise.allSettled(quotes.map(matchPendingOrders));
 
     const clientQuotes = quotes.map(quote => {
-      if (quote.market !== "KR") return quote;
-      const listing = domesticListings.get(quote.symbol);
-      const { venue: tradingVenue, ...rest } = quote;
-      return listing ? { ...rest, venue: listing, tradingVenue } : { ...rest, tradingVenue };
+      if (quote.market === "KR") {
+        const listing = domesticListings.get(quote.symbol);
+        const { venue: tradingVenue, ...rest } = quote;
+        return listing ? { ...rest, venue: listing, tradingVenue } : { ...rest, tradingVenue };
+      }
+      if (quote.market === "US") {
+        const listing = usListings.get(quote.symbol);
+        return listing ? { ...quote, venue: listing } : quote;
+      }
+      return quote;
     });
 
     return Response.json(
