@@ -70,7 +70,7 @@ async function quoteInstrument(cookie, instrument, venue) {
   assert(result.data?.source === "NAVER", `${instrument.market} quote source is not NAVER`);
   assert(Array.isArray(result.data?.quotes) && Number(result.data.quotes[0]?.price) > 0, `${instrument.market} quote missing positive price`);
   const quote = result.data.quotes[0];
-  for (const field of ["open", "high", "low", "volume", "tradingValue", "high52Week", "low52Week"]) {
+  for (const field of ["referencePrice", "open", "high", "low", "volume", "tradingValue", "high52Week", "low52Week"]) {
     assert(Number(quote?.[field]) > 0, `${instrument.market} quote missing ${field}: ${JSON.stringify(quote)}`);
   }
   if (instrument.market === "KR" && venue) {
@@ -82,6 +82,24 @@ async function quoteInstrument(cookie, instrument, venue) {
   const timestampText = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : "none";
   console.log(`PASS ${instrument.market}${venue ? ` ${venue}` : ""} quote + statistics (${quote.price}, ${result.elapsedMs}ms, timestamp=${timestampText}, ageMs=${ageMs}, verified=${Boolean(quote.timestampVerified)}, polling=${quote.pollingInterval ?? "n/a"})`);
   return quote;
+}
+
+async function quoteExtremaDates(cookie, instrument, quote) {
+  const params = new URLSearchParams({
+    market: instrument.market,
+    symbol: instrument.symbol,
+    high: String(quote.high52Week),
+    low: String(quote.low52Week),
+  });
+  if (instrument.exchange) params.set("exchange", instrument.exchange);
+  const result = await jsonRequest(`/api/quote-extrema-dates?${params.toString()}`, {
+    headers: authHeaders(cookie),
+    cache: "no-store",
+  });
+  assert(result.response.status === 200, `${instrument.market} 52-week dates expected 200, got ${result.response.status}: ${JSON.stringify(result.data)}`);
+  assert(/^\d{4}-\d{2}-\d{2}$/.test(result.data?.high52WeekDate ?? ""), `${instrument.market} 52-week high date missing: ${JSON.stringify(result.data)}`);
+  assert(/^\d{4}-\d{2}-\d{2}$/.test(result.data?.low52WeekDate ?? ""), `${instrument.market} 52-week low date missing: ${JSON.stringify(result.data)}`);
+  console.log(`PASS ${instrument.market} 52-week dates (${result.data.high52WeekDate}, ${result.data.low52WeekDate}, ${result.elapsedMs}ms)`);
 }
 
 await waitForDeployment();
@@ -124,15 +142,18 @@ console.log(`PASS production D1 session readback (${me.elapsedMs}ms)`);
 
 const kr = await searchInstrument(cookie, "KR", "삼성전자", "005930");
 const krxQuote = await quoteInstrument(cookie, kr, "KRX");
+await quoteExtremaDates(cookie, kr, krxQuote);
 if (Array.isArray(krxQuote.availableVenues) && krxQuote.availableVenues.includes("NXT")) {
   await quoteInstrument(cookie, kr, "NXT");
 }
 
 const us = await searchInstrument(cookie, "US", "AAPL");
-await quoteInstrument(cookie, us);
+const usQuote = await quoteInstrument(cookie, us);
+await quoteExtremaDates(cookie, us, usQuote);
 
 const crypto = await searchInstrument(cookie, "CRYPTO", "BTC");
-await quoteInstrument(cookie, crypto);
+const cryptoQuote = await quoteInstrument(cookie, crypto);
+await quoteExtremaDates(cookie, crypto, cryptoQuote);
 
 for (const venue of ["KRX", "NXT"]) {
   const status = await jsonRequest(`/api/market-status?market=KR&live=1&venue=${venue}`, { headers: authHeaders(cookie), cache: "no-store" });
