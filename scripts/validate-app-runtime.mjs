@@ -88,13 +88,30 @@ assert(marketStatus.data?.market === "KR", "market status market mismatch");
 assert(marketStatus.data?.source === "NAVER", "market status source is not NAVER");
 console.log(`PASS KR market-status (${marketStatus.data?.label ?? "unknown"})`);
 
-const quote = await jsonRequest("/api/quotes?market=KR&symbols=005930&exchange=KRX", { headers: authHeaders, cache: "no-store" });
+const quote = await jsonRequest("/api/quotes?market=KR&symbols=005930&exchange=KOSPI&venue=KRX", { headers: authHeaders, cache: "no-store" });
 assert(quote.response.status === 200, `quote expected 200, got ${quote.response.status}: ${JSON.stringify(quote.data)}`);
 assert(Array.isArray(quote.data?.quotes) && quote.data.quotes.length > 0, "quote response missing quotes[]");
-assert(Number(quote.data.quotes[0]?.price) > 0, "Samsung quote has no positive price");
-assert(quote.data.quotes[0]?.venue === "KOSPI", `Samsung client listing label expected KOSPI, got ${quote.data.quotes[0]?.venue}`);
+const krxQuote = quote.data.quotes[0];
+assert(Number(krxQuote?.price) > 0, "Samsung quote has no positive price");
+assert(krxQuote?.venue === "KOSPI", `Samsung client listing label expected KOSPI, got ${krxQuote?.venue}`);
+assert(krxQuote?.tradingVenue === "KRX", `Samsung KRX quote trading venue mismatch: ${krxQuote?.tradingVenue}`);
+for (const field of ["open", "high", "low", "volume", "tradingValue", "high52Week", "low52Week"]) {
+  assert(Number(krxQuote?.[field]) > 0, `Samsung integrated quote missing ${field}: ${JSON.stringify(krxQuote)}`);
+}
+assert(Array.isArray(krxQuote?.availableVenues) && krxQuote.availableVenues.includes("KRX"), "Samsung availableVenues missing KRX");
 assert(quote.data?.source === "NAVER", "quote source is not NAVER");
-console.log(`PASS KR quote through app route (${quote.data.quotes[0].price}, KOSPI)`);
+console.log(`PASS KR KRX quote + integrated statistics (${krxQuote.price}, KOSPI)`);
+
+if (krxQuote.availableVenues.includes("NXT")) {
+  const nxtQuoteResult = await jsonRequest("/api/quotes?market=KR&symbols=005930&exchange=KOSPI&venue=NXT", { headers: authHeaders, cache: "no-store" });
+  assert(nxtQuoteResult.response.status === 200, `NXT quote expected 200, got ${nxtQuoteResult.response.status}: ${JSON.stringify(nxtQuoteResult.data)}`);
+  const nxtQuote = nxtQuoteResult.data?.quotes?.[0];
+  assert(Number(nxtQuote?.price) > 0 && nxtQuote?.tradingVenue === "NXT", `Samsung NXT quote invalid: ${JSON.stringify(nxtQuote)}`);
+  for (const field of ["open", "high", "low", "volume", "tradingValue", "high52Week", "low52Week"]) {
+    assert(Number(nxtQuote?.[field]) > 0, `Samsung NXT selection missing integrated ${field}: ${JSON.stringify(nxtQuote)}`);
+  }
+  console.log(`PASS KR NXT selectable quote + integrated statistics (${nxtQuote.price})`);
+}
 
 const chart = await jsonRequest("/api/chart?market=KR&symbol=005930&exchange=KRX&range=1M", { headers: authHeaders, cache: "no-store" });
 assert(chart.response.status === 200, `chart expected 200, got ${chart.response.status}: ${JSON.stringify(chart.data)}`);
