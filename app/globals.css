@@ -81,65 +81,65 @@
 
 /* Naver-style popular stocks summary and ranking sheet */
 .np-popular-stocks{width:100%;min-width:0}
-.np-popular-compact{width:100%;min-height:62px;display:grid;grid-template-columns:minmax(0,1fr) 46px;align-items:stretch;border:1.5px solid #1fbf62;border-radius:12px;background:#fff;overflow:hidden}
-.np-popular-primary{min-width:0;padding:0 6px 0 18px;display:grid;grid-template-columns:auto 28px minmax(0,1fr) auto;gap:8px;align-items:center;border:0;background:#fff;text-align:left}
+.np-popular-compact{width:100%;min-height:54px;display:grid;grid-template-columns:minmax(0,1fr) 42px;align-items:stretch;border:1.5px solid #1fbf62;border-radius:12px;background:#fff;overflow:hidden}
+.np-popular-primary{min-width:0;padding:0 5px 0 15px;display:grid;grid-template-columns:auto 25px minmax(0,1fr) auto;gap:7px;align-items:center;border:0;background:#fff;text-align:left}
 .np-popular-primary:hover,.np-popular-expand:hover{background:#fcfffd}
 .np-popular-primary:disabled{cursor:default;opacity:1}
-.np-popular-badge{display:inline-flex;align-items:center;justify-content:center;height:28px;padding:0 10px;border-radius:14px;background:linear-gradient(135deg,#ff3d2e,#f06a2c);color:#fff;font-size:12px;font-weight:900;white-space:nowrap}
-.np-popular-primary>b{font-size:15px;text-align:center}
-.np-popular-primary>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:17px;letter-spacing:-.035em}
-.np-popular-primary>em{font-size:16px;font-style:normal;font-weight:900;text-align:right;white-space:nowrap}
+.np-popular-badge{display:inline-flex;align-items:center;justify-content:center;height:24px;padding:0 9px;border-radius:12px;background:linear-gradient(135deg,#ff3d2e,#f06a2c);color:#fff;font-size:11px;font-weight:900;white-space:nowrap}
+.np-popular-primary>b{font-size:14px;text-align:center}
+.np-popular-primary>strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;letter-spacing:-.035em}
+.np-popular-primary>em{font-size:14px;font-style:normal;font-weight:900;text-align:right;white-space:nowrap}
 .np-popular-expand{display:grid;place-items:center;border:0;background:#fff;color:#16b85b}
-.np-popular-expand>svg{width:20px;height:20px}
+.np-popular-expand>svg{width:18px;height:18px}
 
 .popular-stocks-layer{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.42)}
-.popular-stocks-sheet{width:min(560px,calc(100vw - 40px));max-height:min(84vh,780px);display:flex;flex-direction:column;overflow:hidden;border-radius:24px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.2)}
-.popular-stocks-sheet-head{position:relative;min-height:94px;display:flex;align-items:center;justify-content:center;padding:0 72px}
-.popular-stocks-sheet-head h2{margin:0;font-size:24px;letter-spacing:-.045em}
-.popular-stocks-close{position:absolute;top:50%;right:26px;display:grid;place-items:center;width:40px;height:40px;transform:translateY(-50%);border:0;background:transparent;color:#17191c}
-.popular-stocks-close svg{width:28px;height:28px}
+.popular-stocks-sheet{width:min(520px,calc(100vw - 40px));max-height:min(82vh,740px);display:flex;flex-direction:column;overflow:hidden;border-radius:24px;background:#fff;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.popular-stocks-sheet-head{position:relative;min-height:78px;display:flex;align-items:center;justify-content:center;padding:0 72px}
+.popular-stocks-sheet-head h2{margin:0;font-size:21px;letter-spacing:-.045em}
+.popular-stocks-close{position:absolute;top:50%;right:22px;display:grid;place-items:center;width:36px;height:36px;transform:translateY(-50%);border:0;background:transparent;color:#17191c}
+.popular-stocks-close svg{width:24px;height:24px}
 .popular-stocks-tabs{min-height:0;display:flex;flex:1;flex-direction:column}
-.popular-stocks-tab-list{width:calc(100% - 40px);height:50px;margin:0 20px 8px;padding:3px;display:grid;grid-template-columns:1fr 1fr;border-radius:10px;background:#f4f5f6}
-.popular-stocks-tab-list [data-slot="tabs-trigger"]{height:44px;border:0;border-radius:8px;background:transparent;color:#a0a5aa;font-size:15px;font-weight:800;box-shadow:none}
+.popular-stocks-tab-list{width:calc(100% - 36px);height:44px;margin:0 18px 8px;padding:3px;display:grid;grid-template-columns:1fr 1fr;border-radius:10px;background:#f4f5f6}
+.popular-stocks-tab-list [data-slot="tabs-trigger"]{height:38px;border:0;border-radius:8px;background:transparent;color:#a0a5aa;font-size:14px;font-weight:800;box-shadow:none}
 .popular-stocks-tab-list [data-slot="tabs-trigger"][data-state="active"]{background:#fff;color:#17191c;box-shadow:0 1px 4px #17202b10}
-.popular-stocks-list{min-height:0;max-height:560px;margin:0!important;padding:2px 0 16px;overflow-y:auto;overscroll-behavior:contain}
-.popular-stocks-list>button{width:100%;min-height:74px;padding:9px 24px;display:grid;grid-template-columns:28px 46px minmax(0,1fr) auto;gap:10px;align-items:center;border:0;background:#fff;text-align:left}
+.popular-stocks-list{min-height:0;max-height:520px;margin:0!important;padding:2px 0 16px;overflow-y:auto;overscroll-behavior:contain}
+.popular-stocks-list>button{width:100%;min-height:66px;padding:8px 20px;display:grid;grid-template-columns:26px 40px minmax(0,1fr) auto;gap:9px;align-items:center;border:0;background:#fff;text-align:left}
 .popular-stocks-list>button:hover{background:#fafbfb}
-.popular-stock-rank{font-size:16px;text-align:center}
-.popular-stock-logo{position:relative;display:block;width:42px;height:42px}
-.popular-stock-logo .instrument-logo{width:42px;height:42px}
-.popular-stock-logo>i{position:absolute;right:-4px;bottom:-3px;display:grid;place-items:center;width:21px;height:21px;border:2px solid #fff;border-radius:50%;background:#fff7f2;color:#ff5a3f}
-.popular-stock-logo>i svg{width:15px;height:15px;fill:#ff7b45;stroke-width:1.8}
+.popular-stock-rank{font-size:14px;text-align:center}
+.popular-stock-logo{position:relative;display:block;width:36px;height:36px}
+.popular-stock-logo .instrument-logo{width:36px;height:36px}
+.popular-stock-logo>i{position:absolute;right:-4px;bottom:-3px;display:grid;place-items:center;width:18px;height:18px;border:2px solid #fff;border-radius:50%;background:#fff7f2;color:#ff5a3f}
+.popular-stock-logo>i svg{width:13px;height:13px;fill:#ff7b45;stroke-width:1.8}
 .popular-stock-name{min-width:0;display:flex;flex-direction:column;gap:3px}
-.popular-stock-name>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;letter-spacing:-.035em}
-.popular-stock-name>small{color:#a1a6ab;font-size:12px}
+.popular-stock-name>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;letter-spacing:-.035em}
+.popular-stock-name>small{color:#a1a6ab;font-size:11px}
 .popular-stock-price{display:flex;flex-direction:column;align-items:flex-end;gap:3px;text-align:right;white-space:nowrap}
-.popular-stock-price>strong{font-size:17px}
-.popular-stock-price>em{font-size:12px;font-style:normal}
+.popular-stock-price>strong{font-size:15px}
+.popular-stock-price>em{font-size:11px;font-style:normal}
 
 @media(max-width:760px){
-  .np-popular-stocks{padding:12px 14px 14px;background:#fff;border-bottom:9px solid #f0f2f3}
-  .np-popular-compact{min-height:58px;grid-template-columns:minmax(0,1fr) 40px;border-radius:11px}
-  .np-popular-primary{padding:0 4px 0 13px;grid-template-columns:auto 24px minmax(0,1fr) auto;gap:6px}
-  .np-popular-badge{height:26px;padding:0 9px;font-size:11px}
-  .np-popular-primary>b{font-size:14px}
-  .np-popular-primary>strong{font-size:16px}
-  .np-popular-primary>em{font-size:14px}
-  .np-popular-expand>svg{width:18px;height:18px}
+  .np-popular-stocks{padding:10px 14px 12px;background:#fff;border-bottom:9px solid #f0f2f3}
+  .np-popular-compact{min-height:50px;grid-template-columns:minmax(0,1fr) 36px;border-radius:11px}
+  .np-popular-primary{padding:0 4px 0 11px;grid-template-columns:auto 22px minmax(0,1fr) auto;gap:5px}
+  .np-popular-badge{height:23px;padding:0 8px;font-size:10px}
+  .np-popular-primary>b{font-size:13px}
+  .np-popular-primary>strong{font-size:14px}
+  .np-popular-primary>em{font-size:13px}
+  .np-popular-expand>svg{width:16px;height:16px}
 
   .popular-stocks-layer{align-items:flex-end;justify-content:stretch;padding:0;background:rgba(0,0,0,.42)}
-  .popular-stocks-sheet{width:100%;max-width:none;max-height:calc(100dvh - 54px);border-radius:28px 28px 0 0;box-shadow:0 -10px 36px rgba(0,0,0,.16)}
-  .popular-stocks-sheet-head{min-height:96px;padding:0 64px}
-  .popular-stocks-sheet-head h2{font-size:25px}
-  .popular-stocks-close{right:20px;width:44px;height:44px}
-  .popular-stocks-close svg{width:30px;height:30px}
-  .popular-stocks-tab-list{width:calc(100% - 32px);height:52px;margin:0 16px 10px}
-  .popular-stocks-tab-list [data-slot="tabs-trigger"]{height:46px;font-size:16px}
+  .popular-stocks-sheet{width:100%;max-width:none;max-height:calc(100dvh - 64px);border-radius:24px 24px 0 0;box-shadow:0 -10px 36px rgba(0,0,0,.16)}
+  .popular-stocks-sheet-head{min-height:76px;padding:0 58px}
+  .popular-stocks-sheet-head h2{font-size:21px}
+  .popular-stocks-close{right:16px;width:40px;height:40px}
+  .popular-stocks-close svg{width:25px;height:25px}
+  .popular-stocks-tab-list{width:calc(100% - 28px);height:46px;margin:0 14px 8px}
+  .popular-stocks-tab-list [data-slot="tabs-trigger"]{height:40px;font-size:14px}
   .popular-stocks-list{max-height:none;flex:1;padding-bottom:max(18px,env(safe-area-inset-bottom))}
-  .popular-stocks-list>button{min-height:76px;padding:9px 18px;grid-template-columns:26px 46px minmax(0,1fr) auto;gap:9px}
-  .popular-stock-rank{font-size:16px}
-  .popular-stock-name>strong{font-size:17px}
-  .popular-stock-name>small{font-size:12px}
-  .popular-stock-price>strong{font-size:18px}
-  .popular-stock-price>em{font-size:12px}
+  .popular-stocks-list>button{min-height:66px;padding:8px 15px;grid-template-columns:24px 38px minmax(0,1fr) auto;gap:8px}
+  .popular-stock-rank{font-size:14px}
+  .popular-stock-name>strong{font-size:14px}
+  .popular-stock-name>small{font-size:11px}
+  .popular-stock-price>strong{font-size:15px}
+  .popular-stock-price>em{font-size:11px}
 }
