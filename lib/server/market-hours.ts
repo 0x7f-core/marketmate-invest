@@ -207,7 +207,7 @@ function isSupportedTradingSession(market: Market, detail: ReturnType<typeof ses
   return true;
 }
 
-function domesticNotice(session: DomesticVenueClockSession, naverOpen: boolean) {
+function domesticNotice(session: DomesticVenueClockSession) {
   const schedule = session.openTimeKst && session.closeTimeKst ? ` · ${session.openTimeKst}~${session.closeTimeKst} KST` : "";
   if (session.currentSession === "openingAuction" || session.currentSession === "closingAuction") {
     return `${session.exchange} ${session.label} 시간에는 모의주문을 받지 않습니다${schedule}.`;
@@ -217,9 +217,6 @@ function domesticNotice(session: DomesticVenueClockSession, naverOpen: boolean) 
   }
   if (!session.isOpen) {
     return `${session.exchange} 현재 거래 가능 시간이 아닙니다.`;
-  }
-  if (!naverOpen) {
-    return `현재 시간은 ${session.exchange} ${session.label} 구간이지만 네이버증권 장 상태가 열림으로 확인되지 않아 안전을 위해 주문을 중단합니다${schedule}.`;
   }
   return `${session.exchange} ${session.label} 주문 가능${schedule}.`;
 }
@@ -264,7 +261,7 @@ export async function getCheckedMarketSession(
         .map(item => {
           const venue = item.exchange.toUpperCase() as DomesticTradingVenue;
           const clock = getDomesticVenueClockSession(venue);
-          const tradable = !item.detail.holiday && clock.isOpen && item.detail.isOpen;
+          const tradable = !item.detail.holiday && clock.isOpen;
           return { ...item, venue, clock, tradable };
         });
 
@@ -288,7 +285,7 @@ export async function getCheckedMarketSession(
         label: `${detail.holiday ? "휴장일" : clock.label} · ${venue}`,
         notice: detail.holiday
           ? `네이버증권 기준 ${venue} 휴장일로 주문할 수 없습니다.`
-          : domesticNotice(clock, detail.isOpen),
+          : domesticNotice(clock),
         exchange: venue,
         isHoliday: detail.holiday,
         currentSession: clock.currentSession,
