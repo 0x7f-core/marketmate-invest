@@ -1,0 +1,33 @@
+name: Quote field diagnostics
+on:
+  push:
+    paths:
+      - .github/workflows/quote-field-diagnostics.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          probe() {
+            name="$1"; url="$2"
+            echo "===== $name ====="
+            code=$(curl -sS --max-time 20 -o /tmp/b -w '%{http_code}' -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-Quote-Diagnostic/1.0' "$url" || true)
+            echo "HTTP $code"
+            head -c 16000 /tmp/b || true
+            echo
+          }
+          probe domestic_snapshot 'https://stock.naver.com/api/stockSecurity/items/v2/domestic/005930/price-snapshot'
+          probe domestic_price 'https://stock.naver.com/api/domestic/detail/005930/price'
+          probe domestic_krx_poll 'https://stock.naver.com/api/polling/domestic/stock?itemCodes=005930'
+          probe domestic_nxt_poll 'https://stock.naver.com/api/polling/domestic/NXT/stock?itemCodes=005930'
+          probe us_poll 'https://stock.naver.com/api/polling/worldstock/stock?reutersCodes=AAPL.O'
+          probe us_basic 'https://stock.naver.com/api/securityService/stock/AAPL.O/basic'
+          probe us_price 'https://stock.naver.com/api/securityService/stock/AAPL.O/price?page=1&pageSize=2'
+          probe crypto_poll 'https://stock.naver.com/api/polling/coin/price?fqnfTickers=BTC_KRW_UPBIT'
+          probe crypto_price 'https://stock.naver.com/api/coin/price/UPBIT/BTC'
+          probe crypto_profile 'https://stock.naver.com/api/coin/profile/BTC'
