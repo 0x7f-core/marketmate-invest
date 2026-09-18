@@ -487,9 +487,10 @@ function usTradingScheduleRows(isDst:boolean):DomesticScheduleRow[]{
     {label:"애프터마켓 마감",start:"09:50",end:"18:00",tradable:false},
   ];
 }
+function newYorkDaylightSavingNow(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",timeZoneName:"short"}).formatToParts(new Date());const zone=parts.find(part=>part.type==="timeZoneName")?.value??"";return zone.toUpperCase().includes("EDT");}
 function UsTradingSchedule(){
   const[state,setState]=useState<{minutes:number;label:string;isDst:boolean}|null>(null);
-  useEffect(()=>{const update=()=>{const seoul=seoulClock();const ny=localClock("America/New_York");setState({...seoul,isDst:ny.zone.toUpperCase().includes("EDT")});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{const update=()=>{const seoul=seoulClock();setState({...seoul,isDst:newYorkDaylightSavingNow()});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
   const rows=usTradingScheduleRows(state?.isDst??true);
   return <div className="domestic-schedule us-schedule">
     <div className="market-schedule-title"><strong>미국주식</strong><span>한국시간 기준 · {state?(state.isDst?"서머타임":"표준시"):"확인 중"}</span></div>
