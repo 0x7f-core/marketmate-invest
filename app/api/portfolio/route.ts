@@ -32,6 +32,7 @@ type FillRow = {
   id: string;
   instrumentId: string;
   side: "buy" | "sell";
+  venue?: "KRX" | "NXT" | null;
   quantityMicros: number;
   priceMicros: number;
   fxRateMicros: number;
@@ -112,7 +113,7 @@ export async function GET(request: Request) {
     ).bind(participantId).all<PositionRow>();
     const repairedPositions = await repairDomesticListings(positions.results);
     const fills = await env.DB!.prepare(
-      `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
+      `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.venue,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,
               f.executed_at AS executedAt,i.market,i.symbol,i.name,i.currency,
               q.price_micros AS currentPriceKrwMicros
@@ -128,7 +129,7 @@ export async function GET(request: Request) {
         CASE
           WHEN i.market='US' THEN 1.0007
           WHEN i.market='CRYPTO' THEN 1.0005
-          WHEN i.market='KR' AND UPPER(i.exchange)='NXT' THEN 1.000145
+          WHEN i.market='KR' AND UPPER(COALESCE(o.venue,i.exchange))='NXT' THEN 1.000145
           ELSE 1.00015
         END
       ),0) AS reservedCashKrw
