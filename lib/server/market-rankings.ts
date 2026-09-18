@@ -1,3 +1,4 @@
+import { canonicalCryptoDisplayName } from "@/lib/crypto-display-name";
 import { getDomesticListingMarket, normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { getCheckedMarketSession } from "@/lib/server/market-hours";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
@@ -140,10 +141,11 @@ function normalizeRow(market: RankingMarket, row: Row): Omit<MarketRankingItem, 
       ? usExchange(row, symbol)
       : textValue(row, ["exchangeType", "exchange", "market"]) || "UPBIT";
 
+  const normalizedSymbol = market === "CRYPTO" ? `KRW-${symbol}` : symbol;
   return {
     market,
-    symbol: market === "CRYPTO" ? `KRW-${symbol}` : symbol,
-    name,
+    symbol: normalizedSymbol,
+    name: market === "CRYPTO" ? canonicalCryptoDisplayName(normalizedSymbol, name) : name,
     exchange,
     currency: market === "US" ? "USD" : "KRW",
     price,
