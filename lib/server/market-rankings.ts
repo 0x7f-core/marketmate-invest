@@ -403,13 +403,14 @@ async function legacyPopular(market: PopularStockMarket) {
 }
 
 export async function getPopularStocks(market: PopularStockMarket): Promise<PopularStocksResult> {
-  let result = await popularAggregate(market);
+  let result = market === "KR" ? await legacyPopular("KR") : await popularAggregate("US");
   const rows = aggregatePopularRows(result.data, market);
   let normalized = uniqueItems(market, rows.length ? rows : result.data);
 
   if (!normalized.length) {
-    result = await legacyPopular(market);
-    normalized = uniqueItems(market, result.data);
+    result = market === "KR" ? await popularAggregate("KR") : await legacyPopular("US");
+    const fallbackRows = aggregatePopularRows(result.data, market);
+    normalized = uniqueItems(market, fallbackRows.length ? fallbackRows : result.data);
   }
 
   let items = normalized.slice(0, 10).map((item, index) => ({ ...item, rank: index + 1 }));
