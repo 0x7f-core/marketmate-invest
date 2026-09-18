@@ -46,7 +46,7 @@ function loadLightweightCharts() {
   return chartLibraryPromise;
 }
 
-export default function MarketChart({ quote }: { quote: QuoteLike }) {
+export default function MarketChart({ quote, indexId }: { quote: QuoteLike; indexId?: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const seriesRef = useRef<CandleSeries | null>(null);
@@ -130,6 +130,10 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
     setDataStatus("loading");
     setDataMessage("");
     const params = new URLSearchParams({ market: quote.market, symbol: quote.symbol, exchange: quote.exchange, range });
+    if (indexId) {
+      params.set("kind", "index");
+      params.set("id", indexId);
+    }
     fetch(`/api/chart?${params.toString()}`, { cache: "no-store", signal: controller.signal })
       .then(async response => {
         const result = await response.json() as ChartResponse;
@@ -146,7 +150,7 @@ export default function MarketChart({ quote }: { quote: QuoteLike }) {
         setDataStatus("error");
       });
     return () => controller.abort();
-  }, [quote.market, quote.symbol, quote.exchange, range, retryToken]);
+  }, [quote.market, quote.symbol, quote.exchange, indexId, range, retryToken]);
 
   const loading = libraryStatus === "loading" || dataStatus === "loading";
   const errorMessage = libraryStatus === "error" ? libraryMessage : dataStatus === "error" ? dataMessage : "";
