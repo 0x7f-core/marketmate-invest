@@ -56,7 +56,10 @@ async function refreshPortfolioQuote(instrument: StalePositionQuote, refreshStar
   }
 
   try {
-    const quote = await getTradingQuote(instrument.market, instrument.symbol, instrument.exchange);
+    const resolvedExchange = instrument.market === "US"
+      ? await getUsListingExchange(instrument.symbol, instrument.exchange) || instrument.exchange
+      : instrument.exchange;
+    const quote = await getTradingQuote(instrument.market, instrument.symbol, resolvedExchange);
     if (quote.stale) throw new Error("NAVER_STALE_QUOTE");
     await persistQuoteSnapshot(quote);
   } catch {
