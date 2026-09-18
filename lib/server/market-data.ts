@@ -4,6 +4,7 @@ import { buildNaverPath, naverJson, naverPolling } from "@/lib/server/naver-stoc
 import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
 export type Market = "KR" | "US" | "CRYPTO";
+export type DomesticTradingVenue = "KRX" | "NXT";
 export type LiveQuote = {
   market: Market;
   symbol: string;
@@ -21,6 +22,10 @@ export type LiveQuote = {
   high?: number;
   low?: number;
   volume?: number;
+  tradingValue?: number;
+  high52Week?: number;
+  low52Week?: number;
+  availableVenues?: DomesticTradingVenue[];
 };
 
 export type MarketIndexQuote = {
@@ -165,7 +170,10 @@ function quoteValues(row: Record<string, unknown>) {
     open: asNumber(row.openPrice, row.open, row.openingPrice),
     high: asNumber(row.highPrice, row.high, row.highestPrice),
     low: asNumber(row.lowPrice, row.low, row.lowestPrice),
-    volume: asNumber(row.accumulatedTradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume),
+    volume: asNumber(row.accumulatedTradingVolumeRaw, row.accumulatedTradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume),
+    tradingValue: asNumber(row.accumulatedTradingValueRaw, row.accumulatedTradingValue, row.tradingValue, row.tradeAmount, row.tradeValue),
+    high52Week: asNumber(row.highPriceOf52Weeks, row.highest52weekPrice, row.week52HighPrice, row.high52Week),
+    low52Week: asNumber(row.lowPriceOf52Weeks, row.lowest52weekPrice, row.week52LowPrice, row.low52Week),
   };
 }
 
@@ -221,26 +229,166 @@ async function resolveReutersCode(symbol: string, exchange?: string) {
   return normalizeNaverReutersCode(`${symbol.replaceAll("_", ".")}${suffix}`);
 }
 
-async function domesticQuote(symbol: string): Promise<LiveQuote> {
-  const result = await naverPolling<unknown>(buildNaverPath("/api/polling/domestic/stock", { itemCodes: symbol }), { staleMs: 60_000 });
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function positiveMin(...values: number[]) {
+  const positives = values.filter(value => Number.isFinite(value) && value > 0);
+  return positives.length ? Math.min(...positives) : 0;
+}
+
+async function domesticQuote(symbol: string, venue: DomesticTradingVenue = "KRX"): Promise<LiveQuote> {
+  const pollingPromise = naverPolling<unknown>(
+    buildNaverPath("/api/polling/domestic/stock", { itemCodes: symbol }),
+    { staleMs: 60_000 },
+  );
+  const snapshotPromise = naverJson<unknown>(
+    `/api/stockSecurity/items/v2/domestic/${encodeURIComponent(symbol)}/price-snapshot`,
+    { ttlMs: 7_000, staleMs: 60_000 },
+  ).catch(() => null);
+
+  const [result, snapshotResult] = await Promise.all([pollingPromise, snapshotPromise]);
   const row = pollingRow(result.data);
   if (!row) throw new Error("NAVER_EMPTY_QUOTE");
-  const values = quoteValues(row);
-  if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
-  const sourceTimestamp = verifiedQuoteTimestamp(row);
-  return { market: "KR", symbol, ...values, currency: "KRW", exchangeRate: 1, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
+
+  const over = asRecord(row.overMarketPriceInfo);
+  const integrated = asRecord(row.integratedPriceInfo);
+  const snapshot = asRecord(snapshotResult?.data);
+  const krxSnapshot = asRecord(snapshot?.krx);
+  const nxtSnapshot = asRecord(snapshot?.nxt);
+  const nxtAvailable = Boolean(
+    nxtSnapshot
+    || (over && asNumber(over.overPrice, over.currentPrice, over.closePrice, over.tradePrice, over.price) > 0),
+  );
+
+  let selected: Record<string, unknown> = row;
+  if (venue === "NXT") {
+    if (!nxtAvailable) throw new Error("NAVER_NXT_UNAVAILABLE");
+    selected = over ?? nxtSnapshot ?? {};
+  }
+
+  const baseValues = quoteValues(selected);
+  const price = venue === "NXT"
+    ? asNumber(selected.overPrice, selected.currentPrice, selected.closePrice, selected.tradePrice, selected.price)
+    : baseValues.price;
+  const change = venue === "NXT"
+    ? asNumber(selected.compareToPreviousClosePrice, selected.changePrice, selected.changeValue, selected.change, selected.netChange)
+    : baseValues.change;
+  const changeRate = venue === "NXT"
+    ? asNumber(selected.fluctuationsRatio, selected.changeRate, selected.changeRatio, selected.rate)
+    : baseValues.changeRate;
+  if (price <= 0) throw new Error("NAVER_INVALID_QUOTE");
+
+  const integratedOpen = asNumber(
+    integrated?.openPrice,
+    nxtSnapshot?.openingPrice,
+    krxSnapshot?.openingPrice,
+    row.openPriceRaw,
+    row.openPrice,
+  );
+  const integratedHigh = asNumber(
+    integrated?.highPrice,
+    Math.max(
+      asNumber(krxSnapshot?.highPrice, row.highPriceRaw, row.highPrice),
+      asNumber(nxtSnapshot?.highPrice, over?.highPrice),
+    ),
+  );
+  const integratedLow = asNumber(integrated?.lowPrice) || positiveMin(
+    asNumber(krxSnapshot?.lowPrice, row.lowPriceRaw, row.lowPrice),
+    asNumber(nxtSnapshot?.lowPrice, over?.lowPrice),
+  );
+  const integratedVolume = asNumber(
+    integrated?.accumulatedTradingVolumeRaw,
+    integrated?.accumulatedTradingVolume,
+  ) || (
+    asNumber(krxSnapshot?.tradingVolume, row.accumulatedTradingVolumeRaw, row.accumulatedTradingVolume)
+    + asNumber(nxtSnapshot?.tradingVolume, over?.accumulatedTradingVolumeRaw, over?.accumulatedTradingVolume)
+  );
+  const integratedTradingValue = asNumber(
+    integrated?.accumulatedTradingValueRaw,
+    integrated?.accumulatedTradingValue,
+  ) || (
+    asNumber(krxSnapshot?.tradingValue, row.accumulatedTradingValueRaw)
+    + asNumber(nxtSnapshot?.tradingValue, over?.accumulatedTradingValueRaw)
+  );
+
+  const high52Week = Math.max(
+    asNumber(krxSnapshot?.highPriceOf52Weeks, krxSnapshot?.originalHighPriceOf52Weeks),
+    asNumber(nxtSnapshot?.highPriceOf52Weeks, nxtSnapshot?.originalHighPriceOf52Weeks),
+  );
+  const low52Week = positiveMin(
+    asNumber(krxSnapshot?.lowPriceOf52Weeks, krxSnapshot?.originalLowPriceOf52Weeks),
+    asNumber(nxtSnapshot?.lowPriceOf52Weeks, nxtSnapshot?.originalLowPriceOf52Weeks),
+  );
+
+  const sourceTimestamp = verifiedQuoteTimestamp(selected);
+  return {
+    market: "KR",
+    symbol,
+    price,
+    change,
+    changeRate,
+    open: integratedOpen || undefined,
+    high: integratedHigh || undefined,
+    low: integratedLow || undefined,
+    volume: integratedVolume || undefined,
+    tradingValue: integratedTradingValue || undefined,
+    high52Week: high52Week || undefined,
+    low52Week: low52Week || undefined,
+    availableVenues: nxtAvailable ? ["KRX", "NXT"] : ["KRX"],
+    currency: "KRW",
+    exchangeRate: 1,
+    timestamp: sourceTimestamp || result.fetchedAt,
+    timestampVerified: sourceTimestamp > 0,
+    source: "NAVER",
+    stale: result.stale,
+    pollingInterval: result.pollingInterval,
+  };
+}
+
+function totalInfoNumber(payload: unknown, code: string) {
+  const root = asRecord(payload);
+  const infos = root && Array.isArray(root.stockItemTotalInfos) ? root.stockItemTotalInfos : [];
+  for (const item of infos) {
+    const row = asRecord(item);
+    if (!row || String(row.code ?? "") !== code) continue;
+    return asNumber(row.value);
+  }
+  return 0;
 }
 
 async function foreignQuote(symbol: string, exchange?: string, exchangeRateOverride?: number): Promise<LiveQuote> {
   const code = await resolveReutersCode(symbol, exchange);
-  const result = await naverPolling<unknown>(buildNaverPath("/api/polling/worldstock/stock", { reutersCodes: code }), { staleMs: 60_000 });
+  const [result, basic] = await Promise.all([
+    naverPolling<unknown>(buildNaverPath("/api/polling/worldstock/stock", { reutersCodes: code }), { staleMs: 60_000 }),
+    naverJson<unknown>(`/api/securityService/stock/${encodeURIComponent(code)}/basic`, {
+      ttlMs: 60_000,
+      staleMs: 10 * 60_000,
+    }).catch(() => null),
+  ]);
   const row = pollingRow(result.data);
   if (!row) throw new Error("NAVER_EMPTY_QUOTE");
   const values = quoteValues(row);
   if (values.price <= 0) throw new Error("NAVER_INVALID_QUOTE");
   const sourceTimestamp = verifiedQuoteTimestamp(row);
   const exchangeRate = exchangeRateOverride ?? (await getNaverUsdKrwRate()).rate;
-  return { market: "US", symbol, ...values, currency: "USD", exchangeRate, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
+  const high52Week = totalInfoNumber(basic?.data, "highPriceOf52Weeks");
+  const low52Week = totalInfoNumber(basic?.data, "lowPriceOf52Weeks");
+  return {
+    market: "US",
+    symbol,
+    ...values,
+    high52Week: high52Week || values.high52Week || undefined,
+    low52Week: low52Week || values.low52Week || undefined,
+    currency: "USD",
+    exchangeRate,
+    timestamp: sourceTimestamp || result.fetchedAt,
+    timestampVerified: sourceTimestamp > 0,
+    source: "NAVER",
+    stale: result.stale,
+    pollingInterval: result.pollingInterval,
+  };
 }
 
 function cryptoTicker(symbol: string) {
@@ -259,9 +407,15 @@ async function cryptoQuote(symbol: string): Promise<LiveQuote> {
   return { market: "CRYPTO", symbol: `KRW-${ticker}`, ...values, currency: "KRW", exchangeRate: 1, timestamp: sourceTimestamp || result.fetchedAt, timestampVerified: sourceTimestamp > 0, source: "NAVER", stale: result.stale, pollingInterval: result.pollingInterval };
 }
 
-export async function getLiveQuote(market: Market, symbol: string, exchange?: string, exchangeRateOverride?: number) {
+export async function getLiveQuote(
+  market: Market,
+  symbol: string,
+  exchange?: string,
+  exchangeRateOverride?: number,
+  domesticVenue?: DomesticTradingVenue,
+) {
   if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol)) throw new Error("INVALID_SYMBOL");
-  if (market === "KR") return domesticQuote(symbol.toUpperCase());
+  if (market === "KR") return domesticQuote(symbol.toUpperCase(), domesticVenue);
   if (market === "US") return foreignQuote(symbol, exchange, exchangeRateOverride);
   return cryptoQuote(symbol);
 }
