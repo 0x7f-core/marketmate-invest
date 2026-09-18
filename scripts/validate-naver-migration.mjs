@@ -132,7 +132,7 @@ for (const token of [
   '"장후 시간외 종가"',
   '"프리마켓 마감"',
   '"15:40"',
-  '"애프터마켓 마감"',
+  '"장 마감"',
 ]) {
   if (!marketHours.includes(token)) failures.push(`domestic KRX/NXT session schedule is missing: ${token}`);
 }
@@ -263,6 +263,7 @@ if (
   || !dashboard.includes('{label:"프리마켓",start:"17:00",end:"22:30",tradable:true}')
   || !dashboard.includes('{label:"정규장",start:"22:30",end:"05:00",tradable:true}')
   || !dashboard.includes('{label:"애프터마켓",start:"05:00",end:"08:50",tradable:true}')
+  || !dashboard.includes('{label:"장 마감",start:"08:50",end:"17:00",tradable:false}')
 ) {
   failures.push("competition tab must expose the DST-aware live US trading timetable");
 }
