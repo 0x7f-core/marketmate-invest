@@ -70,14 +70,11 @@ function quickFallback(market: Market) {
   const schedule = domestic.openTimeKst && domestic.closeTimeKst
     ? ` · ${domestic.openTimeKst}~${domestic.closeTimeKst} KST`
     : "";
-  const auction = domestic.currentSession === "openingAuction" || domestic.currentSession === "closingAuction";
-  const notice = auction
-    ? `${domestic.exchange} ${domestic.label} 시간에는 모의주문을 받지 않습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-    : domestic.currentSession === "afterMarketClosing"
-      ? `${domestic.exchange} 애프터마켓이 마감되었습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-      : domestic.isOpen
-        ? `${domestic.exchange} ${domestic.label} 빠른 시간 판정입니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
-        : "현재 선택 가능한 국내 거래 세션이 없습니다 · KRX/NXT 장 상태는 주문 시 네이버증권에서 다시 확인합니다.";
+  const notice = domestic.currentSession === "afterMarketClosing"
+    ? `${domestic.exchange} 애프터마켓이 마감되었습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+    : domestic.isOpen
+      ? `${domestic.exchange} ${domestic.label} 빠른 시간 판정입니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`
+      : `${domestic.exchange} ${domestic.label} 구간에는 모의주문을 받지 않습니다${schedule} · 주문 시 네이버증권 장 상태를 다시 확인합니다.`;
 
   return {
     isOpen: domestic.isOpen,
