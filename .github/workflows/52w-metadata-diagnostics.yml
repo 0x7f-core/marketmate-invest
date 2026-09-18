@@ -1,0 +1,26 @@
+name: 52w metadata diagnostics
+on:
+  push:
+    paths:
+      - .github/workflows/52w-metadata-diagnostics.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          probe() {
+            name="$1"; url="$2"
+            echo "===== $name ====="
+            code=$(curl -sS --max-time 25 -o /tmp/b -w '%{http_code}' -H 'accept: application/json, text/plain, */*' -H 'referer: https://stock.naver.com/' -A 'Mozilla/5.0 MarketMate-52w-Diagnostic/1.0' "$url" || true)
+            echo "HTTP $code"
+            head -c 40000 /tmp/b || true
+            echo
+          }
+          probe domestic_detail 'https://stock.naver.com/api/domestic/detail/005930/detail?codeType=KRX'
+          probe domestic_daily 'https://stock.naver.com/api/stockSecurity/items/v2/domestic/005930/daily-prices?size=100'
+          probe crypto_days 'https://stock.naver.com/api/coin/candle/UPBIT/KRW/BTC/days?from=2025-09-18T00%3A00%3A00%2B09%3A00&to=2026-09-18T23%3A59%3A59%2B09%3A00'
