@@ -199,7 +199,7 @@ function usAfterMarketCloseKst(detail: ReturnType<typeof sessionDetails>) {
   return minusTenMinutes(detail.closeTimeKst) || (detail.daylight === false ? "09:50" : "08:50");
 }
 
-function isSupportedTradingSession(market: Market, exchange: string, detail: ReturnType<typeof sessionDetails>) {
+function isSupportedTradingSession(market: Market, detail: ReturnType<typeof sessionDetails>) {
   if (!detail.isOpen || !detail.currentType) return false;
   const type = detail.currentType.toLocaleLowerCase("en-US");
   if (type.includes("closing")) return false;
@@ -255,7 +255,7 @@ export async function getCheckedMarketSession(
     const detailed = statuses.map(status => {
       const exchange = stringValue(status, ["exchange"]).toLocaleLowerCase("en-US");
       const detail = sessionDetails(status);
-      return { status, exchange, detail, tradable: isSupportedTradingSession(market, exchange, detail) };
+      return { status, exchange, detail, tradable: isSupportedTradingSession(market, detail) };
     });
 
     if (market === "KR") {
