@@ -1,14 +1,12 @@
 import { apiError, requireUser } from "@/lib/server/auth";
 import { getTrackedMarketIndexDetail, isTrackedMarketIndexId } from "@/lib/server/market-data";
 import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
-import { enforceRateLimit } from "@/lib/server/safety";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const user = await requireUser(request);
-    await enforceRateLimit(request, "index-detail", 120, 60_000, user.id);
+    await requireUser(request);
     const url = new URL(request.url);
     const id = (url.searchParams.get("id") ?? "").toUpperCase();
     if (!isTrackedMarketIndexId(id)) {
