@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
-const DEFAULT_ORDER = ["indices", "competition", "watchlist", "rankings", "news"] as const;
+const DEFAULT_ORDER = ["popular", "indices", "competition", "watchlist", "rankings", "news"] as const;
 type DashboardId = (typeof DEFAULT_ORDER)[number];
 
 type AuthResponse = { user?: { id?: string } };
 
 const DASHBOARDS: Record<DashboardId, { label: string; selector: string }> = {
+  popular: { label: "인기 종목", selector: ".np-home .np-popular-stocks" },
   indices: { label: "지수", selector: ".np-home .np-market-focus" },
   competition: { label: "내 대회", selector: ".np-home .np-my-summary" },
   watchlist: { label: "관심종목", selector: ".np-home .np-watch-preview" },
@@ -17,10 +18,20 @@ const DASHBOARDS: Record<DashboardId, { label: string; selector: string }> = {
 };
 
 function validOrder(value: unknown): DashboardId[] | null {
-  if (!Array.isArray(value) || value.length !== DEFAULT_ORDER.length) return null;
+  if (!Array.isArray(value)) return null;
   const items = value.filter((item): item is DashboardId => typeof item === "string" && DEFAULT_ORDER.includes(item as DashboardId));
-  if (items.length !== DEFAULT_ORDER.length || new Set(items).size !== DEFAULT_ORDER.length) return null;
-  return items;
+  if (items.length !== value.length || new Set(items).size !== items.length) return null;
+  const next = [...items];
+  for (const missing of DEFAULT_ORDER) {
+    if (next.includes(missing)) continue;
+    if (missing === "popular") {
+      const index = next.indexOf("indices");
+      next.splice(index >= 0 ? index : 0, 0, missing);
+    } else {
+      next.push(missing);
+    }
+  }
+  return next.length === DEFAULT_ORDER.length ? next : null;
 }
 
 function moveItem(order: DashboardId[], from: number, to: number) {
@@ -200,7 +211,7 @@ export default function HomeDashboardOrder() {
           .np-home .np-market-status{order:0}
           .np-home-main>.live-market-strip{order:1}
           .home-dashboard-order-slot{display:block!important;order:2;width:100%;background:#f0f2f3;padding-bottom:9px}
-          .np-home .np-market-focus,.np-home .np-my-summary,.np-home .np-watch-preview,.np-home .home-market-ranking-slot,.np-home .np-news{width:100%;min-width:0}
+          .np-home .np-popular-stocks,.np-home .np-market-focus,.np-home .np-my-summary,.np-home .np-watch-preview,.np-home .home-market-ranking-slot,.np-home .np-news{width:100%;min-width:0}
           .home-dashboard-order{overflow:hidden;border-width:0;border-radius:0;background:#fff}
           .home-dashboard-order-head{min-height:48px;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
           .home-dashboard-order-head>span{color:#626b73;font-size:12px;font-weight:700}
