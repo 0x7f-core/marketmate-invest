@@ -322,14 +322,19 @@ const DESKTOP_USDKRW_MARKET_STRIP = String.raw`(() => {
     if (node.textContent !== value) node.textContent = value;
   };
 
-  const goToUsMarket = () => {
+  const goToUsdKrwIndex = () => {
     const marketNav = Array.from(document.querySelectorAll(".np-desktop-header > nav button"))
       .find((button) => (button.textContent || "").trim() === "시세");
     if (marketNav instanceof HTMLButtonElement) marketNav.click();
     requestAnimationFrame(() => {
-      const usTab = Array.from(document.querySelectorAll(".np-market-tabs button"))
-        .find((button) => /미국|글로벌/.test(button.textContent || ""));
-      if (usTab instanceof HTMLButtonElement) usTab.click();
+      const indexTab = Array.from(document.querySelectorAll(".np-market-tabs button"))
+        .find((button) => (button.textContent || "").trim() === "지수");
+      if (indexTab instanceof HTMLButtonElement) indexTab.click();
+      requestAnimationFrame(() => {
+        const usdKrw = Array.from(document.querySelectorAll(".np-index-selector button"))
+          .find((button) => /원[·\/]달러/.test((button.textContent || "").trim()));
+        if (usdKrw instanceof HTMLButtonElement) usdKrw.click();
+      });
     });
   };
 
@@ -356,7 +361,7 @@ const DESKTOP_USDKRW_MARKET_STRIP = String.raw`(() => {
     rate.dataset.marketStripUsdkrwRate = "1";
 
     button.append(label, price, rate);
-    button.addEventListener("click", goToUsMarket);
+    button.addEventListener("click", goToUsdKrwIndex);
     strip.appendChild(button);
     return button;
   };
