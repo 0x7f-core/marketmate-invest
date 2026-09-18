@@ -19,6 +19,7 @@ type ActivityFill = {
   id: string;
   instrumentId: string;
   side: "buy" | "sell";
+  venue?: "KRX" | "NXT" | null;
   quantityMicros: number;
   priceMicros: number;
   fxRateMicros: number;
@@ -65,7 +66,7 @@ export async function GET(request: Request) {
     ).bind(participantId).all<ActivityPosition>();
     const repairedPositions = await repairDomesticListings(positions.results);
     const fills = await env.DB!.prepare(
-      `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
+      `SELECT f.id,f.instrument_id AS instrumentId,f.side,f.venue,f.quantity_micros AS quantityMicros,f.price_micros AS priceMicros,
               f.fx_rate_micros AS fxRateMicros,f.fee_krw AS feeKrw,f.executed_at AS executedAt,
               i.market,i.symbol,i.name,i.currency,q.price_micros AS currentPriceKrwMicros
        FROM fills f JOIN instruments i ON i.id=f.instrument_id
