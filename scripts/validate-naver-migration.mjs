@@ -201,8 +201,12 @@ const dashboard = await source("app/trading-dashboard.tsx");
 if (/\bUPBIT\b/.test(dashboard)) {
   failures.push("dashboard must not expose legacy UPBIT fallback labels");
 }
-if (!dashboard.includes('venue?:"KRX"|"NXT"') || !dashboard.includes("exchange:q.venue??current.exchange")) {
-  failures.push("dashboard must follow the active KRX/NXT venue returned by Naver quotes");
+if (
+  !dashboard.includes("tradingVenue?:DomesticVenue")
+  || !dashboard.includes('venue=${domesticVenue}')
+  || !dashboard.includes("setDomesticVenue(q.tradingVenue)")
+) {
+  failures.push("dashboard must expose explicit KRX/NXT quote and trading venue selection");
 }
 if (!dashboard.includes('exchange: "NAVER"')) {
   failures.push("dashboard crypto fallback provider label must remain NAVER");
@@ -256,8 +260,12 @@ if (executableChecks < 2) {
 if (!pendingOrders.includes("quote.venue !== session.exchange")) {
   failures.push("pending KR orders must reject a quote from the wrong active venue");
 }
-if (!pendingOrders.includes("UPDATE instruments SET exchange=?") || !pendingOrders.includes('quote.market === "KR" && quote.venue')) {
-  failures.push("successful pending KR fills must persist the active instrument venue");
+if (
+  !pendingOrders.includes("COALESCE(venue,'KRX')")
+  || !pendingOrders.includes("side,venue,quantity_micros")
+  || pendingOrders.includes("UPDATE instruments SET exchange=?")
+) {
+  failures.push("pending KR fills must remain venue-specific without overwriting the instrument listing market");
 }
 
 const leaderboard = await source("app/api/leaderboard/route.ts");
