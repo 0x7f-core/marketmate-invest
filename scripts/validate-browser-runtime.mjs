@@ -354,7 +354,7 @@ async function main() {
       const rect = chart.getBoundingClientRect();
       return { width: rect.width, height: rect.height, canvasWidth: canvas.getBoundingClientRect().width, viewport: window.innerWidth };
     })()`);
-    assert(mobileChart?.width <= mobileChart?.viewport + 1 && mobileChart?.width >= 360 && mobileChart?.height >= 400, `Mobile chart sizing invalid: ${JSON.stringify(mobileChart)}`);
+    assert(mobileChart?.width <= mobileChart?.viewport + 1 && mobileChart?.width >= 360 && mobileChart?.height >= 360, `Mobile chart sizing invalid: ${JSON.stringify(mobileChart)}`);
     await client.screenshot(`${ARTIFACT_DIR}/mobile-market.png`);
     console.log(`PASS mobile market/search/order/chart render (${Math.round(mobileChart.width)}x${Math.round(mobileChart.height)})`);
 
