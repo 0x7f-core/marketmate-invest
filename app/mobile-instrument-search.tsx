@@ -247,13 +247,21 @@ export default function MobileInstrumentSearch() {
         .np-mobile-search-launch,.mobile-instrument-search{display:none}
         @media(max-width:767px){
           .marketmate-v2 .np-mobile-header>.search-wrap{display:none!important}
-          .marketmate-v2 .np-mobile-header>div:first-child{position:relative!important}
+          .marketmate-v2 .np-mobile-header>div:first-child{
+            position:relative!important;display:grid!important;grid-template-columns:minmax(0,1fr) auto auto!important;gap:6px!important
+          }
+          .marketmate-v2 .np-mobile-header>div:first-child>.np-brand{min-width:0}
+          .marketmate-v2 .np-mobile-account-actions{grid-column:3;grid-row:1;justify-self:end;min-width:0}
           .np-mobile-search-launch{
-            display:flex;position:absolute;right:48px;top:8px;height:36px;align-items:center;gap:5px;
+            display:flex;position:static;grid-column:2;grid-row:1;align-self:center;height:36px;align-items:center;gap:5px;
             border:0;border-radius:18px;background:#f3f4f6;color:#6b7280;padding:0 12px;font-size:12px;font-weight:700;
             white-space:nowrap;z-index:4
           }
           .np-mobile-search-launch svg{width:17px;height:17px;color:#111827}
+          @media(max-width:380px){
+            .np-mobile-search-launch{width:36px;padding:0;justify-content:center}
+            .np-mobile-search-launch span{display:none}
+          }
           .mobile-instrument-search{
             display:block;position:fixed;inset:0;z-index:10000;background:#fff;color:#191f28;overflow-y:auto;
             overscroll-behavior:contain;padding:0 0 max(18px,env(safe-area-inset-bottom))

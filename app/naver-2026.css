@@ -36,8 +36,9 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .np-desktop-header>nav button{font-size:16px;font-weight:700;color:#555c64}
 .marketmate-v2 .np-desktop-header>nav button.active{color:#111;font-weight:900}
 .marketmate-v2 .np-desktop-header>nav button.active:after{height:3px;background:#111}
-.marketmate-v2 .np-desktop-header>.live-market-strip{height:39px;background:#fafbfc;border-color:#e8eaed}
-.marketmate-v2 .np-desktop-header>.live-market-strip>button{min-width:174px;height:38px;padding:4px 13px;background:#fafbfc}
+.marketmate-v2 .np-desktop-header>.live-market-strip{height:39px;background:#fafbfc;border-color:#e8eaed;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));width:100%;overflow:hidden}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button{min-width:0;width:100%;height:38px;padding:4px 13px;background:#fafbfc;overflow:hidden}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .marketmate-v2 .np-desktop-header>.live-market-strip>button>span small{display:none}
 
 /* Page frames. */
@@ -65,12 +66,6 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .np-market-tabs{height:43px;display:flex;justify-content:flex-start;gap:0;border:1px solid var(--mm-line);border-radius:8px;background:#fff;overflow:hidden}
 .marketmate-v2 .np-market-tabs button{flex:0 0 auto;width:auto;min-width:108px;padding:0 22px;border-right:1px solid #eceef0;background:#fff;color:#686f77;font-size:13px}
 .marketmate-v2 .np-market-tabs button.active{background:#22262a;color:#fff}
-.np-detail-navigation{height:52px;display:flex;align-items:stretch;gap:27px;padding:0 24px;border:1px solid var(--mm-line);border-radius:8px;background:#fff;overflow-x:auto;scrollbar-width:none}
-.np-detail-navigation::-webkit-scrollbar{display:none}
-.np-detail-navigation button{position:relative;flex:0 0 auto;border:0;background:transparent;color:#707780;font-size:14px;font-weight:700;white-space:nowrap}
-.np-detail-navigation button.active{color:#111;font-weight:900}
-.np-detail-navigation button.active:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:#111}
-.np-detail-navigation.mobile{display:none}
 
 /* Desktop instrument sheet: fixed information rail + expansive chart. */
 @media(min-width:1181px){
@@ -148,9 +143,6 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .np-mobile-header .np-brand>b{font-size:19px}
   .marketmate-v2 .np-mobile-account-actions{gap:5px}
   .marketmate-v2 .np-mobile-account-actions .account-settings-trigger.compact{max-width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#f5f6f7;color:#59616a}
-  .marketmate-v2 .np-mobile-market-nav{height:45px!important;padding:0 18px!important;gap:25px!important;border-top:0!important;overflow-x:auto;scrollbar-width:none}
-  .marketmate-v2 .np-mobile-market-nav button{height:45px;font-size:14px!important;font-weight:700!important;color:#7a8087!important;white-space:nowrap}
-  .marketmate-v2 .np-mobile-market-nav button.active{color:#111!important;font-weight:900!important;border-bottom:3px solid #111!important}
   .marketmate-v2 .np-mobile-header .search-wrap{height:40px;margin:9px 14px 10px;border:0;border-radius:21px;background:#f3f4f5}
 
   .marketmate-v2 .np-page{width:100%;max-width:100vw;margin:0;padding:0;overflow-x:hidden}
@@ -160,9 +152,6 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .np-section-title h2{font-size:18px}
 
   .marketmate-v2 .np-market-tabs{display:none}
-  .np-detail-navigation.desktop{order:4;display:flex;width:100%;height:51px;padding:0 19px;gap:28px;border-width:1px 0;border-radius:0;background:#fff}
-  .np-detail-navigation.desktop button{font-size:14px}
-  .np-detail-navigation.mobile{display:none}
   .marketmate-v2 .np-trading{display:block;width:100%;max-width:100%;min-width:0}
   .marketmate-v2 .np-trading-main{display:flex;width:100%;max-width:100%;min-width:0;flex-direction:column}
   .marketmate-v2 .np-trading>aside{display:none}
@@ -231,11 +220,9 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 
 @media(max-width:380px){
   .marketmate-v2 .np-mobile-header>div:first-child{padding:0 14px}
-  .marketmate-v2 .np-mobile-market-nav{padding:0 14px!important;gap:21px!important}
   .marketmate-v2 .np-quote-head,.marketmate-v2 .np-price{padding-left:15px;padding-right:15px}
   .marketmate-v2 .np-price-main>strong{font-size:27px}
   .marketmate-v2 .naver-light-chart-stage{height:254px;min-height:254px}
-  .np-detail-navigation.desktop{padding:0 15px;gap:23px}
 }
 
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}

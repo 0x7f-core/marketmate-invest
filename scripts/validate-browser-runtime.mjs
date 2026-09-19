@@ -203,6 +203,23 @@ async function main() {
     assert(await client.evaluate(hiddenExpression(".np-mobile-bottom")), "Mobile bottom nav should be hidden at 1440px");
     const desktopOverflow = await client.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
     assert(desktopOverflow <= 1, `Desktop root horizontal overflow detected: ${desktopOverflow}px`);
+    const desktopTape = await client.evaluate(`(() => {
+      const strip = document.querySelector('.np-desktop-header > .live-market-strip');
+      const buttons = [...document.querySelectorAll('.np-desktop-header > .live-market-strip > button')];
+      if (!strip) return null;
+      const stripRect = strip.getBoundingClientRect();
+      return {
+        count: buttons.length,
+        clipped: buttons.some(button => {
+          const rect = button.getBoundingClientRect();
+          return rect.width <= 0 || rect.left < stripRect.left - 1 || rect.right > stripRect.right + 1;
+        })
+      };
+    })()`);
+    assert(desktopTape?.count === 6 && !desktopTape.clipped, `Desktop market tape is clipped or incomplete: ${JSON.stringify(desktopTape)}`);
+    await client.waitFor("document.querySelectorAll('.np-market-status .market-status-item').length === 3", "market status board");
+    const statusSeparators = await client.evaluate(`(() => [...document.querySelectorAll('.np-market-status .market-status-item:not(:last-child)')].map(item => getComputedStyle(item, '::after').content))()`);
+    assert(statusSeparators.every(value => value === 'none' || value === '""'), `Market status separators are still visible: ${JSON.stringify(statusSeparators)}`);
     console.log("PASS desktop responsive shell + no root overflow");
 
     // Exercise the real React search UI, then move to Samsung Electronics market view.
@@ -225,6 +242,7 @@ async function main() {
     })()`);
     assert(clickedSamsung, "Could not click 삼성전자 search result");
     await client.waitFor(visibleExpression(".np-trading"), "desktop market view");
+    assert(await client.evaluate(hiddenExpression(".np-detail-navigation")), "Legacy detail navigation should be removed");
     await client.waitFor("document.querySelector('.np-quote h1')?.textContent?.includes('삼성전자')", "삼성전자 quote heading");
     try {
       await client.waitFor("!document.querySelector('.np-price strong')?.textContent?.includes('시세 확인 중')", "live Samsung quote", 10_000);
@@ -276,13 +294,18 @@ async function main() {
       innerWidth: window.innerWidth,
       rootClientWidth: document.documentElement.clientWidth,
       rootScrollWidth: document.documentElement.scrollWidth,
-      topNavButtons: document.querySelectorAll('.np-mobile-header nav button').length,
+      topNavButtons: [...document.querySelectorAll('.np-mobile-header nav button')].filter(button => {
+        const style = getComputedStyle(button);
+        const rect = button.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      }).length,
       bottomNavButtons: document.querySelectorAll('.np-mobile-bottom button').length
     }))()`);
     assert(mobileMetrics.innerWidth === 390, `Unexpected mobile viewport width: ${mobileMetrics.innerWidth}`);
     assert(mobileMetrics.rootScrollWidth <= mobileMetrics.rootClientWidth + 1, `Mobile root horizontal overflow: ${mobileMetrics.rootScrollWidth} > ${mobileMetrics.rootClientWidth}`);
-    assert(mobileMetrics.topNavButtons === 7 && mobileMetrics.bottomNavButtons === 6, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);
-    console.log("PASS mobile shell + nav + no root overflow");
+    assert(mobileMetrics.topNavButtons === 0 && mobileMetrics.bottomNavButtons === 6, `Unexpected mobile nav counts: ${JSON.stringify(mobileMetrics)}`);
+    assert(await client.evaluate(hiddenExpression(".np-detail-navigation")), "Legacy mobile detail navigation should be removed");
+    console.log("PASS mobile shell + bottom nav + no root overflow");
 
     const mobileQuoteLayout = await client.evaluate(`(() => {
       const price = document.querySelector('.np-price-domestic');
@@ -325,6 +348,23 @@ async function main() {
     console.log("PASS mobile price/venue row + 2x4 stats + 52-week label alignment");
 
     assert(await client.evaluate(visibleExpression(".np-mobile-search-launch")), "Mobile instrument search launcher is not visible");
+    const mobileHeaderControls = await client.evaluate(`(() => {
+      const search = document.querySelector('.np-mobile-search-launch');
+      const account = document.querySelector('.np-mobile-account-actions');
+      const header = document.querySelector('.np-mobile-header > div:first-child');
+      if (!search || !account || !header) return null;
+      const searchRect = search.getBoundingClientRect();
+      const accountRect = account.getBoundingClientRect();
+      const headerRect = header.getBoundingClientRect();
+      return {
+        overlap: searchRect.right > accountRect.left && searchRect.left < accountRect.right,
+        withinHeader: searchRect.left >= headerRect.left && accountRect.right <= headerRect.right,
+        searchRight: Math.round(searchRect.right),
+        accountLeft: Math.round(accountRect.left)
+      };
+    })()`);
+    assert(mobileHeaderControls && !mobileHeaderControls.overlap && mobileHeaderControls.withinHeader, `Mobile search/account controls overlap: ${JSON.stringify(mobileHeaderControls)}`);
+    console.log("PASS mobile header search/account layout");
     const openedMobileSearch = await client.evaluate(`(() => {
       const button = document.querySelector('.np-mobile-search-launch');
       if (!button) return false;
