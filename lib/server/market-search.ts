@@ -360,18 +360,16 @@ function searchRank(item: SearchInstrument, query: string) {
   if (name === needle) return 1;
   if (symbol.startsWith(needle)) return 2;
   if (name.startsWith(needle)) return 3;
-  if (item.market === "KR") {
-    const patternIndex = koreanPatternIndex(item.name, query);
-    if (patternIndex === 0) return 3;
-    if (patternIndex > 0) return 5;
-  }
+  const patternIndex = koreanPatternIndex(item.name, query);
+  if (patternIndex === 0) return 3;
+  if (patternIndex > 0) return 5;
   if (symbol.includes(needle)) return 4;
   if (name.includes(needle)) return 5;
   return 6;
 }
 
 export async function searchNaverMarket(query: string, market?: Market) {
-  const initialSearch = market !== "US" && market !== "CRYPTO" && hasHangulInitialQuery(query);
+  const initialSearch = hasHangulInitialQuery(query);
   const target = market === "CRYPTO" ? "coin" : market === "KR" || market === "US" ? "stock" : "stock,coin";
   const literalPrefix = initialSearch ? literalPrefixBeforeInitial(query) : "";
   const upstreamQueries = initialSearch
@@ -394,15 +392,15 @@ export async function searchNaverMarket(query: string, market?: Market) {
     for (const record of collect(response.value.data)) {
       const item = normalize(record);
       if (!item || (market && item.market !== market)) continue;
-      if (initialSearch && (item.market !== "KR" || koreanPatternIndex(item.name, query) < 0)) continue;
+      if (initialSearch && koreanPatternIndex(item.name, query) < 0) continue;
       unique.set(`${item.market}:${item.symbol}`, item);
     }
   }
 
   // Naver autocomplete is queried with the original choseong/mixed string first.
   // This avoids rebuilding the domestic catalog on Worker cold starts when
-  // Naver already returns a valid initial-consonant match. The catalog remains
-  // a completeness fallback only when autocomplete yields no verified KR row.
+  // Naver already returns a valid initial-consonant match. The domestic catalog
+  // remains a completeness fallback only when autocomplete yields no result.
   let catalog: Awaited<ReturnType<typeof searchDomesticInitialCatalog>> | null = null;
   if (initialSearch && unique.size === 0) {
     catalog = await searchDomesticInitialCatalog(query).catch(() => null);
