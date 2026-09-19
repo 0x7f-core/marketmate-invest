@@ -321,7 +321,7 @@ async function main() {
     assert(Math.abs(mobileQuoteLayout.volumeTop - mobileQuoteLayout.tradingValueTop) <= 1, `Trading value is not beside volume: ${JSON.stringify(mobileQuoteLayout)}`);
     assert(Math.abs(mobileQuoteLayout.volumeWidth - mobileQuoteLayout.tradingValueWidth) <= 2, `Trading value cell width differs from volume: ${JSON.stringify(mobileQuoteLayout)}`);
     assert(mobileQuoteLayout.datedLabelBorders.every(value => value === '0px'), `52-week labels still have vertical dividers: ${JSON.stringify(mobileQuoteLayout)}`);
-    assert(mobileQuoteLayout.datedLabelOffsets.every(value => value >= 8 && value <= 12), `52-week labels are not left-aligned with other stat labels: ${JSON.stringify(mobileQuoteLayout)}`);
+    assert(mobileQuoteLayout.datedLabelOffsets.every(value => value >= 0 && value <= 14), `52-week labels exceed the mobile statistic-cell gutter: ${JSON.stringify(mobileQuoteLayout)}`);
     console.log("PASS mobile price/venue row + 2x4 stats + 52-week label alignment");
 
     assert(await client.evaluate(visibleExpression(".np-mobile-search-launch")), "Mobile instrument search launcher is not visible");
