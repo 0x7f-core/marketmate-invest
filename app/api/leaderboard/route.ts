@@ -85,7 +85,6 @@ export async function GET(request: Request) {
        LEFT JOIN positions pos ON pos.participant_id=p.id AND pos.quantity_micros>0
        LEFT JOIN quote_snapshots q ON q.instrument_id=pos.instrument_id
        WHERE p.competition_id=?
-         AND EXISTS (SELECT 1 FROM fills ranked_fill WHERE ranked_fill.participant_id=p.id)
        GROUP BY p.id,u.nickname,p.joined_at,p.cash_krw,p.realized_pnl_krw,c.initial_cash_krw
        ORDER BY totalAssetKrw DESC,p.joined_at ASC LIMIT 100`
     ).bind(competitionId).all();
