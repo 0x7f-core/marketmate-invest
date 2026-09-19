@@ -63,7 +63,7 @@ export async function GET(request: Request) {
     await Promise.allSettled(stale.results.map(instrument => refreshLeaderboardQuote(instrument, refreshStartedAt)));
 
     const rows = await env.DB!.prepare(
-      `SELECT p.id AS participantId,u.nickname,p.cash_krw AS cashKrw,p.realized_pnl_krw AS realizedPnlKrw,
+      `SELECT p.id AS participantId,u.nickname,p.joined_at AS joinedAt,p.cash_krw AS cashKrw,p.realized_pnl_krw AS realizedPnlKrw,
               c.initial_cash_krw AS initialCashKrw,
               (SELECT COUNT(*) FROM fills f WHERE f.participant_id=p.id) AS fillCount,
               (SELECT COUNT(DISTINCT f.instrument_id) FROM fills f WHERE f.participant_id=p.id) AS tradedInstrumentCount,
@@ -84,7 +84,7 @@ export async function GET(request: Request) {
        FROM participants p JOIN users u ON u.id=p.user_id JOIN competitions c ON c.id=p.competition_id
        LEFT JOIN positions pos ON pos.participant_id=p.id AND pos.quantity_micros>0
        LEFT JOIN quote_snapshots q ON q.instrument_id=pos.instrument_id
-       WHERE p.competition_id=? GROUP BY p.id,u.nickname,p.cash_krw,p.realized_pnl_krw,c.initial_cash_krw
+       WHERE p.competition_id=? GROUP BY p.id,u.nickname,p.joined_at,p.cash_krw,p.realized_pnl_krw,c.initial_cash_krw
        ORDER BY totalAssetKrw DESC,p.joined_at ASC LIMIT 100`
     ).bind(competitionId).all();
     const topPicks = await env.DB!.prepare(
