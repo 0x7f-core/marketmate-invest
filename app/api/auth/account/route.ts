@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { apiError, hashPin, normalizeNickname, requireUser, verifyPin } from "@/lib/server/auth";
+import { apiError, clearSessionCookie, hashPin, normalizeNickname, requireUser, verifyPin } from "@/lib/server/auth";
 import { assertSameOrigin, auditLog, enforceRateLimit } from "@/lib/server/safety";
 
 function validateNickname(value: string) {
@@ -21,6 +21,27 @@ async function hasActiveCompetition(userId: string) {
      WHERE p.user_id=? AND c.status='active' AND c.ends_at>?`,
   ).bind(userId, Date.now()).first<{ count: number }>();
   return Number(row?.count ?? 0) > 0;
+}
+
+async function deleteParticipant(id: string) {
+  await env.DB!.batch([
+    env.DB!.prepare("DELETE FROM fills WHERE participant_id=?").bind(id),
+    env.DB!.prepare("DELETE FROM orders WHERE participant_id=?").bind(id),
+    env.DB!.prepare("DELETE FROM positions WHERE participant_id=?").bind(id),
+    env.DB!.prepare("DELETE FROM cash_ledger WHERE participant_id=?").bind(id),
+    env.DB!.prepare("DELETE FROM participants WHERE id=?").bind(id),
+  ]);
+}
+
+async function deleteCompetition(id: string) {
+  await env.DB!.batch([
+    env.DB!.prepare("DELETE FROM fills WHERE participant_id IN (SELECT id FROM participants WHERE competition_id=?)").bind(id),
+    env.DB!.prepare("DELETE FROM orders WHERE participant_id IN (SELECT id FROM participants WHERE competition_id=?)").bind(id),
+    env.DB!.prepare("DELETE FROM positions WHERE participant_id IN (SELECT id FROM participants WHERE competition_id=?)").bind(id),
+    env.DB!.prepare("DELETE FROM cash_ledger WHERE participant_id IN (SELECT id FROM participants WHERE competition_id=?)").bind(id),
+    env.DB!.prepare("DELETE FROM participants WHERE competition_id=?").bind(id),
+    env.DB!.prepare("DELETE FROM competitions WHERE id=?").bind(id),
+  ]);
 }
 
 export async function GET(request: Request) {
@@ -128,6 +149,72 @@ export async function PATCH(request: Request) {
     return Response.json(
       { user: { ...user, nickname }, nicknameLocked: await hasActiveCompetition(user.id) },
       { headers: { "cache-control": "no-store" } },
+    );
+  } catch (error) {
+    return apiError(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "account_delete", 3, 60 * 60 * 1000, user.id);
+
+    if (user.role === "admin") {
+      return Response.json(
+        { error: "관리자 계정은 계정 설정에서 삭제할 수 없습니다." },
+        { status: 409 },
+      );
+    }
+
+    const body = await request.json().catch(() => ({})) as { currentPin?: string };
+    const currentPin = String(body.currentPin ?? "");
+    if (validatePin(currentPin)) {
+      return Response.json({ error: "계정 삭제를 위해 현재 비밀번호 4자리를 입력해주세요." }, { status: 400 });
+    }
+
+    const account = await env.DB!.prepare(
+      "SELECT nickname,pin_hash AS pinHash,pin_salt AS pinSalt FROM users WHERE id=? AND is_active=1",
+    ).bind(user.id).first<{ nickname: string; pinHash: string; pinSalt: string }>();
+    if (!account || !await verifyPin(currentPin, account.pinSalt, account.pinHash)) {
+      return Response.json({ error: "현재 비밀번호가 일치하지 않습니다." }, { status: 401 });
+    }
+
+    const owned = await env.DB!.prepare(
+      "SELECT id FROM competitions WHERE owner_user_id=? ORDER BY created_at ASC",
+    ).bind(user.id).all<{ id: string }>();
+    const joinedCount = await env.DB!.prepare(
+      "SELECT COUNT(*) AS count FROM participants WHERE user_id=?",
+    ).bind(user.id).first<{ count: number }>();
+
+    await auditLog(request, "auth.account_deleted", "user", user.id, user.id, {
+      nickname: account.nickname,
+      ownedCompetitionCount: owned.results.length,
+      joinedCompetitionCount: Number(joinedCount?.count ?? 0),
+    }).catch(() => undefined);
+
+    for (const competition of owned.results) {
+      await deleteCompetition(competition.id);
+    }
+
+    const joined = await env.DB!.prepare(
+      "SELECT id FROM participants WHERE user_id=?",
+    ).bind(user.id).all<{ id: string }>();
+    for (const participant of joined.results) {
+      await deleteParticipant(participant.id);
+    }
+
+    await env.DB!.batch([
+      env.DB!.prepare("DELETE FROM watchlist_items WHERE user_id=?").bind(user.id),
+      env.DB!.prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id),
+      env.DB!.prepare("UPDATE audit_logs SET actor_user_id=NULL WHERE actor_user_id=?").bind(user.id),
+      env.DB!.prepare("DELETE FROM users WHERE id=?").bind(user.id),
+    ]);
+
+    return Response.json(
+      { ok: true },
+      { headers: { "set-cookie": clearSessionCookie(), "cache-control": "no-store" } },
     );
   } catch (error) {
     return apiError(error);
