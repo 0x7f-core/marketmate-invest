@@ -615,18 +615,21 @@ function usTradingScheduleRows(isDst:boolean):DomesticScheduleRow[]{
     {label:"장 마감",start:"09:50",end:"18:00",tradable:false},
   ];
 }
-function newYorkDaylightSavingNow(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",timeZoneName:"short"}).formatToParts(new Date());const zone=parts.find(part=>part.type==="timeZoneName")?.value??"";return zone.toUpperCase().includes("EDT");}
+function newYorkMarketClock(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",timeZoneName:"short"}).formatToParts(new Date());const value=(type:Intl.DateTimeFormatPartTypes)=>parts.find(part=>part.type===type)?.value??"";return{isDst:value("timeZoneName").toUpperCase().includes("EDT"),isWeekday:["Mon","Tue","Wed","Thu","Fri"].includes(value("weekday"))};}
 function UsTradingSchedule(){
-  const[state,setState]=useState<{minutes:number;label:string;isDst:boolean}|null>(null);
-  useEffect(()=>{const update=()=>{const seoul=seoulClock();setState({minutes:seoul.minutes,label:seoul.label,isDst:newYorkDaylightSavingNow()});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
+  const[state,setState]=useState<{minutes:number;label:string;isDst:boolean;isWeekday:boolean}|null>(null);
+  const[isHoliday,setIsHoliday]=useState(false);
+  useEffect(()=>{const update=()=>{const seoul=seoulClock();const ny=newYorkMarketClock();setState({minutes:seoul.minutes,label:seoul.label,isDst:ny.isDst,isWeekday:ny.isWeekday});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{let active=true;const load=()=>fetch("/api/market-status?market=US&live=1",{cache:"no-store"}).then(async response=>response.ok?await response.json() as MarketSession:null).then(session=>{if(active&&session)setIsHoliday(session.isHoliday===true||session.label.includes("휴장일"));}).catch(()=>undefined);void load();const timer=setInterval(load,300_000);return()=>{active=false;clearInterval(timer);};},[]);
   const rows=usTradingScheduleRows(state?.isDst??true);
+  const forceClosed=Boolean(state&&!state.isWeekday)||isHoliday;
   return <div className="domestic-schedule us-schedule">
     <div className="market-schedule-title"><strong>미국주식</strong><span>한국시간 기준 · {state?(state.isDst?"서머타임":"표준시"):"확인 중"}</span></div>
-    <div className="domestic-schedule-now"><span className="schedule-live-dot"/><span>한국시간 현재</span><strong>{state?.label??"--:--"}</strong></div>
+    <div className="domestic-schedule-now"><span className="schedule-live-dot"/><span>{forceClosed?(isHoliday?"미국 휴장일 · 장 마감":"미국 주말 · 장 마감"):"한국시간 현재"}</span><strong>{state?.label??"--:--"}</strong></div>
     <div className="domestic-schedule-grid"><section className="domestic-venue-card us-venue-card">
       <div className="domestic-venue-head"><strong>미국주식</strong><span>{state?.isDst?"서머타임 적용":"표준시 적용"}</span></div>
       <div className="domestic-schedule-head"><span>구분</span><span>시간</span><span>주문</span></div>
-      <ScheduleRows rows={rows} minutes={state?.minutes??null} prefix="US"/>
+      <ScheduleRows rows={rows} minutes={state?.minutes??null} prefix="US" forceClosed={forceClosed}/>
     </section></div>
   </div>;
 }
