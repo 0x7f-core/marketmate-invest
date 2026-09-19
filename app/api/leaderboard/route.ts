@@ -86,7 +86,8 @@ export async function GET(request: Request) {
        LEFT JOIN quote_snapshots q ON q.instrument_id=pos.instrument_id
        WHERE p.competition_id=?
        GROUP BY p.id,u.nickname,p.joined_at,p.cash_krw,p.realized_pnl_krw,c.initial_cash_krw
-       ORDER BY totalAssetKrw DESC,p.joined_at ASC LIMIT 100`
+       ORDER BY CASE WHEN (SELECT COUNT(*) FROM fills ranked_fill WHERE ranked_fill.participant_id=p.id)>0 THEN 0 ELSE 1 END ASC,
+                totalAssetKrw DESC,p.joined_at ASC LIMIT 100`
     ).bind(competitionId).all();
     const topPicks = await env.DB!.prepare(
       `SELECT i.market,i.symbol,i.name,i.exchange,i.currency,
@@ -106,13 +107,18 @@ export async function GET(request: Request) {
        LIMIT 10`
     ).bind(competitionId).all();
 
+    let rankedCount = 0;
     return Response.json({
-      leaderboard: rows.results.map((row, index) => ({
-        ...row,
-        rank: index + 1,
-        pricingIncomplete: Number(row.pricingIncomplete ?? 0),
-        unrealizedPnlKrw: Number(row.totalAssetKrw) - Number(row.initialCashKrw) - Number(row.realizedPnlKrw),
-      })),
+      leaderboard: rows.results.map(row => {
+        const fillCount = Number(row.fillCount ?? 0);
+        return {
+          ...row,
+          fillCount,
+          rank: fillCount > 0 ? ++rankedCount : null,
+          pricingIncomplete: Number(row.pricingIncomplete ?? 0),
+          unrealizedPnlKrw: Number(row.totalAssetKrw) - Number(row.initialCashKrw) - Number(row.realizedPnlKrw),
+        };
+      }),
       topPicks: topPicks.results.map((row, index) => ({
         ...row,
         rank: index + 1,
