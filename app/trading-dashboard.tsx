@@ -30,7 +30,7 @@ type Competition = {
   startsAt: number; endsAt: number; participantId: string; cashKrw: number;
 };
 type LeaderboardRow = {
-  rank: number; participantId: string; nickname: string; cashKrw: number; realizedPnlKrw: number;
+  rank: number; participantId: string; nickname: string; joinedAt: number; cashKrw: number; realizedPnlKrw: number;
   initialCashKrw: number; totalAssetKrw: number; unrealizedPnlKrw: number;
   fillCount: number; tradedInstrumentCount: number; recentSymbols?: string;
 };
@@ -196,6 +196,15 @@ function fillValueKrw(fill: Fill) {
 
 function formatDateTime(value: number) {
   return new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(value);
+}
+
+function formatJoinDate(value: number) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value).replace(/\.\s?/g, ".").replace(/\.$/, "");
 }
 
 function displaySymbol(market: Market, symbol: string) {
@@ -651,7 +660,7 @@ function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:P
   </div>}</>;
 }
 
-function RankingPanel({rows,participantId,onSelect}:{rows:LeaderboardRow[];participantId:string|null;onSelect:(row:LeaderboardRow)=>void}){return <section className="np-panel np-ranking"><div className="np-section-title"><h2>실시간 대회 순위</h2><span>{rows.length}명</span></div><div className="ranking-head"><span>순위·참가자</span><span>총자산</span><span>수익률</span></div>{rows.length?rows.map(row=>{const value=returnRate(row.totalAssetKrw,row.initialCashKrw);return <button className={row.participantId===participantId?"mine":""} onClick={()=>onSelect(row)} key={row.participantId}><b>{row.rank}</b><span><strong>{row.nickname}</strong><small>{displayRecentSymbols(row.recentSymbols)}</small></span><span>{formatKrw(row.totalAssetKrw)}</span><em className={value>=0?"up":"down"}>{value>=0?"+":""}{value.toFixed(2)}%</em><ChevronRight/></button>}):<p className="np-empty">대회를 만들거나 초대코드로 참가해주세요.</p>}</section>;}
+function RankingPanel({rows,participantId,onSelect}:{rows:LeaderboardRow[];participantId:string|null;onSelect:(row:LeaderboardRow)=>void}){return <section className="np-panel np-ranking"><div className="np-section-title"><h2>실시간 대회 순위</h2><span>{rows.length}명</span></div><div className="ranking-head"><span>순위·참가자</span><span>총자산</span><span>수익률</span></div>{rows.length?rows.map(row=>{const value=returnRate(row.totalAssetKrw,row.initialCashKrw);return <button className={row.participantId===participantId?"mine":""} onClick={()=>onSelect(row)} key={row.participantId}><b>{row.rank}</b><span><strong>{row.nickname}</strong><small>참가 {formatJoinDate(row.joinedAt)} · {displayRecentSymbols(row.recentSymbols)}</small></span><span>{formatKrw(row.totalAssetKrw)}</span><em className={value>=0?"up":"down"}>{value>=0?"+":""}{value.toFixed(2)}%</em><ChevronRight/></button>}):<p className="np-empty">대회를 만들거나 초대코드로 참가해주세요.</p>}</section>;}
 function TopPicksPanel({rows,onSelect}:{rows:CompetitionTopPick[];onSelect:(item:CompetitionTopPick)=>void}){return <section className="np-panel np-top-picks"><div className="np-section-title"><h2>대회 Top Pick</h2><span>2명 이상 보유</span></div><div className="top-picks-head"><span>순위·종목</span><span>보유자</span><span>평가금액</span></div>{rows.length?rows.map(row=><button key={`${row.market}:${row.symbol}`} onClick={()=>onSelect(row)}><b className="top-pick-rank">{row.rank}</b><span className="stock-cell"><InstrumentLogo instrument={row} size="sm"/><span><strong>{row.name}</strong><small>{displaySymbol(row.market,row.symbol)} · {row.market==="KR"?"국내":row.market==="US"?"미국":"코인"}</small></span></span><strong className="top-pick-holders">{row.holderCount}명</strong><span className="top-pick-value">{formatKrw(row.totalMarketValueKrw)}</span><ChevronRight/></button>):<p className="np-empty">현재 2명 이상이 함께 보유한 종목이 없습니다.</p>}</section>;}
 
 type DomesticScheduleRow={label:string;start:string;end:string;tradable:boolean};
