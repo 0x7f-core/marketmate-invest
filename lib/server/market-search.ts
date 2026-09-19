@@ -3,7 +3,7 @@ import { normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-ma
 import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
-import { getUsListingExchange } from "@/lib/server/us-listing-exchange";
+import { getUsListingExchange, usExchangeFromReutersCode } from "@/lib/server/us-listing-exchange";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
 
 
@@ -13,11 +13,18 @@ const DOMESTIC_INITIAL_MAX_PAGES = 40;
 const DOMESTIC_INITIAL_BATCH_SIZE = 12;
 const DOMESTIC_INITIAL_CATALOG_TTL_MS = 6 * 60 * 60_000;
 const DOMESTIC_INITIAL_QUERY_TTL_MS = 30 * 60_000;
+const MARKET_INITIAL_PAGE_SIZE = 200;
+const CRYPTO_INITIAL_PAGE_SIZE = 100;
+const MARKET_INITIAL_MAX_PAGES = 20;
+const MARKET_INITIAL_CATALOG_TTL_MS = 6 * 60 * 60_000;
 
 type DomesticInitialCatalog = { instruments: SearchInstrument[]; stale: boolean };
 let domesticInitialCatalogCache: (DomesticInitialCatalog & { expiresAt: number }) | null = null;
 let domesticInitialCatalogInflight: Promise<DomesticInitialCatalog> | null = null;
 const domesticInitialQueryCache = new Map<string, { expiresAt: number; instruments: SearchInstrument[]; stale: boolean }>();
+type InitialMarketCatalog = { instruments: SearchInstrument[]; stale: boolean };
+const marketInitialCatalogCache = new Map<"US" | "CRYPTO", InitialMarketCatalog & { expiresAt: number }>();
+const marketInitialCatalogInflight = new Map<"US" | "CRYPTO", Promise<InitialMarketCatalog>>();
 
 function compactSearchText(value: string) {
   return value.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("en-US");
@@ -245,6 +252,153 @@ async function searchDomesticInitialCatalog(query: string) {
   return resolved;
 }
 
+function nestedText(record: Record<string, unknown>, parentKeys: string[], childKeys: string[]) {
+  const direct = text(record, parentKeys);
+  if (direct) return direct;
+  for (const key of parentKeys) {
+    const value = record[key];
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const nested = text(value as Record<string, unknown>, childKeys);
+    if (nested) return nested;
+  }
+  return "";
+}
+
+function cryptoCatalogRoot(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  let current = payload as Record<string, unknown>;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (Array.isArray(current.contents)) return current;
+    const next = [current.data, current.result, current.body].find(value => value && typeof value === "object" && !Array.isArray(value));
+    if (!next) break;
+    current = next as Record<string, unknown>;
+  }
+  return current;
+}
+
+function initialMarketCatalogRows(payload: unknown, market: "US" | "CRYPTO") {
+  if (market === "US") return Array.isArray(payload) ? payload : [];
+  const rows = cryptoCatalogRoot(payload)?.contents;
+  return Array.isArray(rows) ? rows : [];
+}
+
+function initialMarketCatalogItem(value: unknown, market: "US" | "CRYPTO") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (market === "US") {
+    const reuters = text(record, ["reutersCode", "reuterscode"]);
+    const name = text(record, ["koreanCodeName", "koreanName", "itemName", "name", "englishCodeName", "symbolCode"]);
+    const exchangeRaw = nestedText(record, ["stockExchangeType"], ["code", "name", "nameKor"]);
+    const exchange = normalizeSupportedExchange("US", exchangeRaw) || usExchangeFromReutersCode(reuters);
+    if (!reuters || !name || !exchange || hasUnsupportedForeignReutersSuffix(reuters)) return null;
+    return {
+      market: "US" as const,
+      symbol: normalizeNaverReutersCode(reuters),
+      name,
+      exchange,
+      currency: "USD" as const,
+    };
+  }
+
+  const rawSymbol = text(record, ["fqnfTicker", "nfTicker", "exchangeTicker", "symbol", "ticker"]);
+  const symbol = normalizeNaverMarketSymbol("CRYPTO", rawSymbol);
+  const name = text(record, ["krName", "koreanName", "itemName", "name", "displayName"]);
+  if (!symbol || !name) return null;
+  return {
+    market: "CRYPTO" as const,
+    symbol,
+    name: canonicalCryptoDisplayName(symbol, name),
+    exchange: "UPBIT",
+    currency: "KRW" as const,
+  };
+}
+
+function collectInitialMarketCatalogPage(
+  response: Awaited<ReturnType<typeof naverJson<unknown>>>,
+  market: "US" | "CRYPTO",
+  output: Map<string, SearchInstrument>,
+) {
+  for (const raw of initialMarketCatalogRows(response.data, market)) {
+    const item = initialMarketCatalogItem(raw, market);
+    if (item) output.set(`${item.market}:${item.symbol}`, item);
+  }
+}
+
+async function fetchForeignInitialCatalogPage(orderType: string, startIdx: number) {
+  return naverJson<unknown>(buildNaverPath("/api/foreign/market/stock/global", {
+    nation: "usa",
+    tradeType: "ALL",
+    orderType,
+    startIdx,
+    pageSize: MARKET_INITIAL_PAGE_SIZE,
+  }), { ttlMs: MARKET_INITIAL_CATALOG_TTL_MS, staleMs: 24 * 60 * 60_000, timeoutMs: 8_000 });
+}
+
+async function fetchCryptoInitialCatalogPage(page: number) {
+  return naverJson<unknown>(buildNaverPath("/api/coin/rank/UPBIT", {
+    sortType: "marketValue",
+    page,
+    pageSize: CRYPTO_INITIAL_PAGE_SIZE,
+  }), { ttlMs: MARKET_INITIAL_CATALOG_TTL_MS, staleMs: 24 * 60 * 60_000, timeoutMs: 8_000 });
+}
+
+function cryptoInitialCatalogTotalCount(payload: unknown) {
+  const raw = Number(cryptoCatalogRoot(payload)?.totalCount);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+async function loadMarketInitialCatalog(market: "US" | "CRYPTO"): Promise<InitialMarketCatalog> {
+  const cached = marketInitialCatalogCache.get(market);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+  const inflight = marketInitialCatalogInflight.get(market);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    const unique = new Map<string, SearchInstrument>();
+    let stale = false;
+    if (market === "US") {
+      const orderTypes = ["marketValue", "priceTop", "quantTop"];
+      for (let page = 0; page < 3; page += 1) {
+        const batch = await Promise.allSettled(orderTypes.map(orderType => fetchForeignInitialCatalogPage(orderType, page * MARKET_INITIAL_PAGE_SIZE)));
+        let fulfilled = 0;
+        for (const entry of batch) {
+          if (entry.status !== "fulfilled") continue;
+          fulfilled += 1;
+          stale ||= entry.value.stale;
+          collectInitialMarketCatalogPage(entry.value, market, unique);
+        }
+        if (!fulfilled) break;
+      }
+    } else {
+      const first = await fetchCryptoInitialCatalogPage(1);
+      stale ||= first.stale;
+      collectInitialMarketCatalogPage(first, market, unique);
+      const totalCount = cryptoInitialCatalogTotalCount(first.data);
+      const pageLimit = totalCount ? Math.min(MARKET_INITIAL_MAX_PAGES, Math.ceil(totalCount / CRYPTO_INITIAL_PAGE_SIZE)) : 1;
+      for (let page = 2; page <= pageLimit; page += 6) {
+        const pages = Array.from({ length: Math.min(6, pageLimit - page + 1) }, (_, offset) => page + offset);
+        const batch = await Promise.allSettled(pages.map(fetchCryptoInitialCatalogPage));
+        let fulfilled = 0;
+        for (const entry of batch) {
+          if (entry.status !== "fulfilled") continue;
+          fulfilled += 1;
+          stale ||= entry.value.stale;
+          collectInitialMarketCatalogPage(entry.value, market, unique);
+        }
+        if (!fulfilled) break;
+      }
+    }
+
+    const catalog = { instruments: [...unique.values()], stale };
+    marketInitialCatalogCache.set(market, { ...catalog, expiresAt: Date.now() + MARKET_INITIAL_CATALOG_TTL_MS });
+    return catalog;
+  })().finally(() => {
+    marketInitialCatalogInflight.delete(market);
+  });
+  marketInitialCatalogInflight.set(market, request);
+  return request;
+}
+
 function text(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = record[key];
@@ -398,20 +552,30 @@ export async function searchNaverMarket(query: string, market?: Market) {
   }
 
   // Naver autocomplete is queried with the original choseong/mixed string first.
-  // This avoids rebuilding the domestic catalog on Worker cold starts when
-  // Naver already returns a valid initial-consonant match. The domestic catalog
-  // remains a completeness fallback only when autocomplete yields no result.
-  let catalog: Awaited<ReturnType<typeof searchDomesticInitialCatalog>> | null = null;
+  // This avoids rebuilding the market catalogs on Worker cold starts when Naver
+  // already returns a valid initial-consonant match. Catalogs remain a fallback
+  // only when autocomplete yields no verified result.
+  let catalogStale = false;
   if (initialSearch && unique.size === 0) {
-    catalog = await searchDomesticInitialCatalog(query).catch(() => null);
-    if (catalog) {
-      for (const item of catalog.instruments) {
-        if (!market || market === "KR") unique.set(`${item.market}:${item.symbol}`, item);
+    const fallbackMarkets: Array<Market> = market ? [market] : ["KR", "US", "CRYPTO"];
+    const fallbackResults = await Promise.allSettled(fallbackMarkets.map(fallbackMarket => (
+      fallbackMarket === "KR"
+        ? searchDomesticInitialCatalog(query)
+        : loadMarketInitialCatalog(fallbackMarket).then(catalog => ({
+            instruments: catalog.instruments.filter(item => koreanPatternIndex(item.name, query) >= 0),
+            stale: catalog.stale,
+          }))
+    )));
+    for (const entry of fallbackResults) {
+      if (entry.status !== "fulfilled") continue;
+      catalogStale ||= entry.value.stale;
+      for (const item of entry.value.instruments) {
+        if (!market || item.market === market) unique.set(`${item.market}:${item.symbol}`, item);
       }
     }
   }
 
-  if (!successful.length && !catalog && !initialSearch) {
+  if (!successful.length && !initialSearch) {
     const rejected = requests.find((entry): entry is PromiseRejectedResult => entry.status === "rejected");
     throw rejected?.reason ?? new Error("NAVER_SEARCH_UNAVAILABLE");
   }
@@ -427,6 +591,6 @@ export async function searchNaverMarket(query: string, market?: Market) {
 
   return {
     instruments,
-    stale: successful.some(response => response.value.stale) || Boolean(catalog?.stale),
+    stale: successful.some(response => response.value.stale) || catalogStale,
   };
 }
