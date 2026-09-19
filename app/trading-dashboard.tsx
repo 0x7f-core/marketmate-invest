@@ -575,26 +575,29 @@ const DOMESTIC_TRADING_SCHEDULE:{venue:DomesticVenue;rows:DomesticScheduleRow[]}
 ];
 function scheduleMinutes(value:string){const[hour,minute]=value.split(":").map(Number);return hour*60+minute;}
 function isScheduleCurrent(row:DomesticScheduleRow,minutes:number){const start=scheduleMinutes(row.start);const end=scheduleMinutes(row.end);return start<end?minutes>=start&&minutes<end:minutes>=start||minutes<end;}
-function seoulClock(){const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Seoul",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());const value=(type:Intl.DateTimeFormatPartTypes)=>parts.find(part=>part.type===type)?.value??"00";const hour=value("hour");const minute=value("minute");return{minutes:Number(hour)*60+Number(minute),label:`${hour}:${minute}`};}
-function ScheduleRows({rows,minutes,prefix}:{rows:DomesticScheduleRow[];minutes:number|null;prefix:string}){
+function seoulClock(){const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Seoul",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());const value=(type:Intl.DateTimeFormatPartTypes)=>parts.find(part=>part.type===type)?.value??"00";const hour=value("hour");const minute=value("minute");const weekday=value("weekday");return{minutes:Number(hour)*60+Number(minute),label:`${hour}:${minute}`,isWeekday:["Mon","Tue","Wed","Thu","Fri"].includes(weekday)};}
+function ScheduleRows({rows,minutes,prefix,forceClosed=false}:{rows:DomesticScheduleRow[];minutes:number|null;prefix:string;forceClosed?:boolean}){
   const viewportRef=useRef<HTMLDivElement|null>(null);
-  const currentIndex=minutes===null?-1:rows.findIndex(row=>isScheduleCurrent(row,minutes));
+  const currentIndex=forceClosed?rows.findIndex(row=>row.label==="장 마감"):minutes===null?-1:rows.findIndex(row=>isScheduleCurrent(row,minutes));
   useLayoutEffect(()=>{if(currentIndex<0||typeof window==="undefined"||!window.matchMedia("(max-width:760px)").matches)return;const viewport=viewportRef.current;if(!viewport)return;const current=viewport.querySelector<HTMLElement>(".domestic-schedule-row.current");if(!current)return;const viewportRect=viewport.getBoundingClientRect();const currentRect=current.getBoundingClientRect();const currentTop=currentRect.top-viewportRect.top+viewport.scrollTop;viewport.scrollTop=Math.max(0,currentTop-(viewport.clientHeight-currentRect.height)/2);},[currentIndex]);
-  return <div className="schedule-rows-viewport" ref={viewportRef}>{rows.map(row=>{const current=minutes!==null&&isScheduleCurrent(row,minutes);return <div className={`domestic-schedule-row${current?" current":""}`} key={`${prefix}:${row.label}`}>
+  return <div className="schedule-rows-viewport" ref={viewportRef}>{rows.map(row=>{const current=forceClosed?row.label==="장 마감":minutes!==null&&isScheduleCurrent(row,minutes);return <div className={`domestic-schedule-row${current?" current":""}`} key={`${prefix}:${row.label}`}>
     <span className="domestic-session-name">{current&&<i className="schedule-live-dot" aria-label="현재 시간대"/>}<b>{row.label}</b></span>
     <span className="domestic-session-time">{row.start}~{row.end}</span>
     <span className={row.tradable?"schedule-order open":"schedule-order closed"}>{row.tradable?"가능":"불가"}</span>
   </div>})}</div>;
 }
 function DomesticTradingSchedule(){
-  const[now,setNow]=useState<{minutes:number;label:string}|null>(null);
+  const[now,setNow]=useState<{minutes:number;label:string;isWeekday:boolean}|null>(null);
+  const[isHoliday,setIsHoliday]=useState(false);
   useEffect(()=>{const update=()=>setNow(seoulClock());update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{let active=true;const load=()=>fetch("/api/market-status?market=KR&live=1",{cache:"no-store"}).then(async response=>response.ok?await response.json() as MarketSession:null).then(session=>{if(active&&session)setIsHoliday(session.isHoliday===true||session.label.includes("휴장일"));}).catch(()=>undefined);void load();const timer=setInterval(load,300_000);return()=>{active=false;clearInterval(timer);};},[]);
+  const forceClosed=Boolean(now&&!now.isWeekday)||isHoliday;
   return <div className="domestic-schedule">
-    <div className="domestic-schedule-now"><span className="schedule-live-dot"/><span>한국시간 현재</span><strong>{now?.label??"--:--"}</strong></div>
+    <div className="domestic-schedule-now"><span className="schedule-live-dot"/><span>{forceClosed?(isHoliday?"휴장일 · 장 마감":"주말 · 장 마감"):"한국시간 현재"}</span><strong>{now?.label??"--:--"}</strong></div>
     <div className="domestic-schedule-grid">{DOMESTIC_TRADING_SCHEDULE.map(group=><section className="domestic-venue-card" key={group.venue}>
       <div className="domestic-venue-head"><strong>{group.venue}</strong><span>주문 시간표</span></div>
       <div className="domestic-schedule-head"><span>구분</span><span>시간</span><span>주문</span></div>
-      <ScheduleRows rows={group.rows} minutes={now?.minutes??null} prefix={group.venue}/>
+      <ScheduleRows rows={group.rows} minutes={now?.minutes??null} prefix={group.venue} forceClosed={forceClosed}/>
     </section>)}</div>
   </div>;
 }
@@ -615,7 +618,7 @@ function usTradingScheduleRows(isDst:boolean):DomesticScheduleRow[]{
 function newYorkDaylightSavingNow(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",timeZoneName:"short"}).formatToParts(new Date());const zone=parts.find(part=>part.type==="timeZoneName")?.value??"";return zone.toUpperCase().includes("EDT");}
 function UsTradingSchedule(){
   const[state,setState]=useState<{minutes:number;label:string;isDst:boolean}|null>(null);
-  useEffect(()=>{const update=()=>{const seoul=seoulClock();setState({...seoul,isDst:newYorkDaylightSavingNow()});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{const update=()=>{const seoul=seoulClock();setState({minutes:seoul.minutes,label:seoul.label,isDst:newYorkDaylightSavingNow()});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
   const rows=usTradingScheduleRows(state?.isDst??true);
   return <div className="domestic-schedule us-schedule">
     <div className="market-schedule-title"><strong>미국주식</strong><span>한국시간 기준 · {state?(state.isDst?"서머타임":"표준시"):"확인 중"}</span></div>
