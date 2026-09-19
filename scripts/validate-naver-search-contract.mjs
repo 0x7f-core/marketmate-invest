@@ -53,6 +53,11 @@ if (!source.includes("if (initialSearch && koreanPatternIndex(item.name, query) 
 if (!source.includes("const patternIndex = koreanPatternIndex(item.name, query);")) {
   failures.push("initial-consonant results must use the shared ranking path for every market");
 }
+if (!source.includes("loadMarketInitialCatalog")
+    || !source.includes('/api/foreign/market/stock/global')
+    || !source.includes('/api/coin/rank/UPBIT')) {
+  failures.push("US and crypto initial-consonant searches must have Naver catalog fallbacks");
+}
 
 if (failures.length) {
   console.error("Naver search contract validation failed:\n");
