@@ -8,18 +8,16 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
-const productionD1DatabaseId = process.env.CLOUDFLARE_D1_DATABASE_ID?.trim();
-const productionD1DatabaseName =
-  process.env.CLOUDFLARE_D1_DATABASE_NAME?.trim() || "marketmate-invest";
-const workerName =
-  process.env.CLOUDFLARE_WORKER_NAME?.trim() || "marketmate-invest";
+// Sites server-backed deployments use the Workers-compatible runtime, but do
+// not depend on an account-owned Cloudflare Worker or production D1 ID.
+const sitesRuntimeName = "marketmate-sites";
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 const workerBindingConfig = {
-  name: workerName,
+  name: sitesRuntimeName,
   main: "vinext/server/fetch-handler",
   // Keep this at the newest date supported by the pinned Wrangler/Miniflare
   // runtime so local regression smoke and production deploy use the same ABI.
@@ -30,11 +28,8 @@ const workerBindingConfig = {
     ? [
         {
           binding: d1,
-          database_name: productionD1DatabaseId
-            ? productionD1DatabaseName
-            : "site-creator-d1",
-          database_id:
-            productionD1DatabaseId || SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          database_name: "site-creator-d1",
+          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
         },
       ]
     : [],
