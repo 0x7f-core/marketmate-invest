@@ -625,14 +625,14 @@ function dDay(endsAt:number){const days=Math.ceil((endsAt-Date.now())/86_400_000
 function formatEndDate(value:number){return new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(value);}
 function LiveMarketStrip({quotes,onPick}:{quotes:MarketIndexQuote[];onPick:(id:string,market:Market)=>void}){const expected=[{id:"KOSPI",name:"코스피",market:"KR" as Market},{id:"KOSDAQ",name:"코스닥",market:"KR" as Market},{id:"SPX",name:"S&P 500",market:"US" as Market},{id:"COMP",name:"나스닥 종합",market:"US" as Market},{id:"BTC",name:"비트코인",market:"CRYPTO" as Market}];return <div className="live-market-strip">{expected.map(meta=>{const item=quotes.find(q=>q.id===meta.id);return <button key={meta.id} onClick={()=>onPick(meta.id,meta.market)}><span>{meta.name}<small>{item?"네이버증권":"시세 확인 중"}</small></span><strong>{item?`${item.price.toLocaleString("ko-KR",{maximumFractionDigits:item.id==="BTC"?0:2})}${item.unit}`:"-"}</strong><em className={(item?.rate??0)>=0?"up":"down"}>{item?`${item.rate>=0?"+":""}${item.rate.toFixed(2)}%`:""}</em></button>})}</div>;}
 function NewsPanel({items,title,loading=false,usSplit=false}:{items:NewsItem[];title:string;loading?:boolean;usSplit?:boolean}){
-  const[newsTab,setNewsTab]=useState<"LOCAL"|"WORLD">("LOCAL");
+  const[newsTab,setNewsTab]=useState<"LOCAL"|"WORLD">("WORLD");
   const filtered=usSplit?items.filter(item=>item.kind===newsTab):items;
   const sorted=[...filtered].sort((a,b)=>b.publishedAt-a.publishedAt);
   return <section className="np-panel np-news">
     <div className="np-section-title"><h2>{title}</h2><span>{sorted.length?`${Math.min(sorted.length,10)}건 · 최신순`:""}</span></div>
     {usSplit&&<div className="us-news-tabs" role="tablist" aria-label="미국주식 뉴스 구분">
-      <button type="button" role="tab" aria-selected={newsTab==="LOCAL"} className={newsTab==="LOCAL"?"active":""} onClick={()=>setNewsTab("LOCAL")}>국내뉴스</button>
       <button type="button" role="tab" aria-selected={newsTab==="WORLD"} className={newsTab==="WORLD"?"active":""} onClick={()=>setNewsTab("WORLD")}>해외뉴스</button>
+      <button type="button" role="tab" aria-selected={newsTab==="LOCAL"} className={newsTab==="LOCAL"?"active":""} onClick={()=>setNewsTab("LOCAL")}>국내뉴스</button>
     </div>}
     {sorted.length?sorted.slice(0,10).map(item=><article key={`${item.kind??"NEWS"}:${item.link}:${item.publishedAt}`}><a href={item.link} target="_blank" rel="noreferrer">{item.title}</a><span>{item.source} · {relativeTime(item.publishedAt)}</span></article>):<p className="np-empty">{loading?"네이버증권 뉴스를 불러오는 중입니다.":usSplit?(newsTab==="LOCAL"?"표시할 국내뉴스가 없습니다.":"표시할 해외뉴스가 없습니다."):"표시할 뉴스가 없습니다."}</p>}
   </section>;
