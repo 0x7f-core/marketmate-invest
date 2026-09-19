@@ -104,7 +104,7 @@ const NAVER_NEWS_OFFICES: Record<string, string> = {
 
 const SOURCE_NAME_KEYS = [
   "officeName", "pressName", "mediaName", "publisherName", "providerName", "sourceName",
-  "newsOfficeName", "newsAgencyName", "companyName",
+  "newsOfficeName", "newsAgencyName", "companyName", "ohnm",
 ];
 const SOURCE_CONTAINER_KEYS = ["office", "press", "media", "publisher", "provider", "source", "newsOffice", "newsAgency", "company"];
 const SOURCE_CODE_KEYS = [
@@ -248,7 +248,7 @@ function parsePublishedAt(record: Record<string, unknown>) {
 
   for (const key of [
     "publishedAt", "publishDateTime", "publishedDateTime", "publishedDate", "publishDate", "releasedAt", "writeDateTime", "writeDate",
-    "createdAt", "createdDateTime", "createdDate", "regDateTime", "regDate", "datetime", "dateTime", "date",
+    "createdAt", "createdDateTime", "createdDate", "regDateTime", "regDate", "datetime", "dateTime", "date", "dt", "updatedt",
   ]) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -274,13 +274,16 @@ function articleLink(record: Record<string, unknown>, title: string) {
   if (raw.startsWith("/")) return `https://stock.naver.com${raw}`;
   const oid = text(record, ["oid", "officeId", "officeCode"]);
   const aid = text(record, ["aid", "articleId", "newsId", "id"]);
+  if (/^[A-Za-z0-9_-]+$/.test(aid) && (oid === "fnGuide" || typeof record.tit === "string")) {
+    return `https://stock.naver.com/news/worldnews/${aid}`;
+  }
   if (/^\d+$/.test(oid) && /^[A-Za-z0-9_-]+$/.test(aid)) return `https://n.news.naver.com/mnews/article/${oid}/${aid}`;
   return `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(title)}`;
 }
 
 function normalize(payload: unknown, kind?: NewsKind) {
   const items = collect(payload).map((record): NewsItem | null => {
-    const title = text(record, ["title", "articleTitle", "headline", "newsTitle", "subject", "articleSubject", "contentTitle"]);
+    const title = text(record, ["title", "tit", "articleTitle", "headline", "newsTitle", "subject", "articleSubject", "contentTitle"]);
     if (!title || title.length < 4) return null;
     return {
       title,
