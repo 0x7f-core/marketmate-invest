@@ -538,7 +538,7 @@ function AccountSettingsDialog({ user, onUpdated, onDeleted, compact = false }: 
       </div>
       <DialogFooter><Button onClick={save} disabled={busy || !canSave}>{busy ? "처리 중..." : "변경사항 저장"}</Button></DialogFooter>
       {user.role !== "admin" && <div className="account-delete-zone">
-        <div><strong>계정 탈퇴</strong><p>계정과 모든 모의투자 데이터가 영구 삭제됩니다. 직접 개설한 대회도 함께 삭제됩니다.</p></div>
+        <div><strong>계정 탈퇴</strong><p>계정과 모든 모의투자 데이터가 영구 삭제됩니다. 직접 개설한 대회도 함께 삭제됩니다. 계정 탈퇴를 진행하려면 위의 현재 비밀번호 4자리를 입력해야 합니다.</p></div>
         <button type="button" onClick={deleteAccount} disabled={busy || currentPin.length !== 4}>계정 삭제</button>
       </div>}
     </DialogContent>
