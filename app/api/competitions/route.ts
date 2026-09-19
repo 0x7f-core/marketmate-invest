@@ -32,14 +32,47 @@ export async function POST(request: Request) {
       return Response.json({ error: "대회 설정값을 확인해주세요." }, { status: 400 });
     }
     const now = Date.now();
+    const existingCompetition = await env.DB!.prepare(
+      `SELECT c.id,c.name
+       FROM participants p
+       JOIN competitions c ON c.id=p.competition_id
+       WHERE p.user_id=? AND c.status='active' AND c.ends_at>?
+       ORDER BY c.created_at DESC LIMIT 1`,
+    ).bind(user.id, now).first<{id:string;name:string}>();
+    if (existingCompetition) {
+      return Response.json(
+        { error: `이미 '${existingCompetition.name}' 대회에 참가 중입니다. 현재 대회에서 나간 뒤 새 대회를 만들 수 있습니다.` },
+        { status: 409 },
+      );
+    }
+
     const competitionId = crypto.randomUUID();
     const participantId = crypto.randomUUID();
     const inviteCode = `MATE-${crypto.randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase()}`;
     await env.DB!.batch([
-      env.DB!.prepare("INSERT INTO competitions (id,owner_user_id,name,invite_code,status,initial_cash_krw,starts_at,ends_at,created_at) VALUES (?,?,?,?,?,?,?,?,?)").bind(competitionId, user.id, name, inviteCode, "active", initialCashKrw, startsAt, endsAt, now),
-      env.DB!.prepare("INSERT INTO participants (id,competition_id,user_id,cash_krw,realized_pnl_krw,joined_at) VALUES (?,?,?,?,?,?)").bind(participantId, competitionId, user.id, initialCashKrw, 0, now),
-      env.DB!.prepare("INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), participantId, "initial", initialCashKrw, competitionId, initialCashKrw, now),
+      env.DB!.prepare(
+        `INSERT INTO competitions (id,owner_user_id,name,invite_code,status,initial_cash_krw,starts_at,ends_at,created_at)
+         SELECT ?,?,?,?,?,?,?,?,?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM participants p
+           JOIN competitions c ON c.id=p.competition_id
+           WHERE p.user_id=? AND c.status='active' AND c.ends_at>?
+         )`,
+      ).bind(competitionId, user.id, name, inviteCode, "active", initialCashKrw, startsAt, endsAt, now, user.id, now),
+      env.DB!.prepare(
+        `INSERT INTO participants (id,competition_id,user_id,cash_krw,realized_pnl_krw,joined_at)
+         SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM competitions WHERE id=?)`,
+      ).bind(participantId, competitionId, user.id, initialCashKrw, 0, now, competitionId),
+      env.DB!.prepare(
+        "INSERT INTO cash_ledger (id,participant_id,type,amount_krw,reference_id,balance_after_krw,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM participants WHERE id=?)",
+      ).bind(crypto.randomUUID(), participantId, "initial", initialCashKrw, competitionId, initialCashKrw, now, participantId),
     ]);
+    const created = await env.DB!.prepare(
+      "SELECT c.id FROM competitions c JOIN participants p ON p.competition_id=c.id WHERE c.id=? AND p.user_id=?",
+    ).bind(competitionId, user.id).first<{id:string}>();
+    if (!created) {
+      return Response.json({ error: "이미 다른 대회에 참가 중입니다. 현재 대회에서 나간 뒤 다시 시도해주세요." }, { status: 409 });
+    }
     await auditLog(request, "competition.created", "competition", competitionId, user.id, { name }).catch(() => undefined);
     return Response.json({ competition: { id: competitionId, participantId, name, inviteCode, initialCashKrw, startsAt, endsAt } }, { status: 201 });
   } catch (error) { return apiError(error); }
