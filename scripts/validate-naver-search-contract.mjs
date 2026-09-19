@@ -44,6 +44,16 @@ if (!source.includes("normalizeSupportedExchange(market, exchangeRaw)")) {
   failures.push("normalized search results must use the shared supported-exchange policy");
 }
 
+if (!source.includes("const initialSearch = hasHangulInitialQuery(query);")) {
+  failures.push("Hangul initial-consonant searches must be enabled for every supported market");
+}
+if (!source.includes("if (initialSearch && koreanPatternIndex(item.name, query) < 0) continue;")) {
+  failures.push("initial-consonant matching must apply to KR, US, and CRYPTO results");
+}
+if (!source.includes("const patternIndex = koreanPatternIndex(item.name, query);")) {
+  failures.push("initial-consonant results must use the shared ranking path for every market");
+}
+
 if (failures.length) {
   console.error("Naver search contract validation failed:\n");
   for (const failure of failures) console.error(`- ${failure}`);
