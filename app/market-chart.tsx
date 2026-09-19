@@ -8,9 +8,10 @@ type ChartPoint = { time: number; open: number; high: number; low: number; close
 type ChartResponse = { points?: ChartPoint[]; range?: string; source?: string; stale?: boolean; error?: string };
 type CandleRow = { time: number; open: number; high: number; low: number; close: number };
 type LineRow = { time: number; value: number };
-type ChartSeries = { setData: (rows: CandleRow[] | LineRow[]) => void };
+type HistogramRow = { time: number; value: number; color: string };
+type ChartSeries = { setData: (rows: CandleRow[] | LineRow[] | HistogramRow[]) => void };
 type ChartApi = { addSeries: (seriesType: unknown, options: Record<string, unknown>) => ChartSeries; remove: () => void; timeScale: () => { fitContent: () => void } };
-type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown; LineSeries: unknown };
+type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown; LineSeries: unknown; HistogramSeries: unknown };
 
 declare global {
   interface Window { LightweightCharts?: LightweightChartsApi }
@@ -58,6 +59,7 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const seriesRef = useRef<ChartSeries | null>(null);
+  const volumeSeriesRef = useRef<ChartSeries | null>(null);
   const [chartReady, setChartReady] = useState(false);
   const [range, setRange] = useState<(typeof RANGES)[number]>("3M");
   const [points, setPoints] = useState<ChartPoint[]>([]);
@@ -88,6 +90,7 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
       chartRef.current?.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volumeSeriesRef.current = null;
       setChartReady(false);
       return;
     }
@@ -104,16 +107,20 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
         layout: {
           attributionLogo: true,
           background: { type: "solid", color: "#ffffff" },
-          textColor: "#6b7280",
+          textColor: "#8a9199",
           fontFamily: "Arial, 'Noto Sans KR', sans-serif",
+          fontSize: 11,
         },
         grid: {
-          vertLines: { color: "#f3f4f6" },
-          horzLines: { color: "#f3f4f6" },
+          vertLines: { color: "#f0f1f3" },
+          horzLines: { color: "#f0f1f3" },
         },
-        rightPriceScale: { borderColor: "#e5e7eb" },
-        timeScale: { borderColor: "#e5e7eb", timeVisible: false, secondsVisible: false },
-        crosshair: { vertLine: { labelBackgroundColor: "#374151" }, horzLine: { labelBackgroundColor: "#374151" } },
+        rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.25 } },
+        timeScale: { borderVisible: false, timeVisible: false, secondsVisible: false, rightOffset: 2, barSpacing: 7 },
+        crosshair: {
+          vertLine: { color: "#7d858d", width: 1, style: 3, labelBackgroundColor: "#3f444a" },
+          horzLine: { color: "#7d858d", width: 1, style: 3, labelBackgroundColor: "#3f444a" },
+        },
         localization: { locale: "ko-KR" },
       });
       const series = indexId === "USDKRW"
@@ -132,8 +139,16 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
           priceLineVisible: true,
           lastValueVisible: true,
         });
+      const volumeSeries = chart.addSeries(library.HistogramSeries, {
+        priceFormat: { type: "volume" },
+        priceScaleId: "",
+        lastValueVisible: false,
+        priceLineVisible: false,
+        scaleMargins: { top: 0.8, bottom: 0 },
+      });
       chartRef.current = chart;
       seriesRef.current = series;
+      volumeSeriesRef.current = volumeSeries;
       setChartReady(true);
       setLibraryStatus("ready");
     }).catch(error => {
@@ -147,6 +162,7 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
       chartRef.current?.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      volumeSeriesRef.current = null;
     };
   }, [retryToken, indexId, isFxImageChart]);
 
@@ -162,6 +178,11 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
         .filter(point => point.open > 0 && point.high > 0 && point.low > 0)
         .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
     series.setData(rows);
+    volumeSeriesRef.current?.setData(valid.map(point => ({
+      time: Math.floor(point.time / 1_000),
+      value: Math.max(0, Number(point.volume ?? 0)),
+      color: point.close >= point.open ? "rgba(239,75,85,.72)" : "rgba(60,127,219,.72)",
+    })));
     if (rows.length) chart.timeScale().fitContent();
   }, [points, chartReady, indexId, isFxImageChart]);
 
@@ -219,6 +240,8 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
 
   const loading = libraryStatus === "loading" || dataStatus === "loading";
   const errorMessage = libraryStatus === "error" ? libraryMessage : dataStatus === "error" ? dataMessage : "";
+  const latestPoint = points.at(-1);
+  const formatMetric = (value?: number) => Number.isFinite(value) ? Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 4 }) : "-";
 
   return (
     <section className="naver-light-chart" aria-label={`${quote.name} 차트`}>
@@ -230,6 +253,13 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
         <div className="naver-light-chart-ranges" role="tablist" aria-label="차트 기간">
           {RANGES.map(item => <button key={item} className={range === item ? "active" : ""} onClick={() => setRange(item)}>{item}</button>)}
         </div>
+      </div>
+      <div className="chart-ohlcv" aria-live="polite">
+        <span>시 <b>{formatMetric(latestPoint?.open)}</b></span>
+        <span>고 <b className="up">{formatMetric(latestPoint?.high)}</b></span>
+        <span>저 <b className="down">{formatMetric(latestPoint?.low)}</b></span>
+        <span>종 <b>{formatMetric(latestPoint?.close)}</b></span>
+        <span>거래량 <b>{formatMetric(latestPoint?.volume)}</b></span>
       </div>
       <div className="naver-light-chart-stage">
         <div ref={containerRef} className="naver-light-chart-canvas" />

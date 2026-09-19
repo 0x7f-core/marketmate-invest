@@ -3,6 +3,7 @@ import "./globals.css";
 import "./mobile.css";
 import "./naver-market.css";
 import "./naver-parity.css";
+import "./naver-2026.css";
 import "./order-closed.css";
 import "./market-status-board.css";
 
