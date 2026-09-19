@@ -82,6 +82,18 @@ assert(samsungByCode.exchange === "KOSPI", `Samsung numeric search exchange expe
 assert(codeSearch.data?.source === "NAVER", "numeric instrument search source is not NAVER");
 console.log("PASS Naver numeric-code instrument search + KOSPI label");
 
+const usInitialSearch = await jsonRequest(`/api/instruments/search?q=${encodeURIComponent("ㅌㅅㄹ")}&market=US`, { headers: authHeaders, cache: "no-store" });
+assert(usInitialSearch.response.status === 200, `US initial search expected 200, got ${usInitialSearch.response.status}: ${JSON.stringify(usInitialSearch.data)}`);
+const teslaByInitial = usInitialSearch.data?.instruments?.find(item => item?.market === "US" && item?.symbol === "TSLA.O" && item?.name === "테슬라");
+assert(teslaByInitial, `Tesla missing from US initial-consonant search: ${JSON.stringify(usInitialSearch.data?.instruments)}`);
+console.log("PASS US initial-consonant instrument search (테슬라 / TSLA.O)");
+
+const cryptoInitialSearch = await jsonRequest(`/api/instruments/search?q=${encodeURIComponent("ㅂㅌㅋㅇ")}&market=CRYPTO`, { headers: authHeaders, cache: "no-store" });
+assert(cryptoInitialSearch.response.status === 200, `crypto initial search expected 200, got ${cryptoInitialSearch.response.status}: ${JSON.stringify(cryptoInitialSearch.data)}`);
+const bitcoinByInitial = cryptoInitialSearch.data?.instruments?.find(item => item?.market === "CRYPTO" && item?.symbol === "KRW-BTC" && item?.name === "비트코인");
+assert(bitcoinByInitial, `Bitcoin missing from crypto initial-consonant search: ${JSON.stringify(cryptoInitialSearch.data?.instruments)}`);
+console.log("PASS crypto initial-consonant instrument search (비트코인 / KRW-BTC)");
+
 const marketStatus = await jsonRequest("/api/market-status?market=KR", { headers: authHeaders, cache: "no-store" });
 assert(marketStatus.response.status === 200, `market status expected 200, got ${marketStatus.response.status}: ${JSON.stringify(marketStatus.data)}`);
 assert(marketStatus.data?.market === "KR", "market status market mismatch");
