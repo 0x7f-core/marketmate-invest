@@ -401,6 +401,108 @@ function ParticipantActivityDialog({ row, onClose }: { row: LeaderboardRow | nul
   </DialogContent></Dialog>;
 }
 
+function AccountSettingsDialog({ user, onUpdated, compact = false }: { user: User; onUpdated: (user: User) => void; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [nickname, setNickname] = useState(user.nickname);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [nicknameLocked, setNicknameLocked] = useState(false);
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { setNickname(user.nickname); }, [user.nickname]);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setStatus("");
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+    fetch("/api/auth/account", { cache: "no-store" })
+      .then(async response => {
+        const result = await response.json() as { user?: User; nicknameLocked?: boolean; error?: string };
+        if (!response.ok || !result.user) throw new Error(result.error ?? "계정 정보를 불러오지 못했습니다.");
+        if (!active) return;
+        setNickname(result.user.nickname);
+        setNicknameLocked(Boolean(result.nicknameLocked));
+        onUpdated(result.user);
+      })
+      .catch(error => active && setStatus(error instanceof Error ? error.message : "계정 정보를 불러오지 못했습니다."));
+    return () => { active = false; };
+  }, [open, onUpdated]);
+
+  const save = async () => {
+    if (busy) return;
+    if (newPin && newPin !== confirmPin) {
+      setStatus("새 비밀번호 확인이 일치하지 않습니다.");
+      return;
+    }
+    setBusy(true);
+    setStatus("");
+    try {
+      const response = await fetch("/api/auth/account", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          currentPin,
+          nickname,
+          ...(newPin ? { newPin } : {}),
+        }),
+      });
+      const result = await response.json() as { user?: User; nicknameLocked?: boolean; error?: string };
+      if (!response.ok || !result.user) {
+        if (result.nicknameLocked) setNicknameLocked(true);
+        setStatus(result.error ?? "계정 정보를 변경하지 못했습니다.");
+        return;
+      }
+      onUpdated(result.user);
+      setNickname(result.user.nickname);
+      setNicknameLocked(Boolean(result.nicknameLocked));
+      setCurrentPin("");
+      setNewPin("");
+      setConfirmPin("");
+      setStatus("계정 정보를 변경했습니다.");
+    } catch {
+      setStatus("연결이 원활하지 않습니다. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const nicknameChanged = nickname.normalize("NFKC").trim() !== user.nickname;
+  const pinChanged = newPin.length > 0;
+  const canSave = currentPin.length === 4 && (nicknameChanged || pinChanged) && (!pinChanged || (newPin.length === 4 && confirmPin === newPin));
+
+  return <Dialog open={open} onOpenChange={setOpen}>
+    <DialogTrigger asChild><button type="button" className={`account-settings-trigger${compact ? " compact" : ""}`} aria-label="계정 설정">{compact ? "계정" : user.nickname}</button></DialogTrigger>
+    <DialogContent className="account-settings-dialog sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>계정 설정</DialogTitle>
+        <DialogDescription>닉네임과 숫자 비밀번호를 변경할 수 있습니다.</DialogDescription>
+      </DialogHeader>
+      <div className="account-settings-fields">
+        <label>닉네임
+          <Input value={nickname} onChange={event => setNickname(event.target.value)} maxLength={12} disabled={nicknameLocked} autoComplete="username" />
+        </label>
+        {nicknameLocked && <p className="account-settings-lock">참가 중인 대회가 있어 닉네임을 변경할 수 없습니다. 대회에서 나가거나 대회가 종료된 뒤 변경할 수 있습니다.</p>}
+        <div className="account-settings-divider" />
+        <label>현재 비밀번호
+          <Input value={currentPin} onChange={event => setCurrentPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" autoComplete="current-password" placeholder="숫자 4자리" />
+        </label>
+        <label>새 비밀번호 <small>변경하지 않으려면 비워두세요.</small>
+          <Input value={newPin} onChange={event => setNewPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" autoComplete="new-password" placeholder="새 숫자 4자리" />
+        </label>
+        <label>새 비밀번호 확인
+          <Input value={confirmPin} onChange={event => setConfirmPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" autoComplete="new-password" placeholder="새 비밀번호 다시 입력" disabled={!newPin} />
+        </label>
+        {status && <p className="account-settings-status">{status}</p>}
+      </div>
+      <DialogFooter><Button onClick={save} disabled={busy || !canSave}>{busy ? "저장 중..." : "변경사항 저장"}</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
+}
+
 function AdminDialog() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<AdminData | null>(null);
@@ -682,7 +784,7 @@ export default function TradingDashboard(){
   const nav:(readonly[AppView,string])[]=[["home","홈"],["market","시세"],["watchlist","관심"],["competition","모의투자대회"],["news","뉴스"],["portfolio","MY"]];
   const mobileNavItems = [["home",Home,"홈"],["watchlist",Star,"관심"],["market",LineChart,"시세"],["competition",Trophy,"대회"],["news",Newspaper,"뉴스"],["portfolio",WalletCards,"MY"]] as const;
   const holdings=<section className="np-panel holdings"><div className="np-section-title"><h2>내 투자현황</h2><div className="flex items-center gap-2"><select aria-label="보유종목 정렬 기준" value={positionSortKey} onChange={event=>setPositionSortKey(event.target.value as PositionSortKey)} className="h-8 rounded-md border border-[#dfe3e6] bg-white px-2 text-xs text-[#59636c]"><option value="name">종목 이름</option><option value="quantity">보유수량</option><option value="averagePrice">평균단가</option><option value="marketValue">평가금액</option><option value="unrealizedPnl">평가손익</option><option value="returnRate">수익률</option></select><button type="button" onClick={()=>setPositionSortDirection(value=>value==="asc"?"desc":"asc")} className="h-8 rounded-md border border-[#dfe3e6] bg-white px-2 text-xs text-[#59636c]">{positionSortDirection==="asc"?"오름차순 ↑":"내림차순 ↓"}</button><button onClick={loadAccount}><RefreshCw/> 새로고침</button></div></div><div className="asset-summary"><span>총 자산<strong>{formatKrw(assets)}</strong></span><span>주문 가능 현금<strong>{formatKrw(portfolio?.account.availableCashKrw??0)}</strong></span><span>평가손익<strong className={unrealizedPnl>=0?"up":"down"}>{formatKrw(unrealizedPnl)}</strong></span><span>실현손익<strong className={(portfolio?.account.realizedPnlKrw??0)>=0?"up":"down"}>{formatKrw(portfolio?.account.realizedPnlKrw??0)}</strong></span><span>수익률<strong className={rate>=0?"up":"down"}>{rate>=0?"+":""}{rate.toFixed(2)}%</strong></span></div><div className="desktop-position-table"><Table><TableHeader><TableRow><TableHead>종목</TableHead><TableHead>보유</TableHead><TableHead>평균단가</TableHead><TableHead>평가금액</TableHead><TableHead>평가손익</TableHead><TableHead>수익률</TableHead></TableRow></TableHeader><TableBody>{sortedPositions.length?sortedPositions.map(p=>{const instrument:Instrument={market:p.market,symbol:p.symbol,name:p.name,exchange:p.exchange||(p.market==="KR"?"KRX":p.market==="US"?"NAS":"NAVER"),currency:p.currency as"KRW"|"USD"};return <TableRow key={`${p.market}:${p.symbol}`} onClick={()=>chooseInstrument(instrument)}><TableCell><span className="stock-cell"><InstrumentLogo instrument={instrument} size="sm"/><span>{p.name}<small>{displaySymbol(p.market,p.symbol)} · {instrument.exchange}</small></span></span></TableCell><TableCell>{formatQuantity(p.quantityMicros)}</TableCell><TableCell>{formatKrw(p.averagePriceKrwMicros/1_000_000)}</TableCell><TableCell>{p.currentPriceKrwMicros?formatKrw(p.marketValueKrw??0):"시세 대기"}</TableCell><TableCell className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatKrw(p.unrealizedPnlKrw??0):"-"}</TableCell><TableCell className={positionReturnRate(p)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatReturnRate(positionReturnRate(p)):"-"}</TableCell></TableRow>}):<TableRow><TableCell colSpan={6} className="empty-cell">{participantId?"아직 보유한 종목이 없습니다.":"대회에 참가하면 투자현황이 표시됩니다."}</TableCell></TableRow>}</TableBody></Table></div><div className="mobile-position-list">{sortedPositions.length?sortedPositions.map(p=>{const instrument:Instrument={market:p.market,symbol:p.symbol,name:p.name,exchange:p.exchange||(p.market==="KR"?"KRX":p.market==="US"?"NAS":"NAVER"),currency:p.currency as"KRW"|"USD"};return <button key={`mobile:${p.market}:${p.symbol}`} onClick={()=>chooseInstrument(instrument)}><span className="stock-cell"><InstrumentLogo instrument={instrument} size="sm"/><span><b>{p.name}</b><small>{displaySymbol(p.market,p.symbol)} · {instrument.exchange} · {formatQuantity(p.quantityMicros)}{p.market==="CRYPTO"?"개":"주"}</small></span></span><span><strong>{p.currentPriceKrwMicros?formatKrw(p.marketValueKrw??0):"시세 대기"}</strong><em className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?`${formatKrw(p.unrealizedPnlKrw??0)} · ${formatReturnRate(positionReturnRate(p))}`:"-"}</em></span></button>}):<p className="np-empty">{participantId?"아직 보유한 종목이 없습니다.":"대회에 참가하면 투자현황이 표시됩니다."}</p>}</div></section>;
-  return <div className="marketmate-v2"><header className="np-desktop-header"><div className="np-head"><button className="np-brand" onClick={()=>setView("home")}><span>MM</span><b>마켓메이트</b></button><SearchBox onSelect={chooseInstrument}/><div className="np-head-actions">{auth.role==="admin"&&<AdminDialog/>}<JoinDialog onChanged={loadCompetitions}/><span>{auth.nickname}</span><button aria-label="로그아웃" onClick={logout}><LogOut/></button></div></div><nav>{nav.map(([key,label])=><button key={key} className={view===key?"active":""} onClick={()=>key==="market"?openMarketView():setView(key)}>{label}</button>)}</nav><LiveMarketStrip quotes={indices} onPick={pickMarketOverviewById}/></header><header className="np-mobile-header"><div><button className="np-brand" onClick={()=>setView("home")}><span>MM</span><b>마켓메이트</b></button><button aria-label="로그아웃" onClick={logout}><LogOut/></button></div>{view==="market"&&<SearchBox onSelect={chooseInstrument}/>}</header>
+  return <div className="marketmate-v2"><header className="np-desktop-header"><div className="np-head"><button className="np-brand" onClick={()=>setView("home")}><span>MM</span><b>마켓메이트</b></button><SearchBox onSelect={chooseInstrument}/><div className="np-head-actions">{auth.role==="admin"&&<AdminDialog/>}<JoinDialog onChanged={loadCompetitions}/><AccountSettingsDialog user={auth} onUpdated={setAuth}/><button aria-label="로그아웃" onClick={logout}><LogOut/></button></div></div><nav>{nav.map(([key,label])=><button key={key} className={view===key?"active":""} onClick={()=>key==="market"?openMarketView():setView(key)}>{label}</button>)}</nav><LiveMarketStrip quotes={indices} onPick={pickMarketOverviewById}/></header><header className="np-mobile-header"><div><button className="np-brand" onClick={()=>setView("home")}><span>MM</span><b>마켓메이트</b></button><div className="np-mobile-account-actions"><AccountSettingsDialog user={auth} onUpdated={setAuth} compact/><button aria-label="로그아웃" onClick={logout}><LogOut/></button></div></div>{view==="market"&&<SearchBox onSelect={chooseInstrument}/>}</header>
     {view==="home"&&<main className="np-page np-home"><section className="np-home-main"><div className="np-market-status"><span><i/>국내 · 네이버증권 market-status</span><span><i/>미국 · 네이버증권 세션·서머타임</span><span><i/>가상자산 · 네이버증권 24시간 시세</span></div><PopularStocksPanel domestic={popularStocks.domestic} us={popularStocks.us} onSelect={chooseInstrument}/><LiveMarketStrip quotes={indices} onPick={pickMarketOverviewById}/><section className="np-panel np-market-focus"><div className="np-section-title"><h2>주요 지수·가상자산</h2><button onClick={openMarketView}>시세 보기 <ChevronRight/></button></div><div className="index-board">{indices.map(item=><button key={item.id} onClick={()=>pickMarketOverview(item)}><span>{item.name}<small>네이버증권 · 실시간</small></span><strong>{item.price.toLocaleString("ko-KR",{maximumFractionDigits:item.id==="BTC"?0:2})}{item.unit}</strong><em className={item.rate>=0?"up":"down"}>{item.change>=0?"+":""}{item.change.toLocaleString("ko-KR",{maximumFractionDigits:2})} ({item.rate>=0?"+":""}{item.rate.toFixed(2)}%)</em></button>)}</div></section><NewsPanel items={newsItems} title="주요 시장 뉴스" loading={newsLoading}/></section><aside><section className="np-panel np-my-summary"><div className="np-section-title"><h2>내 대회</h2><button onClick={()=>setView("competition")}>전체 <ChevronRight/></button></div><div className="contest-summary"><span>{activeCompetition?.name??"참가 중인 대회 없음"}{activeCompetition&&<b>{dDay(activeCompetition.endsAt)}</b>}</span><strong>{myRank?`${myRank.rank}위 / ${leaderboard.length}명`:"대회에 참가해보세요"}</strong><em className={rate>=0?"up":"down"}>{rate>=0?"+":""}{rate.toFixed(2)}%</em></div></section><section className="np-panel np-watch-preview"><div className="np-section-title"><h2>관심 종목</h2><button onClick={()=>setView("watchlist")}>전체 <ChevronRight/></button></div>{watchlist.slice(0,6).map(item=><button key={item.id} onClick={()=>chooseInstrument(item)}><InstrumentLogo instrument={item} size="sm"/><span><b>{item.name}</b><small>{displaySymbol(item.market,item.symbol)}</small></span><strong>{formatWatchPrice(item)}<em className={(item.changeRatePpm??0)>=0?"up":"down"}>{((item.changeRatePpm??0)/10_000).toFixed(2)}%</em></strong></button>)}{!watchlist.length&&<p className="np-empty">관심 종목을 추가해보세요.</p>}</section></aside></main>}
     {view==="market"&&<main className={`np-page np-trading${marketTab==="INDEX"?" index-mode":""}`}><section className="np-trading-main"><div className="np-market-tabs">{([["INDEX","지수"],["KR","국내"],["US","미국"],["CRYPTO","가상자산"]] as const).map(([key,label])=><button className={marketTab===key?"active":""} onClick={()=>key==="INDEX"?openIndexView(selectedIndexId):changeMarket(key)} key={key}>{label}</button>)}</div>
       {marketTab==="INDEX"?<><div className="np-index-selector">{MARKET_INDEX_IDS.map(id=><button key={id} className={selectedIndexId===id?"active":""} onClick={()=>openIndexView(id)}>{MARKET_INDEX_META[id].name}</button>)}</div>{(()=>{const overview=indices.find(item=>item.id===selectedIndexId);const current=indexDetail?.id===selectedIndexId?indexDetail:overview;const meta=MARKET_INDEX_META[selectedIndexId];const detail=indexDetail?.id===selectedIndexId?indexDetail:null;const chartQuote={market:meta.market,symbol:meta.symbol,name:meta.name,exchange:meta.exchange};return <section className="np-panel np-quote np-index-quote"><div className="np-quote-head"><span className="stock-title"><span><small>{selectedIndexId==="USDKRW"?"환율":meta.exchange} · 네이버증권</small><h1>{meta.name}</h1></span></span><span className={`live-pill${indexStatus==="unavailable"?" pending":""}`}><i/>{indexStatus==="live"?"네이버 실시간":indexStatus==="loading"?"확인 중":"시세 지연"}</span></div><div className="np-price"><div className="np-price-main"><strong>{current?formatMarketIndexValue(current,current.price):"시세 확인 중"}</strong>{current&&current.price>0&&<span className={current.rate>=0?"up":"down"}>{current.change>=0?"▲":"▼"} {Math.abs(current.change).toLocaleString("ko-KR",{maximumFractionDigits:2})} ({current.rate>=0?"+":""}{current.rate.toFixed(2)}%)</span>}</div></div>{selectedIndexId!=="USDKRW"&&<div className="np-stats"><span>기준가<b>{current?formatMarketIndexValue(current,detail?.referencePrice):"-"}</b></span><span>시가<b className={quoteMetricDirectionClass(detail?.open,detail?.referencePrice)}>{current?formatMarketIndexValue(current,detail?.open):"-"}</b></span><span>고가<b className="up">{current?formatMarketIndexValue(current,detail?.high):"-"}</b></span><span>저가<b className="down">{current?formatMarketIndexValue(current,detail?.low):"-"}</b></span><span className="np-stat-dated"><span className="np-stat-label">52주 최고<small>{detail?.high52WeekDate===undefined?"확인 중":formatQuoteMetricDate(detail.high52WeekDate)||"-"}</small></span><b className="up">{current?formatMarketIndexValue(current,detail?.high52Week):"-"}</b></span><span className="np-stat-dated"><span className="np-stat-label">52주 최저<small>{detail?.low52WeekDate===undefined?"확인 중":formatQuoteMetricDate(detail.low52WeekDate)||"-"}</small></span><b className="down">{current?formatMarketIndexValue(current,detail?.low52Week):"-"}</b></span><span>거래량<b>{formatQuoteVolume(detail?.volume)}</b></span><span>거래대금<b>{formatMarketIndexTradingValue(detail?.tradingValue)}</b></span></div>}<div className="np-chart"><MarketChart quote={chartQuote} indexId={selectedIndexId} fxChartImages={detail?.chartImages}/></div></section>;})()}</>:<><section className="np-panel np-quote"><div className="np-quote-head"><span className="stock-title"><InstrumentLogo key={`${selected.market}:${selected.symbol}`} instrument={selected} size="lg"/><span><small>{displaySymbol(selected.market,selected.symbol)} · {selected.exchange}</small><h1>{selected.name}<button className={selectedInWatchlist?"starred":""} onClick={toggleWatchlist} aria-label="관심종목"><Star fill={selectedInWatchlist?"currentColor":"none"}/></button></h1></span></span><span className="live-pill"><i/>{quoteStatus==="live"?"네이버 실시간":quoteStatus==="loading"?"확인 중":"시세 지연"}</span></div><div className={`np-price${selected.market==="KR"?" np-price-domestic":""}`}><div className="np-price-main"><strong>{formatPrice(selected)}</strong>{selected.price>0&&<span className={selected.rate>=0?"up":"down"}>{selected.change>=0?"▲":"▼"} {Math.abs(selected.change).toLocaleString()} ({selected.rate>=0?"+":""}{selected.rate.toFixed(2)}%)</span>}</div>{selected.market==="KR"&&<div className="np-domestic-venue-switch"><div><button type="button" className={domesticVenue==="KRX"?"active":""} onClick={()=>changeDomesticVenue("KRX")}>KRX</button><button type="button" className={domesticVenue==="NXT"?"active":""} disabled={Boolean(selected.availableVenues)&&!selected.availableVenues?.includes("NXT")} onClick={()=>changeDomesticVenue("NXT")}>NXT</button></div></div>}</div><div className="np-stats"><span>기준가<b>{formatQuoteMetricPrice(selected,selected.referencePrice)}</b></span><span>시가<b className={quoteMetricDirectionClass(selected.open,selected.referencePrice)}>{formatQuoteMetricPrice(selected,selected.open)}</b></span><span>고가<b className="up">{formatQuoteMetricPrice(selected,selected.high)}</b></span><span>저가<b className="down">{formatQuoteMetricPrice(selected,selected.low)}</b></span><span className="np-stat-dated"><span className="np-stat-label">52주 최고<small>{selected.high52WeekDate===undefined?"확인 중":formatQuoteMetricDate(selected.high52WeekDate)||"-"}</small></span><b className="up">{formatQuoteMetricPrice(selected,selected.high52Week)}</b></span><span className="np-stat-dated"><span className="np-stat-label">52주 최저<small>{selected.low52WeekDate===undefined?"확인 중":formatQuoteMetricDate(selected.low52WeekDate)||"-"}</small></span><b className="down">{formatQuoteMetricPrice(selected,selected.low52Week)}</b></span><span>거래량<b>{formatQuoteVolume(selected.volume)}</b></span><span>거래대금<b>{formatQuoteTradingValue(selected)}</b></span></div><div className="np-chart"><MarketChart quote={selected}/></div></section><div className="np-mobile-order"><OrderPanel quote={selected} participantId={participantId} availableCashKrw={portfolio?.account.availableCashKrw??0} heldQuantityMicros={selectedHolding} session={marketSession} domesticVenue={domesticVenue} onDomesticVenueChange={changeDomesticVenue} onFilled={handleFilled}/></div><NewsPanel items={newsItems} title={`${selected.name} 관련 뉴스`} loading={newsLoading}/></>}</section>{marketTab!=="INDEX"&&<aside><OrderPanel quote={selected} participantId={participantId} availableCashKrw={portfolio?.account.availableCashKrw??0} heldQuantityMicros={selectedHolding} session={marketSession} domesticVenue={domesticVenue} onDomesticVenueChange={changeDomesticVenue} onFilled={handleFilled}/></aside>}</main>}
