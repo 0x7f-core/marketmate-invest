@@ -1,7 +1,8 @@
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 
-type NewsItem = { title: string; link: string; publishedAt: number; source: string };
+type NewsKind = "LOCAL" | "WORLD";
+type NewsItem = { title: string; link: string; publishedAt: number; source: string; kind?: NewsKind };
 
 type FetchResult = { data: unknown; stale: boolean };
 
@@ -277,7 +278,7 @@ function articleLink(record: Record<string, unknown>, title: string) {
   return `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(title)}`;
 }
 
-function normalize(payload: unknown) {
+function normalize(payload: unknown, kind?: NewsKind) {
   const items = collect(payload).map((record): NewsItem | null => {
     const title = text(record, ["title", "articleTitle", "headline", "newsTitle", "subject", "articleSubject", "contentTitle"]);
     if (!title || title.length < 4) return null;
@@ -286,6 +287,7 @@ function normalize(payload: unknown) {
       link: articleLink(record, title),
       publishedAt: parsePublishedAt(record),
       source: newsSource(record),
+      ...(kind ? { kind } : {}),
     };
   }).filter((item): item is NewsItem => Boolean(item));
 
@@ -305,24 +307,28 @@ async function settled(path: string): Promise<FetchResult | null> {
 
 async function usNews(symbol: string, exchange: string) {
   const code = await resolveReutersCode(symbol, exchange);
-  const paths = [
-    buildNaverPath("/api/foreign/worldStock/list", { reutersCode: code, page: 1, pageSize: 30 }),
-    buildNaverPath("/api/domestic/detail/news", { itemCode: code, page: 1, pageSize: 30 }),
-  ];
-  const related = await Promise.all(paths.map(settled));
-  let items = related.flatMap(result => result ? normalize(result.data) : []);
-  let stale = related.some(result => result?.stale);
-  items = items.filter((item, index, all) => all.findIndex(other => other.title === item.title) === index)
-    .sort((a, b) => b.publishedAt - a.publishedAt);
+  const [worldResult, localResult] = await Promise.all([
+    settled(buildNaverPath("/api/foreign/worldStock/list", { reutersCode: code, page: 1, pageSize: 30 })),
+    settled(buildNaverPath("/api/domestic/detail/news", { itemCode: code, page: 1, pageSize: 30 })),
+  ]);
 
-  if (!items.length) {
+  let worldItems = worldResult ? normalize(worldResult.data, "WORLD") : [];
+  const localItems = localResult ? normalize(localResult.data, "LOCAL") : [];
+  let stale = Boolean(worldResult?.stale || localResult?.stale);
+
+  if (!worldItems.length) {
     const fallback = await settled(buildNaverPath("/api/foreign/news/worldNews", { page: 1, pageSize: 30 }));
     if (fallback) {
-      items = normalize(fallback.data);
+      worldItems = normalize(fallback.data, "WORLD");
       stale = stale || fallback.stale;
     }
   }
-  return { items: items.slice(0, 30), stale };
+
+  const items = [...localItems, ...worldItems]
+    .filter((item, index, all) => all.findIndex(other => other.title === item.title && other.kind === item.kind) === index)
+    .sort((a, b) => b.publishedAt - a.publishedAt);
+
+  return { items: items.slice(0, 60), stale };
 }
 
 export async function getNaverMarketNews(market: "KR" | "US" | "CRYPTO", symbol: string, name: string, exchange: string) {
