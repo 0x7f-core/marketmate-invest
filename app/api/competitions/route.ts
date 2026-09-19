@@ -6,14 +6,16 @@ export async function GET(request: Request) {
   try {
     const user = await requireUser(request);
     await enforceRateLimit(request, "competition_read", 120, 60 * 1000, user.id);
+    const now = Date.now();
     const result = await env.DB!.prepare(
-      `SELECT c.id, c.name, c.invite_code AS inviteCode, c.status,
+      `SELECT c.id, c.name, c.invite_code AS inviteCode,
+              CASE WHEN c.status='active' AND c.ends_at<=? THEN 'ended' ELSE c.status END AS status,
               c.initial_cash_krw AS initialCashKrw, c.starts_at AS startsAt,
               c.ends_at AS endsAt, p.id AS participantId, p.cash_krw AS cashKrw
        FROM competitions c
        JOIN participants p ON p.competition_id = c.id
        WHERE p.user_id = ? ORDER BY c.created_at DESC`
-    ).bind(user.id).all();
+    ).bind(now, user.id).all();
     return Response.json({ competitions: result.results });
   } catch (error) { return apiError(error); }
 }
