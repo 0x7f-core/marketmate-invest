@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Inspect production sparkline payload
         env:
-          URL: https://marketmate-invest.0x7f-core.workers.dev/api/market-sparklines
+          URL: https://marketmate-invest.mauve-ray-5016.chatgpt.site/api/market-sparklines
         run: |
           node - <<'NODE'
           const response = await fetch(process.env.URL, { cache: 'no-store' });
