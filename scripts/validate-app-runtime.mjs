@@ -139,6 +139,13 @@ assert(Array.isArray(news.data?.items), "news response missing items[]");
 assert(news.data?.source === "NAVER", "news source is not NAVER");
 console.log(`PASS KR news through app route (${news.data.items.length} items)`);
 
+const usNews = await jsonRequest("/api/news?market=US&symbol=AAPL.O&name=Apple&exchange=NASDAQ", { headers: authHeaders, cache: "no-store" });
+assert(usNews.response.status === 200, `US news expected 200, got ${usNews.response.status}: ${JSON.stringify(usNews.data)}`);
+assert(Array.isArray(usNews.data?.items), "US news response missing items[]");
+const usWorldNews = usNews.data.items.filter(item => item?.kind === "WORLD");
+assert(usWorldNews.length > 0, `US world news missing: ${JSON.stringify(usNews.data)}`);
+console.log(`PASS US world news through app route (${usWorldNews.length} world / ${usNews.data.items.length} total)`);
+
 const overview = await jsonRequest("/api/market-overview", { headers: authHeaders, cache: "no-store" });
 assert(overview.response.status === 200, `market overview expected 200, got ${overview.response.status}: ${JSON.stringify(overview.data)}`);
 assert(Array.isArray(overview.data?.quotes), "market overview missing quotes[]");
