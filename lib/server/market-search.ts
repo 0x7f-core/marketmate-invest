@@ -2,7 +2,7 @@ import { canonicalCryptoDisplayName } from "@/lib/crypto-display-name";
 import { normalizeDomesticListingMarket } from "@/lib/server/domestic-listing-market";
 import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeSupportedExchange } from "@/lib/server/instrument-policy";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
-import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
+import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode, usSearchTickerCore } from "@/lib/server/naver-symbol";
 import { getUsListingExchange, usExchangeFromReutersCode } from "@/lib/server/us-listing-exchange";
 import type { Market, SearchInstrument } from "@/lib/server/market-data";
 
@@ -99,7 +99,9 @@ function domesticCatalogItem(value: unknown): SearchInstrument | null {
   const normalized = normalize(record);
   if (normalized?.market === "KR") return normalized;
 
-  const name = text(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
+  const name = market === "US"
+    ? text(record, ["koreanCodeName", "koreanName", "stockNameKo", "stockNameKor", "korName", "itemName", "itemname", "stockName", "name", "displayName", "englishCodeName", "symbolCode"])
+    : text(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
   const symbol = text(record, ["itemCode", "itemcode", "stockCode", "symbolCode", "code"]).toUpperCase();
   if (!name || !/^[A-Z0-9]{6}$/.test(symbol)) return null;
   const exchange = domesticListingExchange(record) || "KRX";
@@ -139,7 +141,7 @@ function collectDomesticCatalogPage(
 ) {
   for (const raw of domesticCatalogRows(response.data)) {
     const item = domesticCatalogItem(raw);
-    if (item) output.set(`${item.market}:${item.symbol}`, item);
+    if (item) addSearchInstrument(output, item);
   }
 }
 
@@ -287,7 +289,7 @@ function initialMarketCatalogItem(value: unknown, market: "US" | "CRYPTO") {
   const record = value as Record<string, unknown>;
   if (market === "US") {
     const reuters = text(record, ["reutersCode", "reuterscode"]);
-    const name = text(record, ["koreanCodeName", "koreanName", "itemName", "name", "englishCodeName", "symbolCode"]);
+    const name = text(record, ["koreanCodeName", "koreanName", "stockNameKo", "stockNameKor", "korName", "itemName", "name", "englishCodeName", "symbolCode"]);
     const exchangeRaw = nestedText(record, ["stockExchangeType"], ["code", "name", "nameKor"]);
     const exchange = normalizeSupportedExchange("US", exchangeRaw) || usExchangeFromReutersCode(reuters);
     if (!reuters || !name || !exchange || hasUnsupportedForeignReutersSuffix(reuters)) return null;
@@ -407,6 +409,43 @@ function text(record: Record<string, unknown>, keys: string[]) {
   }
   return "";
 }
+function searchIdentityKey(item: SearchInstrument) {
+  if (item.market === "US") return `${item.market}:${usSearchTickerCore(item.symbol)}`;
+  return `${item.market}:${item.symbol}`;
+}
+
+function hasKoreanName(value: string) {
+  return /[가-힣]/.test(value);
+}
+
+function hasReutersSuffix(value: string) {
+  return /[._](?:O|K|N|P|A)$/i.test(value.trim());
+}
+
+function mergeSearchInstrument(current: SearchInstrument, incoming: SearchInstrument) {
+  if (current.market !== "US" || incoming.market !== "US") return incoming;
+
+  // Prefer a Korean alias when both autocomplete endpoints return the same
+  // listing with different localized names. This keeps the quote tab name
+  // stable when the upstream endpoints expose both Korean and English aliases.
+  const preferred = hasKoreanName(incoming.name) && !hasKoreanName(current.name) ? incoming : current;
+  const symbol = hasReutersSuffix(incoming.symbol) && !hasReutersSuffix(current.symbol)
+    ? incoming.symbol
+    : current.symbol;
+  const currentExchange = normalizeSupportedExchange("US", current.exchange);
+  const incomingExchange = normalizeSupportedExchange("US", incoming.exchange);
+  const exchange = (!currentExchange || currentExchange === "USA") && incomingExchange
+    ? incoming.exchange
+    : current.exchange || incoming.exchange;
+  return { ...preferred, symbol, exchange };
+}
+
+function addSearchInstrument(output: Map<string, SearchInstrument>, item: SearchInstrument) {
+  const key = searchIdentityKey(item);
+  const current = output.get(key);
+  output.set(key, current ? mergeSearchInstrument(current, item) : item);
+}
+
 
 function collect(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
   if (depth > 5 || output.length >= 400 || value === null || value === undefined) return output;
@@ -547,7 +586,7 @@ export async function searchNaverMarket(query: string, market?: Market) {
       const item = normalize(record);
       if (!item || (market && item.market !== market)) continue;
       if (initialSearch && koreanPatternIndex(item.name, query) < 0) continue;
-      unique.set(`${item.market}:${item.symbol}`, item);
+      addSearchInstrument(unique, item);
     }
   }
 
@@ -570,7 +609,7 @@ export async function searchNaverMarket(query: string, market?: Market) {
       if (entry.status !== "fulfilled") continue;
       catalogStale ||= entry.value.stale;
       for (const item of entry.value.instruments) {
-        if (!market || item.market === market) unique.set(`${item.market}:${item.symbol}`, item);
+        if (!market || item.market === market) addSearchInstrument(unique, item);
       }
     }
   }
