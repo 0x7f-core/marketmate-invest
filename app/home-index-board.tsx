@@ -273,18 +273,18 @@ export default function HomeIndexBoard() {
       <style>{`
         .home-index-board-slot{width:100%;min-width:0;background:#fff}
         .home-index-live-board{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;background:#fff}
-        .home-index-live-board .home-index-card{position:relative;min-width:0;height:87px;min-height:87px;padding:11px;display:grid!important;grid-template-columns:minmax(0,1fr) 48px;grid-template-rows:19px 24px 16px;gap:4px 8px;border:0;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2;background:#fff;text-align:left;overflow:hidden}
+        .home-index-live-board .home-index-card{position:relative;min-width:0;min-height:190px;padding:16px 20px 12px;display:flex!important;flex-direction:column;align-items:stretch;gap:0;border:0;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2;background:#fff;text-align:left;overflow:hidden}
         .home-index-live-board .home-index-card:nth-child(3n){border-right:0}
         .home-index-live-board .home-index-card:nth-child(n+4){border-bottom:0}
-        .home-index-name{display:block!important;grid-column:1/-1;grid-row:1;color:#202428!important;padding-right:34px;font-size:14px!important;font-weight:500!important;line-height:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .home-index-live-board .home-index-card>strong{display:block;grid-column:1;grid-row:2;margin:0;color:#17191c;font-size:18px;font-weight:600;line-height:24px;letter-spacing:-.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .home-index-live-board .home-index-card>em{display:block;grid-column:1;grid-row:3;margin:0;font-size:11px;font-weight:500;font-style:normal;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .home-index-name{display:block!important;color:#202428!important;padding-right:0;font-size:14px!important;font-weight:500!important;line-height:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .home-index-live-board .home-index-card>strong{display:block;margin-top:8px;color:#17191c;font-size:18px;font-weight:600;line-height:24px;letter-spacing:-.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .home-index-live-board .home-index-card>em{display:block;margin-top:5px;font-size:11px;font-weight:500;font-style:normal;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .home-index-live-board .home-index-card.up>em{color:#e93648}.home-index-live-board .home-index-card.down>em{color:#2678d9}.home-index-live-board .home-index-card:not(.up):not(.down)>em{color:#6f7881}
-        .home-index-sparkline{display:block;grid-column:2;grid-row:2/4;align-self:center;width:48px;height:32px;margin:0;overflow:visible}.home-index-sparkline.empty{background:linear-gradient(180deg,transparent 49%,#edf0f2 49.5%,#edf0f2 50.5%,transparent 51%)}
+        .home-index-sparkline{display:block;width:100%;height:54px;margin-top:10px;overflow:visible}.home-index-sparkline.empty{background:linear-gradient(180deg,transparent 49%,#edf0f2 49.5%,#edf0f2 50.5%,transparent 51%)}
         .home-index-sparkline .spark-baseline{stroke:#d9dde1;stroke-width:.8;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}
         .home-index-sparkline .spark-line{fill:none;stroke-width:1.25;vector-effect:non-scaling-stroke}.home-index-sparkline .spark-fill{stroke:none;opacity:.08}
         .home-index-sparkline .positive .spark-line{stroke:#eb4d5c}.home-index-sparkline .positive .spark-fill{fill:#eb4d5c}.home-index-sparkline .negative .spark-line{stroke:#2d7ed8}.home-index-sparkline .negative .spark-fill{fill:#2d7ed8}
-        .home-index-live-board .home-index-card>small{position:absolute;top:6px;right:11px;display:flex;align-items:center;gap:4px;margin:0;color:#9aa0a6;font-size:10px;font-weight:400;line-height:12px;white-space:nowrap}.home-index-live-board .home-index-card>small i{width:6px;height:6px;border-radius:50%;background:#d0d4d8;flex:none}
+        .home-index-live-board .home-index-card>small{position:static;display:flex;align-items:center;gap:4px;margin-top:8px;color:#9aa0a6;font-size:10px;font-weight:400;line-height:12px;white-space:nowrap}.home-index-live-board .home-index-card>small i{width:6px;height:6px;border-radius:50%;background:#d0d4d8;flex:none}
         @media(max-width:760px){
           .np-home-main>.live-market-strip{display:none!important}
           .home-index-live-board{grid-template-columns:repeat(3,minmax(0,1fr))!important}
