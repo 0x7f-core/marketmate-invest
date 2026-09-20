@@ -22,7 +22,7 @@ const PERIODS = [
   { value: "DAY", label: "일봉" },
   { value: "WEEK", label: "주봉" },
   { value: "MONTH", label: "월봉" },
-  { value: "YEAR", label: "연봉" },
+  { value: "YEAR", label: "년봉" },
 ] as const;
 const LIGHTWEIGHT_CHARTS_URL = "https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js";
 let chartLibraryPromise: Promise<LightweightChartsApi> | null = null;
