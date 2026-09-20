@@ -22,8 +22,11 @@ type Target = {
   exchange: string;
 };
 
-function displaySymbol(market: Market, symbol: string) {
-  return market === "US" ? symbol.replace(/\.(?:O|K|N|P|A)$/i, "") : symbol;
+function instrumentKey(market: Market, symbol: string) {
+  const comparable = market === "US"
+    ? symbol.normalize("NFKC").trim().toUpperCase().replaceAll("_", ".").replace(/[._](?:O|K|N|P|A)$/i, "")
+    : symbol;
+  return `${market}:${comparable}`;
 }
 
 function marketFromLabel(label: string): Market | null {
@@ -35,7 +38,7 @@ function marketFromLabel(label: string): Market | null {
 }
 
 function targetKey(target: Target) {
-  return `${target.market}:${target.symbol}:${target.name}:${target.exchange}`;
+  return `${instrumentKey(target.market, target.symbol)}:${target.name}:${target.exchange}`;
 }
 
 function sameTargets(left: Target[], right: Target[]) {
@@ -116,7 +119,7 @@ export default function DesktopSearchFavorites() {
 
   const favorites = useMemo(() => {
     const map = new Map<string, WatchlistItem>();
-    for (const item of watchlist) map.set(`${item.market}:${displaySymbol(item.market, item.symbol)}`, item);
+    for (const item of watchlist) map.set(instrumentKey(item.market, item.symbol), item);
     return map;
   }, [watchlist]);
 
@@ -128,9 +131,9 @@ export default function DesktopSearchFavorites() {
     const items = payload.instruments ?? [];
     return items.find(item =>
       item.market === target.market &&
-      displaySymbol(item.market, item.symbol) === target.symbol &&
+      instrumentKey(item.market, item.symbol) === instrumentKey(target.market, target.symbol) &&
       (!target.exchange || !item.exchange || item.exchange === target.exchange),
-    ) ?? items.find(item => item.market === target.market && displaySymbol(item.market, item.symbol) === target.symbol)
+    ) ?? items.find(item => item.market === target.market && instrumentKey(item.market, item.symbol) === instrumentKey(target.market, target.symbol))
       ?? items.find(item => item.market === target.market && item.name === target.name)
       ?? null;
   }, []);
@@ -138,7 +141,7 @@ export default function DesktopSearchFavorites() {
   const toggleFavorite = useCallback(async (event: React.SyntheticEvent, target: Target) => {
     event.preventDefault();
     event.stopPropagation();
-    const key = `${target.market}:${target.symbol}`;
+    const key = instrumentKey(target.market, target.symbol);
     if (busy === key) return;
     setBusy(key);
     try {
