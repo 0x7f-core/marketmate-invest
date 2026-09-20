@@ -37,7 +37,6 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .np-desktop-header>nav button.active{color:#111;font-weight:900}
 .marketmate-v2 .np-desktop-header>nav button.active:after{height:3px;background:#111}
 
-
 /* Page frames. */
 .marketmate-v2 .np-page{width:min(100% - 48px,1360px);max-width:none;margin:16px auto 72px;padding:0}
 .marketmate-v2 .np-panel{border:1px solid var(--mm-line);border-radius:9px;background:#fff;box-shadow:none}
