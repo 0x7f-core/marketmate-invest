@@ -320,7 +320,10 @@ export async function GET() {
   const ids = ["KOSPI", "KOSDAQ", "SPX", "COMP", "BTC", "USDKRW"] as const;
   const series = Object.fromEntries(ids.map((id, index) => {
     const job = jobs[index];
-    const value = job.status === "fulfilled" && job.value.points.length >= 2 ? job.value : fallbackSeries();
+    const value = job.status === "fulfilled"
+      && (job.value.points.length >= 2 || ("status" in job.value && job.value.status === "preopen"))
+      ? job.value
+      : fallbackSeries();
     return [id, value];
   })) as Record<(typeof ids)[number], SparkSeries>;
 
