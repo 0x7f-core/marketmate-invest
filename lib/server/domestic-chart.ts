@@ -1,7 +1,7 @@
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
+import { chartPeriodHistoryDays, finalizeChartPoints, naverCandlePeriod, type ChartPeriod } from "@/lib/server/chart-period";
+import { runChartFallback } from "@/lib/server/chart-fallback";
 import type { ChartPoint } from "@/lib/server/market-data";
-
-const RANGE_DAYS: Record<string, number> = { "1D": 2, "1W": 8, "1M": 32, "3M": 94, "1Y": 367 };
 
 function asNumber(...values: unknown[]) {
   for (const value of values) {
@@ -13,7 +13,10 @@ function asNumber(...values: unknown[]) {
 }
 
 function records(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
-  if (depth > 7 || output.length >= 800 || value === null || value === undefined) return output;
+  // The native chart endpoint can return up to ten years of daily rows for
+  // the long-period views. Keep enough records to cover that response while
+  // retaining the recursion guard for unexpected payloads.
+  if (depth > 7 || output.length >= 5000 || value === null || value === undefined) return output;
   if (Array.isArray(value)) {
     for (const item of value) records(item, depth + 1, output);
     return output;
@@ -46,9 +49,9 @@ function parseTime(value: unknown, fallback: number) {
 }
 
 function point(row: Record<string, unknown>, fallback: number): ChartPoint | null {
-  const close = asNumber(row.closePrice, row.close, row.currentPrice, row.nowPrice, row.tradePrice, row.price, row.basePrice, row.lastPrice);
+  const close = asNumber(row.closingPrice, row.closePrice, row.close, row.currentPrice, row.nowPrice, row.tradePrice, row.price, row.basePrice, row.lastPrice);
   if (close <= 0) return null;
-  const dateValue = row.localTradedAt ?? row.tradeDate ?? row.localDate ?? row.date ?? row.businessDate ?? row.bizDate ?? row.bizdate ?? row.baseDate ?? row.xymd ?? row.dateTime ?? row.datetime;
+  const dateValue = row.tradingDateKst ?? row.localTradedAt ?? row.tradeDate ?? row.localDate ?? row.date ?? row.businessDate ?? row.bizDate ?? row.bizdate ?? row.baseDate ?? row.xymd ?? row.dateTime ?? row.datetime;
   const open = asNumber(row.openPrice, row.open, row.openingPrice) || close;
   const high = asNumber(row.highPrice, row.high, row.highestPrice) || close;
   const low = asNumber(row.lowPrice, row.low, row.lowestPrice) || close;
@@ -58,40 +61,99 @@ function point(row: Record<string, unknown>, fallback: number): ChartPoint | nul
     high,
     low,
     close,
-    volume: asNumber(row.accumulatedTradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume) || undefined,
+    volume: asNumber(row.tradingVolume, row.accumulatedTradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume) || undefined,
   };
 }
 
-function normalizedPoints(payload: unknown, fetchedAt: number, range: string, days: number) {
-  const all = records(payload)
+function normalizedPoints(payload: unknown, fetchedAt: number) {
+  return records(payload)
     .map((row, index) => point(row, fetchedAt - index * 86_400_000))
     .filter((item): item is ChartPoint => Boolean(item))
     .sort((a, b) => a.time - b.time)
     .filter((item, index, list) => index === 0 || item.time !== list[index - 1].time);
-  const since = Date.now() - days * 86_400_000;
-  const ranged = range === "1Y" ? all : all.filter(item => item.time >= since);
-  return (ranged.length ? ranged : all).slice(-400);
 }
 
-export async function getDomesticChartSeries(symbol: string, range: string) {
-  const days = RANGE_DAYS[range];
-  if (!days) throw new Error("INVALID_CHART_RANGE");
+function dailyPriceRows(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const items = (payload as Record<string, unknown>).items;
+  return Array.isArray(items) ? items : [];
+}
 
-  const primary = await naverJson<unknown>(
-    buildNaverPath(`/api/securityService/chart/domestic/item/${encodeURIComponent(symbol)}`, { periodType: "day" }),
-    { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 2_500 },
-  );
-  let points = normalizedPoints(primary.data, primary.fetchedAt, range, days);
-  let stale = primary.stale;
+function dailyPriceCursor(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const cursor = (payload as Record<string, unknown>).cursor;
+  return typeof cursor === "string" && cursor ? cursor : undefined;
+}
 
-  if (!points.length) {
-    const fallback = await naverJson<unknown>(
-      buildNaverPath(`/api/stockSecurity/items/v2/domestic/${encodeURIComponent(symbol)}/daily-prices`, { size: Math.min(100, Math.max(40, days + 8)) }),
-      { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 2_500 },
+function dailyPriceHasNext(payload: unknown) {
+  return Boolean(payload && typeof payload === "object" && !Array.isArray(payload) && (payload as Record<string, unknown>).hasNext);
+}
+
+async function getDomesticDailyHistory(symbol: string, period: ChartPeriod, days: number) {
+  const pageSize = 100;
+  // Keep the request bounded while following the cursor returned by Naver's
+  // daily-prices endpoint. Longer candle intervals are aggregated below.
+  const targetRows = Math.min(600, Math.max(80, Math.ceil(days * 0.75) + 8));
+  const payloads: unknown[] = [];
+  let fetchedAt = Date.now();
+  let stale = false;
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 6 && (page === 0 || payloads.flatMap(dailyPriceRows).length < targetRows); page += 1) {
+    const result = await naverJson<unknown>(
+      buildNaverPath(`/api/stockSecurity/items/v2/domestic/${encodeURIComponent(symbol)}/daily-prices`, {
+        size: pageSize,
+        cursor,
+      }),
+      { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 8_000 },
     );
-    points = normalizedPoints(fallback.data, fallback.fetchedAt, range, days);
-    stale = stale || fallback.stale;
+    payloads.push(result.data);
+    fetchedAt = result.fetchedAt;
+    stale = stale || result.stale;
+    if (!dailyPriceHasNext(result.data)) break;
+    const nextCursor = dailyPriceCursor(result.data);
+    if (!nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
   }
 
-  return { points, range, stale, source: "NAVER" as const };
+  return {
+    points: finalizeChartPoints(normalizedPoints(payloads, fetchedAt), period, "Asia/Seoul", days),
+    stale,
+  };
+}
+
+export async function getDomesticChartSeries(symbol: string, period: ChartPeriod) {
+  const days = chartPeriodHistoryDays(period);
+  const result = await runChartFallback([
+    async () => {
+      const chart = await naverJson<unknown>(
+        buildNaverPath(`/api/securityService/chart/domestic/item/${encodeURIComponent(symbol)}`, {
+          periodType: naverCandlePeriod(period),
+        }),
+        { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+      );
+      const rawPoints = normalizedPoints(chart.data, chart.fetchedAt);
+      if (rawPoints.length <= 1) return null;
+      return {
+        points: finalizeChartPoints(rawPoints, period, "Asia/Seoul", days),
+        stale: chart.stale,
+      };
+    },
+    async () => {
+      // Keep the paged daily-price feed as a resilience fallback only. Normal
+      // chart requests use the dedicated Naver candle endpoint above.
+      const fallback = await getDomesticDailyHistory(symbol, period, days);
+      return fallback.points.length > 1 ? fallback : null;
+    },
+    async () => {
+      // Last resort: request the native daily chart and aggregate it locally.
+      const fallback = await naverJson<unknown>(
+        buildNaverPath(`/api/securityService/chart/domestic/item/${encodeURIComponent(symbol)}`, { periodType: "day" }),
+        { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 4_000 },
+      );
+      const points = finalizeChartPoints(normalizedPoints(fallback.data, fallback.fetchedAt), period, "Asia/Seoul", days);
+      return { points, stale: fallback.stale };
+    },
+  ]);
+  return { ...result, period, source: "NAVER" as const };
 }

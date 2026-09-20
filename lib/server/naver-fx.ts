@@ -33,10 +33,10 @@ function collect(value: unknown, depth = 0, output: Row[] = []) {
   return output;
 }
 
-export async function getNaverUsdKrwRate() {
+export async function getNaverUsdKrwRate(options: { timeoutMs?: number } = {}) {
   const result = await naverJson<unknown>(
     buildNaverPath("/api/securityService/integration/indicators", { indicatorCodes: "FX_USDKRW" }),
-    { ttlMs: 30_000, staleMs: 10 * 60_000 },
+    { ttlMs: 30_000, staleMs: 10 * 60_000, timeoutMs: options.timeoutMs },
   );
   const rows = collect(result.data);
   const exact = rows.find(row => stringValue(row, ["itemCode", "code", "symbol"]) === "FX_USDKRW") ?? rows[0];

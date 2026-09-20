@@ -1,882 +1,27 @@
-"use client";
-
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
-import MarketChart from "@/app/market-chart";
-import { OTPInputContext } from "input-otp";
-import { ChevronDown, ChevronRight, DoorOpen, Flame, Home, LineChart, LogOut, Newspaper, RefreshCw, Search, ShieldCheck, Star, Trash2, Trophy, WalletCards, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { InputOTP, InputOTPGroup } from "@/components/ui/input-otp";
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader,
-  DialogTitle, DialogTrigger,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-type Market = "KR" | "US" | "CRYPTO";
-type MarketTab = "INDEX" | Market;
-type MarketIndexId = "KOSPI" | "KOSDAQ" | "SPX" | "COMP" | "USDKRW";
-type DomesticVenue = "KRX" | "NXT";
-type User = { id: string; nickname: string; role: "member" | "admin" };
-type Instrument = { market: Market; symbol: string; name: string; exchange: string; currency: "KRW" | "USD" };
-type Quote = Instrument & {
-  price: number; change: number; rate: number; exchangeRate: number;
-  referencePrice?: number; open?: number; high?: number; low?: number; volume?: number; tradingValue?: number;
-  high52Week?: number; low52Week?: number; high52WeekDate?: string | null; low52WeekDate?: string | null; tradingVenue?: DomesticVenue; availableVenues?: DomesticVenue[];
-};
-type Competition = {
-  id: string; name: string; inviteCode: string; status: string; initialCashKrw: number;
-  startsAt: number; endsAt: number; participantId: string; cashKrw: number;
-};
-type LeaderboardRow = {
-  rank: number | null; participantId: string; nickname: string; joinedAt: number; cashKrw: number; realizedPnlKrw: number;
-  initialCashKrw: number; totalAssetKrw: number; unrealizedPnlKrw: number;
-  fillCount: number; tradedInstrumentCount: number; recentSymbols?: string;
-};
-type CompetitionTopPick = Instrument & {
-  rank: number;
-  holderCount: number;
-  totalMarketValueKrw: number;
-};
-type Portfolio = {
-  account: { cashKrw: number; reservedCashKrw: number; availableCashKrw: number; realizedPnlKrw: number; marketValueKrw: number; totalAssetKrw: number };
-  positions: Array<{
-    market: Market; symbol: string; name: string; exchange: string; currency: string; quantityMicros: number;
-    averagePriceKrwMicros: number; realizedPnlKrw: number; currentPriceKrwMicros?: number;
-    marketValueKrw?: number; unrealizedPnlKrw?: number;
-  }>;
-  fills: Fill[];
-};
-type Fill = {
-  id: string; side: "buy" | "sell"; venue?: DomesticVenue | null; quantityMicros: number; priceMicros: number; fxRateMicros: number;
-  executedAt: number; market: Market; symbol: string; name: string; currency: string;
-  returnRate?: number | null; returnRateKind?: "current" | "realized";
-};
-type ParticipantActivity = {
-  participant: { id: string; nickname: string };
-  positions: Portfolio["positions"];
-  fills: Fill[];
-};
-type Order = { id: string; side: "buy" | "sell"; orderType: "market" | "limit"; venue?: DomesticVenue | null; quantityMicros: number; limitPriceMicros?: number; filledQuantityMicros: number; status: string; rejectionReason?: string; createdAt: number; market: Market; symbol: string; name: string; currency: string };
-type MarketSession = {
-  isOpen: boolean; label: string; notice: string; source?: "NAVER"; stale?: boolean; isHoliday?: boolean; exchange?: string;
-  currentSession?: string; isDaylightSavingTime?: boolean; openTimeKst?: string; closeTimeKst?: string;
-};
-type AdminData = {
-  users: Array<{ id:string; nickname:string; role:string; isActive:number; createdAt:number; competitionCount:number; fillCount:number }>;
-  competitions: Array<{ id:string; name:string; inviteCode:string; status:string; ownerNickname:string; participantCount:number; fillCount:number }>;
-  participants: Array<{ id:string; competitionId:string; nickname:string; cashKrw:number; isOwner:number }>;
-  audit: Array<{ id:string; action:string; targetType:string; targetId?:string; details:string; createdAt:number; actorNickname:string }>;
-  health: { pendingOrders:number; rejectedOrders:number; activeSessions:number; latestQuoteAt?:number };
-};
-type WatchlistItem = Instrument & { id:string; priceKrwMicros?:number; changeRatePpm?:number; fxRateMicros?:number; receivedAt?:number };
-type PopularStock = Instrument & {
-  rank:number;
-  price:number;
-  change:number;
-  changeRate:number;
-};
-type NewsItem = { title:string; link:string; source:string; publishedAt:number; kind?:"LOCAL"|"WORLD" };
-type MarketIndexQuote = { id:string; name:string; market:Market; price:number; change:number; rate:number; unit:string; source:"NAVER"; timestamp:number; pollingInterval?:number };
-type MarketIndexDetail = MarketIndexQuote & {
-  symbol:string; exchange:string; currency:"KRW"|"USD"; referencePrice?:number; open?:number; high?:number; low?:number;
-  volume?:number; tradingValue?:number; high52Week?:number; low52Week?:number;
-  high52WeekDate?:string; low52WeekDate?:string;
-  cashBuy?:number; cashSell?:number; send?:number; receive?:number;
-  chartImages?:Partial<Record<"1M"|"3M"|"1Y",string>>;
-};
-type AppView = "home" | "market" | "watchlist" | "competition" | "portfolio" | "news";
-type PositionSortKey = "name" | "quantity" | "averagePrice" | "marketValue" | "unrealizedPnl" | "returnRate";
-
-const clientNewsCache = new Map<string, { items:NewsItem[]; expiresAt:number }>();
-const LOADING_MARKET_SESSION: MarketSession = {isOpen:false,label:"í™•ì¸ ì¤‘",notice:"ë„¤ì´ë²„ì¦ê¶Œ ê±°ë˜ì‹œê°„ì„ í™•ì¸í•˜ê³  ìˆìŠµë‹ˆë‹¤."};
-
-const DEFAULTS: Record<Market, Quote> = {
-  KR: { market: "KR", symbol: "005930", name: "ì‚¼ì„±ì „ì", exchange: "KOSPI", currency: "KRW", price: 0, change: 0, rate: 0, exchangeRate: 1 },
-  US: { market: "US", symbol: "AAPL.O", name: "ì• í”Œ", exchange: "NAS", currency: "USD", price: 0, change: 0, rate: 0, exchangeRate: 1 },
-  CRYPTO: { market: "CRYPTO", symbol: "KRW-BTC", name: "ë¹„íŠ¸ì½”ì¸", exchange: "NAVER", currency: "KRW", price: 0, change: 0, rate: 0, exchangeRate: 1 },
-};
-
-const MARKET_INDEX_IDS: MarketIndexId[] = ["KOSPI", "KOSDAQ", "SPX", "COMP", "USDKRW"];
-const MARKET_INDEX_META: Record<MarketIndexId, { name:string; market:Market; symbol:string; exchange:string; currency:"KRW"|"USD"; unit:string }> = {
-  KOSPI: { name:"ì½”ìŠ¤í”¼", market:"KR", symbol:"KOSPI", exchange:"KRX", currency:"KRW", unit:"" },
-  KOSDAQ: { name:"ì½”ìŠ¤ë‹¥", market:"KR", symbol:"KOSDAQ", exchange:"KRX", currency:"KRW", unit:"" },
-  SPX: { name:"S&P 500", market:"US", symbol:".INX", exchange:"INDEX", currency:"USD", unit:"" },
-  COMP: { name:"ë‚˜ìŠ¤ë‹¥ ì¢…í•©", market:"US", symbol:".IXIC", exchange:"INDEX", currency:"USD", unit:"" },
-  USDKRW: { name:"ì›/ë‹¬ëŸ¬ í™˜ìœ¨", market:"US", symbol:"USDKRW", exchange:"FX", currency:"KRW", unit:"ì›" },
-};
-
-function isMarketIndexId(value:string): value is MarketIndexId {
-  return MARKET_INDEX_IDS.includes(value as MarketIndexId);
-}
-
-function formatMarketIndexValue(index:Pick<MarketIndexQuote,"id"|"unit">, value?:number) {
-  if (!Number.isFinite(value) || Number(value) <= 0) return "-";
-  const formatted = Number(value).toLocaleString("ko-KR", {
-    minimumFractionDigits: index.id === "USDKRW" ? 2 : 0,
-    maximumFractionDigits: 2,
-  });
-  return `${formatted}${index.unit}`;
-}
-
-function formatMarketIndexTradingValue(value?:number) {
-  if (!Number.isFinite(value) || Number(value) <= 0) return "-";
-  return new Intl.NumberFormat("ko-KR", { notation:"compact", maximumFractionDigits:2 }).format(Number(value));
-}
-
-function formatPrice(quote: Quote) {
-  if (!quote.price) return "ì‹œì„¸ í™•ì¸ ì¤‘";
-  return quote.currency === "USD"
-    ? `$${quote.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-    : `${quote.price.toLocaleString("ko-KR")}ì›`;
-}
-
-function formatKrw(value: number) {
-  return `â‚©${Math.round(value || 0).toLocaleString("ko-KR")}`;
-}
-
-function formatQuoteMetricPrice(quote: Quote, value?: number) {
-  if (!Number.isFinite(value) || Number(value) <= 0) return "-";
-  if (quote.currency === "USD") {
-    return `${Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
-  }
-  return Number(value).toLocaleString("ko-KR", { maximumFractionDigits: quote.market === "CRYPTO" && Number(value) < 100 ? 4 : 0 });
-}
-
-function formatQuoteMetricDate(value?: string | null) {
-  if (!value) return "";
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return match ? `${match[1]}.${match[2]}.${match[3]}.` : value;
-}
-
-function quoteMetricDirectionClass(value?: number, referencePrice?: number) {
-  if (!Number.isFinite(value) || Number(value) <= 0 || !Number.isFinite(referencePrice) || Number(referencePrice) <= 0) return undefined;
-  if (Number(value) > Number(referencePrice)) return "up";
-  if (Number(value) < Number(referencePrice)) return "down";
-  return undefined;
-}
-
-function formatQuoteVolume(value?: number) {
-  if (!Number.isFinite(value) || Number(value) <= 0) return "-";
-  return Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 6 });
-}
-
-function formatQuoteTradingValue(quote: Quote) {
-  const value = Number(quote.tradingValue ?? 0);
-  if (!Number.isFinite(value) || value <= 0) return "-";
-  const compact = new Intl.NumberFormat(quote.currency === "USD" ? "en-US" : "ko-KR", {
-    notation: "compact",
-    maximumFractionDigits: 2,
-  }).format(value);
-  return quote.currency === "USD" ? `${compact}` : `${compact}ì›`;
-}
-
-function returnRate(total: number, initial: number) {
-  return initial > 0 ? ((total - initial) / initial) * 100 : 0;
-}
-
-function positionReturnRate(position: Portfolio["positions"][number]) {
-  const costBasisKrw = (position.quantityMicros / 1_000_000) * (position.averagePriceKrwMicros / 1_000_000);
-  return costBasisKrw > 0 ? (Number(position.unrealizedPnlKrw ?? 0) / costBasisKrw) * 100 : 0;
-}
-
-function formatReturnRate(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return "-";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
-}
-
-function formatQuantity(quantityMicros: number) {
-  return (quantityMicros / 1_000_000).toLocaleString("ko-KR", { maximumFractionDigits: 6 });
-}
-
-function fillValueKrw(fill: Fill) {
-  return (fill.quantityMicros / 1_000_000) * (fill.priceMicros / 1_000_000) * (fill.fxRateMicros / 1_000_000);
-}
-
-function formatDateTime(value: number) {
-  return new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(value);
-}
-
-function formatJoinDate(value: number) {
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(value).replace(/\.\s?/g, ".").replace(/\.$/, "");
-}
-
-function displaySymbol(market: Market, symbol: string) {
-  return market === "US" ? symbol.replace(/\.(?:O|K|N|P|A)$/i, "") : symbol;
-}
-
-const usQuoteNameCache = new Map<string, string>();
-
-async function localizeUsQuoteInstrument(instrument: Instrument): Promise<Instrument> {
-  if (instrument.market !== "US" || /[ê°€-í£]/.test(instrument.name)) return instrument;
-  const cacheKey = `${instrument.symbol}:${instrument.exchange}`;
-  const cachedName = usQuoteNameCache.get(cacheKey);
-  if (cachedName) return { ...instrument, name: cachedName };
-  try {
-    const params = new URLSearchParams({ symbol: instrument.symbol, exchange: instrument.exchange, fallback: instrument.name });
-    const response = await fetch(`/api/instruments/display-name?${params.toString()}`);
-    if (!response.ok) return instrument;
-    const payload = await response.json() as { name?: string };
-    const name = typeof payload.name === "string" && payload.name.trim() ? payload.name.trim() : instrument.name;
-    if (/[ê°€-í£]/.test(name)) usQuoteNameCache.set(cacheKey, name);
-    return name === instrument.name ? instrument : { ...instrument, name };
-  } catch {
-    return instrument;
-  }
-}
-
-function displayRecentSymbols(value?: string) {
-  if (!value) return "ê±°ë˜ ì—†ìŒ";
-  return value.replace(/([A-Z0-9-]{1,12})\.(?:O|K|N|P|A)\b/gi, "$1");
-}
-
-function PinSlot({ index }: { index: number }) {
-  const context = useContext(OTPInputContext);
-  const slot = context?.slots[index];
-  return <div data-active={slot?.isActive} className="auth-pin-slot">{slot?.char ? "â€¢" : null}{slot?.hasFakeCaret && <i className="auth-pin-caret" />}</div>;
-}
-
-function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [nickname, setNickname] = useState("");
-  const [pin, setPin] = useState("");
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    if (busy) return;
-    setBusy(true);
-    setStatus("");
-    try {
-      const response = await fetch(`/api/auth/${mode}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ nickname, pin }),
-      });
-      const result = await response.json() as { user?: User; error?: string };
-      if (!response.ok || !result.user) return setStatus(result.error ?? "ë¡œê·¸ì¸í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-      onAuthenticated(result.user);
-    } catch {
-      setStatus("ì—°ê²°ì´ ì›í™œí•˜ì§€ ì•ŠìŠµë‹ˆë‹¤. ì ì‹œ í›„ ë‹¤ì‹œ ì‹œë„í•´ì£¼ì„¸ìš”.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <main className="auth-shell">
-      <section className="auth-card">
-        <div className="auth-brand"><span>MM</span><b>ë§ˆì¼“ë©”ì´íŠ¸</b></div>
-        <h1>{mode === "login" ? "ì¹œêµ¬ë“¤ê³¼ íˆ¬ìëŒ€íšŒ ì‹œì‘í•˜ê¸°" : "ìƒˆ ë‹‰ë„¤ì„ ë§Œë“¤ê¸°"}</h1>
-        <p>ChatGPT ê³„ì • ì—†ì´ ë‹‰ë„¤ì„ê³¼ ìˆ«ì ë¹„ë°€ë²ˆí˜¸ë¡œ ì´ìš©í•©ë‹ˆë‹¤.</p>
-        <div className="mode-switch auth-mode" role="tablist" aria-label="ë¡œê·¸ì¸ ë°©ì‹">
-          <button role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setStatus(""); }}>ë¡œê·¸ì¸</button>
-          <button role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setStatus(""); }}>ì²˜ìŒ ì´ìš©</button>
-        </div>
-        <label className="auth-field">ë‹‰ë„¤ì„
-          <Input value={nickname} onChange={event => setNickname(event.target.value)} maxLength={12} autoComplete="username" placeholder="í•œê¸€Â·ì˜ë¬¸Â·ìˆ«ì 2~12ì" />
-        </label>
-        <label className="auth-field">ìˆ«ì ë¹„ë°€ë²ˆí˜¸ 4ìë¦¬
-          <InputOTP maxLength={4} value={pin} onChange={value => setPin(value.replace(/\D/g, ""))} inputMode="numeric" autoComplete={mode === "login" ? "current-password" : "new-password"}>
-            <InputOTPGroup className="auth-pin">
-              {[0, 1, 2, 3].map(index => <PinSlot key={index} index={index} />)}
-            </InputOTPGroup>
-          </InputOTP>
-        </label>
-        {mode === "register" && <div className="auth-notice">ë‹‰ë„¤ì„ì€ ëŒ€íšŒ ìˆœìœ„í‘œì— í‘œì‹œë˜ë©° ì¤‘ë³µìœ¼ë¡œ ë§Œë“¤ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.</div>}
-        {status && <p className="auth-error" role="alert">{status}</p>}
-        <Button onClick={submit} disabled={busy || nickname.trim().length < 2 || pin.length !== 4} className="auth-submit">
-          {busy ? "í™•ì¸ ì¤‘..." : mode === "login" ? "ë¡œê·¸ì¸" : "ê°€ì…í•˜ê³  ì‹œì‘"}
-        </Button>
-        <small>ë¹„ë°€ë²ˆí˜¸ 5íšŒ ì˜¤ë¥˜ ì‹œ 10ë¶„ ë™ì•ˆ ë¡œê·¸ì¸ì´ ì œí•œë©ë‹ˆë‹¤.</small>
-      </section>
-    </main>
-  );
-}
-
-function SearchBox({ onSelect }: { onSelect: (instrument: Instrument) => void }) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Instrument[]>([]);
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    const value = query.trim();
-    if (!value) { setResults([]); setLoading(false); return; }
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      setLoading(true);
-      fetch(`/api/instruments/search?q=${encodeURIComponent(value)}`, { signal: controller.signal })
-        .then(async response => {
-          if (!response.ok) throw new Error("SEARCH_FAILED");
-          return await response.json() as { instruments?: Instrument[] };
-        })
-        .then(data => setResults(data.instruments ?? []))
-        .catch(() => !controller.signal.aborted && setResults([]))
-        .finally(() => !controller.signal.aborted && setLoading(false));
-    }, 180);
-    return () => { clearTimeout(timer); controller.abort(); };
-  }, [query]);
-  const choose = (instrument: Instrument) => { onSelect(instrument); setQuery(""); setResults([]); };
-  return (
-    <div className="search-wrap">
-      <Search aria-hidden="true" />
-      <input value={query} onChange={event => setQuery(event.target.value)} placeholder="ë„¤ì´ë²„ì¦ê¶Œì—ì„œ êµ­ë‚´Â·ë¯¸êµ­ì£¼ì‹Â·ì½”ì¸ ê²€ìƒ‰" aria-label="ì¢…ëª© ê²€ìƒ‰" />
-      {query && <button aria-label="ê²€ìƒ‰ì–´ ì§€ìš°ê¸°" onClick={() => setQuery("")}><X /></button>}
-      {query && (
-        <div className="search-results">
-          {loading ? <p>ì¢…ëª©ì„ ì°¾ëŠ” ì¤‘...</p> : results.length ? results.map(item => (
-            <button key={`${item.market}:${item.symbol}`} onClick={() => choose(item)}>
-              <span className="search-result-stock"><InstrumentLogo instrument={item} size="sm" /><span><strong>{item.name}</strong><small>{displaySymbol(item.market,item.symbol)} Â· {item.exchange}</small></span></span>
-              <b>{item.market === "KR" ? "êµ­ë‚´" : item.market === "US" ? "ë¯¸êµ­" : "ì½”ì¸"}</b>
-            </button>
-          )) : <p>ì¼ì¹˜í•˜ëŠ” ì¢…ëª©ì´ ì—†ìŠµë‹ˆë‹¤.</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function relativeTime(value:number) {
-  if (!Number.isFinite(value) || value <= 0) return "ë‚ ì§œ ë¯¸ìƒ";
-  const minutes = Math.max(0, Math.floor((Date.now()-value)/60_000));
-  if (minutes < 1) return "ë°©ê¸ˆ ì „";
-  if (minutes < 60) return `${minutes}ë¶„ ì „`;
-  if (minutes < 1_440) return `${Math.floor(minutes/60)}ì‹œê°„ ì „`;
-  return `${Math.floor(minutes/1_440)}ì¼ ì „`;
-}
-
-function formatWatchPrice(item:WatchlistItem) {
-  if (!item.priceKrwMicros) return "ì‹œì„¸ ëŒ€ê¸°";
-  const krw = item.priceKrwMicros/1_000_000;
-  if (item.currency === "USD") return `$${(krw/((item.fxRateMicros ?? 1_000_000)/1_000_000)).toLocaleString("en-US",{maximumFractionDigits:2})}`;
-  return `${Math.round(krw).toLocaleString("ko-KR")}ì›`;
-}
-
-function JoinDialog({ onChanged }: { onChanged: () => void }) {
-  const [mode, setMode] = useState<"join" | "create">("join");
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("ì¹œêµ¬ íˆ¬ìëŒ€íšŒ");
-  const [cash, setCash] = useState("100000000");
-  const [endsOn, setEndsOn] = useState(() => {
-    const date = new Date(Date.now() + 30 * 86_400_000);
-    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year:"numeric", month:"2-digit", day:"2-digit" }).format(date);
-  });
-  const [status, setStatus] = useState("");
-  const submit = async () => {
-    setStatus("ì²˜ë¦¬ ì¤‘...");
-    const now = Date.now();
-    const endsAt = Date.parse(`${endsOn}T23:59:59+09:00`);
-    if (mode === "create" && (!Number.isFinite(endsAt) || endsAt <= now)) return setStatus("ì˜¤ëŠ˜ ì´í›„ì˜ ì¢…ë£Œì¼ì„ ì„ íƒí•´ì£¼ì„¸ìš”.");
-    const payload = mode === "join" ? { inviteCode: code } : {
-      name, initialCashKrw: Number(cash), startsAt: now - 1_000, endsAt,
-    };
-    const response = await fetch(mode === "join" ? "/api/competitions/join" : "/api/competitions", {
-      method: "POST", headers: { "content-type":"application/json" }, body: JSON.stringify(payload),
-    });
-    const result = await response.json() as { error?: string; competition?: { inviteCode?: string } };
-    if (!response.ok) return setStatus(result.error ?? "ì²˜ë¦¬í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-    setStatus(mode === "join" ? "ëŒ€íšŒì— ì°¸ê°€í–ˆìŠµë‹ˆë‹¤." : `ëŒ€íšŒë¥¼ ë§Œë“¤ì—ˆìŠµë‹ˆë‹¤. ì´ˆëŒ€ì½”ë“œ: ${result.competition?.inviteCode}`);
-    onChanged();
-  };
-  return (
-    <Dialog>
-      <DialogTrigger asChild><Button className="contest-button"><Trophy /> ëŒ€íšŒ ì°¸ê°€</Button></DialogTrigger>
-      <DialogContent className="rounded-2xl border-0 p-0 sm:max-w-md">
-        <DialogHeader className="border-b px-6 py-5">
-          <DialogTitle>{mode === "join" ? "ì´ˆëŒ€ì½”ë“œë¡œ ì°¸ê°€" : "ìƒˆ ëŒ€íšŒ ë§Œë“¤ê¸°"}</DialogTitle>
-          <DialogDescription>ëª¨ë“  ì°¸ê°€ìê°€ ê°™ì€ ê¸ˆì•¡ìœ¼ë¡œ ì‹œì‘í•©ë‹ˆë‹¤.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 px-6 py-2">
-          <div className="mode-switch"><button className={mode === "join" ? "active" : ""} onClick={() => setMode("join")}>ëŒ€íšŒ ì°¸ê°€</button><button className={mode === "create" ? "active" : ""} onClick={() => setMode("create")}>ëŒ€íšŒ ê°œì„¤</button></div>
-          {mode === "join" ? <label className="field-label">ì´ˆëŒ€ì½”ë“œ<Input value={code} onChange={event => setCode(event.target.value.toUpperCase())} placeholder="MATE-XXXXXX" className="mt-2 uppercase" /></label> : <>
-            <label className="field-label">ëŒ€íšŒ ì´ë¦„<Input value={name} onChange={event => setName(event.target.value)} className="mt-2" maxLength={60} /></label>
-            <label className="field-label">ì‹œì‘ ìê¸ˆ<Input value={cash} onChange={event => setCash(event.target.value.replace(/\D/g, ""))} className="mt-2" inputMode="numeric" /></label>
-            <label className="field-label">ëŒ€íšŒ ì¢…ë£Œì¼<Input type="date" value={endsOn} onChange={event => setEndsOn(event.target.value)} className="mt-2" /><small>ì„ íƒí•œ ë‚ ì§œì˜ 23:59(KST)ì— ì¢…ë£Œë©ë‹ˆë‹¤.</small></label>
-          </>}
-        </div>
-        <DialogFooter className="px-6 pb-6"><div className="w-full">{status && <p className="mb-3 text-center text-xs text-muted-foreground" role="status">{status}</p>}<Button onClick={submit} className="w-full bg-[#19a974] hover:bg-[#14875d]">{mode === "join" ? "ì°¸ê°€í•˜ê¸°" : "ëŒ€íšŒ ë§Œë“¤ê¸°"}</Button></div></DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ParticipantActivityDialog({ row, onClose }: { row: LeaderboardRow | null; onClose: () => void }) {
-  const [activity, setActivity] = useState<ParticipantActivity | null>(null);
-  const [status, setStatus] = useState("");
-  useEffect(() => {
-    if (!row) { setActivity(null); setStatus(""); return; }
-    const controller = new AbortController();
-    setStatus("ê±°ë˜ë‚´ì—­ì„ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘...");
-    fetch(`/api/participants/activity?participantId=${encodeURIComponent(row.participantId)}`, { cache: "no-store", signal: controller.signal })
-      .then(async response => {
-        const result = await response.json() as ParticipantActivity & { error?: string };
-        if (!response.ok) throw new Error(result.error ?? "ê±°ë˜ë‚´ì—­ì„ ë¶ˆëŸ¬ì˜¤ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-        setActivity(result); setStatus("");
-      })
-      .catch(error => { if (!controller.signal.aborted) setStatus(error instanceof Error ? error.message : "ê±°ë˜ë‚´ì—­ì„ ë¶ˆëŸ¬ì˜¤ì§€ ëª»í–ˆìŠµë‹ˆë‹¤."); });
-    return () => controller.abort();
-  }, [row]);
-  return <Dialog open={Boolean(row)} onOpenChange={open => { if (!open) onClose(); }}><DialogContent className="activity-dialog sm:max-w-2xl">
-    <DialogHeader><DialogTitle>{row?.nickname}ë‹˜ì˜ íˆ¬ìí˜„í™©</DialogTitle><DialogDescription>{row ? `ì°¸ê°€ì¼ ${formatJoinDate(row.joinedAt)} Â· ` : ""}ê°™ì€ ëŒ€íšŒ ì°¸ê°€ìì—ê²Œ ê³µê°œë˜ëŠ” ë³´ìœ ì¢…ëª©ê³¼ ëª¨ì˜ì²´ê²° ë‚´ì—­ì…ë‹ˆë‹¤.</DialogDescription></DialogHeader>
-    {status ? <p className="activity-status">{status}</p> : <Tabs defaultValue="positions"><TabsList className="activity-tabs"><TabsTrigger value="positions">ë³´ìœ ì¢…ëª© {activity?.positions.length ?? 0}</TabsTrigger><TabsTrigger value="fills">ì²´ê²°ë‚´ì—­ {activity?.fills.length ?? 0}</TabsTrigger></TabsList>
-      <TabsContent value="positions" className="activity-list">{activity?.positions.length ? activity.positions.map(position => <div key={`${position.market}:${position.symbol}`}><span><b>{position.name}</b><small>{position.market} Â· {displaySymbol(position.market,position.symbol)} Â· {position.exchange}</small></span><span><b>{formatQuantity(position.quantityMicros)}</b><small className={(position.unrealizedPnlKrw ?? 0) >= 0 ? "up" : "down"}>{formatKrw(position.unrealizedPnlKrw ?? 0)} Â· {position.currentPriceKrwMicros ? formatReturnRate(positionReturnRate(position)) : "-"}</small></span></div>) : <p>í˜„ì¬ ë³´ìœ ì¢…ëª©ì´ ì—†ìŠµë‹ˆë‹¤.</p>}</TabsContent>
-      <TabsContent value="fills" className="activity-list">{activity?.fills.length ? activity.fills.map(fill => <div key={fill.id}><span><b>{fill.name}</b><small>{formatDateTime(fill.executedAt)}{fill.market==="KR"&&fill.venue?` Â· ${fill.venue}`:""} Â· {formatQuantity(fill.quantityMicros)}{fill.market === "CRYPTO" ? "ê°œ" : "ì£¼"}</small></span><span><b className={fill.side === "buy" ? "up" : "down"}>{fill.side === "buy" ? "ë§¤ìˆ˜" : "ë§¤ë„"}</b><small className={fill.returnRate == null ? "" : fill.returnRate >= 0 ? "up" : "down"}>{formatKrw(fillValueKrw(fill))} Â· {fill.returnRateKind === "realized" ? "ì‹¤í˜„" : "í˜„ì¬"} {formatReturnRate(fill.returnRate)}</small></span></div>) : <p>ì•„ì§ ì²´ê²°ë‚´ì—­ì´ ì—†ìŠµë‹ˆë‹¤.</p>}</TabsContent>
-    </Tabs>}
-  </DialogContent></Dialog>;
-}
-
-function AccountSettingsDialog({ user, onUpdated, onDeleted, compact = false }: { user: User; onUpdated: (user: User) => void; onDeleted: () => void; compact?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [nickname, setNickname] = useState(user.nickname);
-  const [currentPin, setCurrentPin] = useState("");
-  const [newPin, setNewPin] = useState("");
-  const [confirmPin, setConfirmPin] = useState("");
-  const [nicknameLocked, setNicknameLocked] = useState(false);
-  const [status, setStatus] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => { setNickname(user.nickname); }, [user.nickname]);
-  useEffect(() => {
-    if (!open) return;
-    let active = true;
-    setStatus("");
-    setCurrentPin("");
-    setNewPin("");
-    setConfirmPin("");
-    fetch("/api/auth/account", { cache: "no-store" })
-      .then(async response => {
-        const result = await response.json() as { user?: User; nicknameLocked?: boolean; error?: string };
-        if (!response.ok || !result.user) throw new Error(result.error ?? "ê³„ì • ì •ë³´ë¥¼ ë¶ˆëŸ¬ì˜¤ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-        if (!active) return;
-        setNickname(result.user.nickname);
-        setNicknameLocked(Boolean(result.nicknameLocked));
-        onUpdated(result.user);
-      })
-      .catch(error => active && setStatus(error instanceof Error ? error.message : "ê³„ì • ì •ë³´ë¥¼ ë¶ˆëŸ¬ì˜¤ì§€ ëª»í–ˆìŠµë‹ˆë‹¤."));
-    return () => { active = false; };
-  }, [open, onUpdated]);
-
-  const save = async () => {
-    if (busy) return;
-    if (newPin && newPin !== confirmPin) {
-      setStatus("ìƒˆ ë¹„ë°€ë²ˆí˜¸ í™•ì¸ì´ ì¼ì¹˜í•˜ì§€ ì•ŠìŠµë‹ˆë‹¤.");
-      return;
-    }
-    setBusy(true);
-    setStatus("");
-    try {
-      const response = await fetch("/api/auth/account", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          currentPin,
-          nickname,
-          ...(newPin ? { newPin } : {}),
-        }),
-      });
-      const result = await response.json() as { user?: User; nicknameLocked?: boolean; error?: string };
-      if (!response.ok || !result.user) {
-        if (result.nicknameLocked) setNicknameLocked(true);
-        setStatus(result.error ?? "ê³„ì • ì •ë³´ë¥¼ ë³€ê²½í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-        return;
-      }
-      onUpdated(result.user);
-      setNickname(result.user.nickname);
-      setNicknameLocked(Boolean(result.nicknameLocked));
-      setCurrentPin("");
-      setNewPin("");
-      setConfirmPin("");
-      setStatus("ê³„ì • ì •ë³´ë¥¼ ë³€ê²½í–ˆìŠµë‹ˆë‹¤.");
-    } catch {
-      setStatus("ì—°ê²°ì´ ì›í™œí•˜ì§€ ì•ŠìŠµë‹ˆë‹¤. ì ì‹œ í›„ ë‹¤ì‹œ ì‹œë„í•´ì£¼ì„¸ìš”.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const deleteAccount = async () => {
-    if (busy) return;
-    if (currentPin.length !== 4) {
-      setStatus("ê³„ì •ì„ ì‚­ì œí•˜ë ¤ë©´ í˜„ì¬ ë¹„ë°€ë²ˆí˜¸ 4ìë¦¬ë¥¼ ì…ë ¥í•´ì£¼ì„¸ìš”.");
-      return;
-    }
-    if (!window.confirm("ê³„ì •ì„ ì‚­ì œí•˜ë©´ ì°¸ê°€ ì¤‘ì¸ ëŒ€íšŒ ê¸°ë¡, ì£¼ë¬¸Â·ì²´ê²°Â·ë³´ìœ ë‚´ì—­, ê´€ì‹¬ì¢…ëª©ì´ ëª¨ë‘ ì‚­ì œë©ë‹ˆë‹¤. ë‚´ê°€ ê°œì„¤í•œ ëŒ€íšŒë„ í•¨ê»˜ ì‚­ì œë˜ë©° ë³µêµ¬í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤. ì •ë§ ê³„ì •ì„ ì‚­ì œí• ê¹Œìš”?")) return;
-    setBusy(true);
-    setStatus("");
-    try {
-      const response = await fetch("/api/auth/account", {
-        method: "DELETE",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ currentPin }),
-      });
-      const result = await response.json() as { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) {
-        setStatus(result.error ?? "ê³„ì •ì„ ì‚­ì œí•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-        return;
-      }
-      setOpen(false);
-      onDeleted();
-    } catch {
-      setStatus("ì—°ê²°ì´ ì›í™œí•˜ì§€ ì•ŠìŠµë‹ˆë‹¤. ì ì‹œ í›„ ë‹¤ì‹œ ì‹œë„í•´ì£¼ì„¸ìš”.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const nicknameChanged = nickname.normalize("NFKC").trim() !== user.nickname;
-  const pinChanged = newPin.length > 0;
-  const canSave = currentPin.length === 4 && (nicknameChanged || pinChanged) && (!pinChanged || (newPin.length === 4 && confirmPin === newPin));
-
-  return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger asChild><button type="button" className={`account-settings-trigger${compact ? " compact" : ""}`} aria-label="ê³„ì • ì„¤ì •">ê³„ì • ì„¤ì •</button></DialogTrigger>
-    <DialogContent className="account-settings-dialog sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle>ê³„ì • ì„¤ì •</DialogTitle>
-        <DialogDescription>ë‹‰ë„¤ì„ê³¼ ìˆ«ì ë¹„ë°€ë²ˆí˜¸ë¥¼ ë³€ê²½í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</DialogDescription>
-      </DialogHeader>
-      <div className="account-settings-fields">
-        <label>ë‹‰ë„¤ì„
-          <Input value={nickname} onChange={event => setNickname(event.target.value)} maxLength={12} disabled={nicknameLocked} autoComplete="username" />
-        </label>
-        {nicknameLocked && <p className="account-settings-lock">ì°¸ê°€ ì¤‘ì¸ ëŒ€íšŒê°€ ìˆì–´ ë‹‰ë„¤ì„ì„ ë³€ê²½í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤. ëŒ€íšŒì—ì„œ ë‚˜ê°€ê±°ë‚˜ ëŒ€íšŒê°€ ì¢…ë£Œëœ ë’¤ ë³€ê²½í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</p>}
-        <div className="account-settings-divider" />
-        <label>í˜„ì¬ ë¹„ë°€ë²ˆí˜¸
-          <Input value={currentPin} onChange={event => setCurrentPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" autoComplete="current-password" placeholder="ìˆ«ì 4ìë¦¬" />
-        </label>
-        <label>ìƒˆ ë¹„ë°€ë²ˆí˜¸ <small>ë³€ê²½í•˜ì§€ ì•Šìœ¼ë ¤ë©´ ë¹„ì›Œë‘ì„¸ìš”.</small>
-          <Input value={newPin} onChange={event => setNewPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" autoComplete="new-password" placeholder="ìƒˆ ìˆ«ì 4ìë¦¬" />
-        </label>
-        <label>ìƒˆ ë¹„ë°€ë²ˆí˜¸ í™•ì¸
-          <Input value={confirmPin} onChange={event => setConfirmPin(event.target.value.replace(/\D/g, "").slice(0, 4))} type="password" inputMode="numeric" autoComplete="new-password" placeholder="ìƒˆ ë¹„ë°€ë²ˆí˜¸ ë‹¤ì‹œ ì…ë ¥" disabled={!newPin} />
-        </label>
-        {status && <p className="account-settings-status">{status}</p>}
-      </div>
-      <DialogFooter><Button onClick={save} disabled={busy || !canSave}>{busy ? "ì²˜ë¦¬ ì¤‘..." : "ë³€ê²½ì‚¬í•­ ì €ì¥"}</Button></DialogFooter>
-      {user.role !== "admin" && <div className="account-delete-zone">
-        <div><strong>ê³„ì • íƒˆí‡´</strong><p>ê³„ì •ê³¼ ëª¨ë“  ëª¨ì˜íˆ¬ì ë°ì´í„°ê°€ ì˜êµ¬ ì‚­ì œë©ë‹ˆë‹¤. ì§ì ‘ ê°œì„¤í•œ ëŒ€íšŒë„ í•¨ê»˜ ì‚­ì œë©ë‹ˆë‹¤. ê³„ì • íƒˆí‡´ë¥¼ ì§„í–‰í•˜ë ¤ë©´ ìœ„ì˜ í˜„ì¬ ë¹„ë°€ë²ˆí˜¸ 4ìë¦¬ë¥¼ ì…ë ¥í•´ì•¼ í•©ë‹ˆë‹¤.</p></div>
-        <button type="button" onClick={deleteAccount} disabled={busy || currentPin.length !== 4}>ê³„ì • ì‚­ì œ</button>
-      </div>}
-    </DialogContent>
-  </Dialog>;
-}
-
-function AdminDialog() {
-  const [open, setOpen] = useState(false);
-  const [data, setData] = useState<AdminData | null>(null);
-  const [status, setStatus] = useState("");
-  const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async response => {
-    const result = await response.json() as AdminData & { error?: string };
-    if (!response.ok) throw new Error(result.error ?? "ê´€ë¦¬ ë°ì´í„°ë¥¼ ë¶ˆëŸ¬ì˜¤ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-    setData(result);
-  }).catch(error => setStatus(error instanceof Error ? error.message : "ì˜¤ë¥˜ê°€ ë°œìƒí–ˆìŠµë‹ˆë‹¤.")), []);
-  useEffect(() => { if (open) void load(); }, [open, load]);
-  const action = async (payload: Record<string, unknown>, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return;
-    setStatus("ì²˜ë¦¬ ì¤‘...");
-    const response = await fetch("/api/admin/actions", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(payload) });
-    const result = await response.json() as { error?:string };
-    setStatus(response.ok ? "ì ìš©í–ˆìŠµë‹ˆë‹¤." : result.error ?? "ì²˜ë¦¬í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");
-    if (response.ok) void load();
-  };
-  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="admin-button"><ShieldCheck /> ê´€ë¦¬ì</Button></DialogTrigger><DialogContent className="admin-dialog sm:max-w-4xl">
-    <DialogHeader><DialogTitle>ì „ì²´ ê´€ë¦¬ì ì„¼í„°</DialogTitle><DialogDescription>ëŒ€íšŒì™€ íšŒì›ì„ ê´€ë¦¬í•©ë‹ˆë‹¤.</DialogDescription></DialogHeader>
-    {status && <p className="admin-status">{status}</p>}
-    <div className="admin-health"><span>í™œì„± ì„¸ì…˜<b>{data?.health.activeSessions ?? 0}</b></span><span>ëŒ€ê¸° ì£¼ë¬¸<b>{data?.health.pendingOrders ?? 0}</b></span><span>ê±°ì ˆ ì£¼ë¬¸<b>{data?.health.rejectedOrders ?? 0}</b></span><span>ìµœê·¼ ì‹œì„¸<b>{data?.health.latestQuoteAt ? relativeTime(data.health.latestQuoteAt) : "ì—†ìŒ"}</b></span></div>
-    <Tabs defaultValue="competitions"><TabsList className="admin-tabs"><TabsTrigger value="competitions">ëŒ€íšŒ</TabsTrigger><TabsTrigger value="users">íšŒì›</TabsTrigger><TabsTrigger value="audit">ê°ì‚¬ ê¸°ë¡</TabsTrigger></TabsList>
-      <TabsContent value="competitions" className="admin-list">{data?.competitions.map(item => <div key={item.id}><span><b>{item.name}</b><small>{item.ownerNickname} Â· {item.participantCount}ëª… Â· ì²´ê²° {item.fillCount}ê±´ Â· {item.inviteCode}</small></span><span><button onClick={() => action({action:"competition_status",competitionId:item.id,status:item.status === "active" ? "ended" : "active"})}>{item.status === "active" ? "ì¢…ë£Œ" : "ì¬ê°œ"}</button><button className="danger" onClick={() => action({action:"delete_competition",competitionId:item.id}, `${item.name} ëŒ€íšŒì™€ ëª¨ë“  ëª¨ì˜íˆ¬ì ê¸°ë¡ì„ ì‚­ì œí• ê¹Œìš”?`)}>ì‚­ì œ</button></span><div className="admin-members">{data.participants.filter(member => member.competitionId === item.id).map(member => <span key={member.id}>{member.nickname}{member.isOwner ? " (ëŒ€íšŒì¥)" : <button onClick={() => action({action:"remove_member",participantId:member.id}, `${member.nickname}ë‹˜ì„ ëŒ€íšŒì—ì„œ ë‚´ë³´ë‚¼ê¹Œìš”?`)}>ë‚´ë³´ë‚´ê¸°</button>}</span>)}</div></div>)}</TabsContent>
-      <TabsContent value="users" className="admin-list">{data?.users.map(item => <div key={item.id}><span><b>{item.nickname}{item.role === "admin" ? " Â· ê´€ë¦¬ì" : ""}</b><small>ëŒ€íšŒ {item.competitionCount}ê°œ Â· ì²´ê²° {item.fillCount}ê±´</small></span><span><button disabled={item.role === "admin"} onClick={() => action({action:"user_status",userId:item.id,active:!Boolean(item.isActive)})}>{item.isActive ? "ì´ìš© ì •ì§€" : "í™œì„±í™”"}</button><button className="danger" disabled={item.role === "admin"} onClick={() => action({action:"delete_user",userId:item.id}, `${item.nickname} ê³„ì •ê³¼ ëª¨ë“  ëŒ€íšŒÂ·íˆ¬ì ê¸°ë¡ì„ ì™„ì „íˆ ì‚­ì œí• ê¹Œìš”? ì´ ì‘ì—…ì€ ë˜ëŒë¦´ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.`)}><Trash2 /> ì‚­ì œ</button></span></div>)}</TabsContent>
-      <TabsContent value="audit" className="admin-audit">{data?.audit.map(item => <div key={item.id}><span><b>{item.action}</b><small>{item.actorNickname} Â· {item.targetType}{item.targetId ? ` Â· ${item.targetId.slice(0,8)}` : ""}</small></span><time>{formatDateTime(item.createdAt)}</time></div>)}</TabsContent>
-    </Tabs>
-  </DialogContent></Dialog>;
-}
-
-function OrderPanel({ quote, participantId, availableCashKrw, heldQuantityMicros, session, domesticVenue, onDomesticVenueChange, onFilled }: { quote: Quote; participantId: string | null; availableCashKrw: number; heldQuantityMicros: number; session: MarketSession; domesticVenue: DomesticVenue; onDomesticVenueChange: (venue: DomesticVenue) => void; onFilled: () => void }) {
-  const [quantity, setQuantity] = useState("1");
-  const [orderType, setOrderType] = useState<"market" | "limit">("market");
-  const [limitPrice, setLimitPrice] = useState("");
-  const [status, setStatus] = useState("");
-  const [orders, setOrders] = useState<Order[]>([]);
-  const effectivePrice = orderType === "limit" ? Number(limitPrice || 0) : quote.price;
-  const estimatedKrw = effectivePrice * quote.exchangeRate * Number(quantity || 0);
-  const changeQuantity = (value: string) => {
-    if (quote.market !== "CRYPTO") return setQuantity(value.replace(/\D/g, ""));
-    const normalized = value.replace(/[^\d.]/g, "").replace(/(\..*)\./g, "$1");
-    const [whole, decimal = ""] = normalized.split(".");
-    setQuantity(normalized.includes(".") ? `${whole}.${decimal.slice(0, 6)}` : whole);
-  };
-  const loadOrders = useCallback(() => {
-    if (!participantId) return setOrders([]);
-    fetch(`/api/orders?participantId=${encodeURIComponent(participantId)}`, { cache:"no-store" }).then(async response => response.ok ? await response.json() as {orders:Order[]} : null).then(result => setOrders(result?.orders ?? [])).catch(()=>undefined);
-  }, [participantId]);
-  useEffect(() => { const timer = setTimeout(loadOrders,0); return()=>clearTimeout(timer); }, [loadOrders,quote.price]);
-  useEffect(() => { const timer=setTimeout(()=>{if(quote.price)setLimitPrice(String(quote.price));},0);return()=>clearTimeout(timer);},[quote.market,quote.symbol,quote.price]);
-  const sizeByPercent=(side:"buy"|"sell",percent:number)=>{if(!quote.price)return;const raw=side==="buy"?availableCashKrw*percent/(effectivePrice*quote.exchangeRate):heldQuantityMicros/1_000_000*percent;const sized=quote.market==="CRYPTO"?Math.floor(raw*1_000_000)/1_000_000:Math.floor(raw);setQuantity(String(Math.max(0,sized)));};
-  const submit=async(side:"buy"|"sell")=>{if(!participantId)return setStatus("ë¨¼ì € ëŒ€íšŒë¥¼ ë§Œë“¤ê±°ë‚˜ ì°¸ê°€í•´ì£¼ì„¸ìš”.");if(!quote.price)return setStatus("ì‹¤ì‹œê°„ ì‹œì„¸ë¥¼ í™•ì¸í•œ ë’¤ ì£¼ë¬¸í•´ì£¼ì„¸ìš”.");setStatus("ë„¤ì´ë²„ì¦ê¶Œ ìµœì‹  ì‹œì„¸ë¥¼ í™•ì¸í•˜ê³  ìˆìŠµë‹ˆë‹¤...");const response=await fetch("/api/orders",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({participantId,clientOrderId:crypto.randomUUID(),market:quote.market,symbol:quote.symbol,name:quote.name,exchange:quote.exchange,venue:quote.market==="KR"?domesticVenue:undefined,side,orderType,quantity:Number(quantity),limitPrice:orderType==="limit"?Number(limitPrice):undefined})});const result=await response.json() as {error?:string;order?:{status?:string}};setStatus(response.ok?(result.order?.status==="pending"?"ì§€ì •ê°€ ëŒ€ê¸° ì£¼ë¬¸ì„ ì ‘ìˆ˜í–ˆìŠµë‹ˆë‹¤.":"ëª¨ì˜ì£¼ë¬¸ì´ ë„¤ì´ë²„ì¦ê¶Œ ìµœì‹  ì‹œì„¸ë¡œ ì²´ê²°ë˜ì—ˆìŠµë‹ˆë‹¤."):result.error??"ì£¼ë¬¸ì„ ì²˜ë¦¬í•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");if(response.ok){onFilled();loadOrders();}};
-  const cancel=async(id:string)=>{const response=await fetch(`/api/orders?orderId=${encodeURIComponent(id)}`,{method:"DELETE"});setStatus(response.ok?"ëŒ€ê¸° ì£¼ë¬¸ì„ ì·¨ì†Œí–ˆìŠµë‹ˆë‹¤.":"ì£¼ë¬¸ì„ ì·¨ì†Œí•˜ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");loadOrders();};
-  const sessionClassName = session.isOpen ? "session open" : "session closed";
-  return <section className="panel order-panel"><Tabs defaultValue="buy"><TabsList variant="line" className="order-tabs"><TabsTrigger value="buy" className="buy-tab">ë§¤ìˆ˜</TabsTrigger><TabsTrigger value="sell" className="sell-tab">ë§¤ë„</TabsTrigger></TabsList>{(["buy","sell"] as const).map(side=><TabsContent value={side} key={side} className="order-form"><div className="available"><span>{side==="buy"?"ì£¼ë¬¸ ê°€ëŠ¥ í˜„ê¸ˆ":"ë³´ìœ  ìˆ˜ëŸ‰"}</span><strong>{side==="buy"?formatKrw(availableCashKrw):`${formatQuantity(heldQuantityMicros)}${quote.market==="CRYPTO"?"ê°œ":"ì£¼"}`}</strong></div>{quote.market==="KR"&&<div className="order-venue-selector"><span>ê±°ë˜ì†Œ</span><div><button type="button" className={domesticVenue==="KRX"?"active":""} onClick={()=>onDomesticVenueChange("KRX")}>KRX</button><button type="button" className={domesticVenue==="NXT"?"active":""} disabled={Boolean(quote.availableVenues)&&!quote.availableVenues?.includes("NXT")} onClick={()=>onDomesticVenueChange("NXT")}>NXT</button></div></div>}<div className={`${sessionClassName} order-session`}><b>{session.isOpen?"â—":"â—‹"} {session.label}</b><small>{session.notice}</small></div><label>ì£¼ë¬¸ ìœ í˜•<select aria-label="ì£¼ë¬¸ ìœ í˜•" value={orderType} onChange={event=>setOrderType(event.target.value as "market"|"limit")}><option value="market">ì‹œì¥ê°€</option><option value="limit">ì§€ì •ê°€</option></select></label>{orderType==="limit"&&<label>ì§€ì • ê°€ê²©<div className="number-input"><input value={limitPrice} onChange={event=>setLimitPrice(event.target.value.replace(/[^\d.]/g,""))} inputMode="decimal"/><span>{quote.currency}</span></div></label>}<label>ìˆ˜ëŸ‰<div className="number-input"><input value={quantity} onChange={event=>changeQuantity(event.target.value)} inputMode={quote.market==="CRYPTO"?"decimal":"numeric"}/><span>{quote.market==="CRYPTO"?"ê°œ":"ì£¼"}</span></div></label><div className="size-buttons">{[[.25,"25%"],[.5,"50%"],[.75,"75%"],[1,"ìµœëŒ€"]].map(([percent,label])=><button key={String(label)} onClick={()=>sizeByPercent(side,Number(percent))}>{label}</button>)}</div>{quote.currency==="USD"&&<div className="available"><span>ì ìš© í™˜ìœ¨</span><strong>{quote.exchangeRate>1?`${quote.exchangeRate.toLocaleString("ko-KR")}ì›/USD`:"ì‹œì„¸ ì¡°íšŒ ì‹œ ì ìš©"}</strong></div>}<div className="order-total"><span>ì˜ˆìƒ ì£¼ë¬¸ê¸ˆì•¡</span><strong>{formatKrw(estimatedKrw)}</strong></div><Button disabled={!session.isOpen&&quote.market!=="CRYPTO"} onClick={()=>submit(side)} className={side==="buy"?"order-buy":"order-sell"}>{session.isOpen||quote.market==="CRYPTO"?`${quote.name} ${side==="buy"?"ë§¤ìˆ˜":"ë§¤ë„"}`:"ì¥ ìš´ì˜ì‹œê°„ì´ ì•„ë‹™ë‹ˆë‹¤"}</Button>{status&&<p className="order-status" role="status">{status}</p>}<p className="simulation-note">ì‹¤ì œ ì¦ê¶Œ ì£¼ë¬¸ì€ ì „ì†¡ë˜ì§€ ì•ŠìŠµë‹ˆë‹¤.</p>{orders.some(order=>order.status==="pending")&&<div className="pending-orders"><b>ëŒ€ê¸° ì£¼ë¬¸</b>{orders.filter(order=>order.status==="pending").slice(0,5).map(order=><div key={order.id}><span>{order.name}{order.venue?` Â· ${order.venue}`:""} Â· {order.side==="buy"?"ë§¤ìˆ˜":"ë§¤ë„"} {formatQuantity(order.quantityMicros)} @ {((order.limitPriceMicros??0)/1_000_000).toLocaleString()}</span><button onClick={()=>cancel(order.id)}>ì·¨ì†Œ</button></div>)}</div>}</TabsContent>)}</Tabs></section>;
-}
-
-const NAVER_STOCK_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/stock/";
-const NAVER_CRYPTO_LOGO_BASE="https://ssl.pstatic.net/imgstock/fn/real/logo/crypto/";
-const CRYPTO_LOGO_PRIMARY_BASE="https://static.upbit.com/logos/";
-function normalizeNaverLogoCode(symbol:string){let clean=String(symbol??"").trim().replaceAll("\\","/");const tail=clean.split("/").filter(Boolean).pop()??"";clean=tail.replace(/\.svg$/i,"").replace(/^(?:Stock)+/i,"");return clean.replace(/[^A-Za-z0-9._-]/g,"");}
-function normalizeCryptoLogoTicker(symbol:string){return String(symbol??"").trim().toUpperCase().replace(/^KRW[-_]/,"").replace(/_KRW_(?:upbit|bithumb)$/i,"").replace(/[^A-Z0-9]/g,"");}
-function instrumentLogoCandidates(instrument:Pick<Instrument,"market"|"symbol"|"exchange">){if(instrument.market==="CRYPTO"){const ticker=normalizeCryptoLogoTicker(instrument.symbol);if(!ticker)return[];return[`${CRYPTO_LOGO_PRIMARY_BASE}${encodeURIComponent(ticker)}.png`,`${NAVER_CRYPTO_LOGO_BASE}Crypto${ticker}.svg`];}const code=normalizeNaverLogoCode(instrument.symbol);if(!code)return[];if(instrument.market==="US"){const resolver=`/api/instruments/logo?symbol=${encodeURIComponent(code)}`;return[...new Set([resolver,`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`])];}return[`${NAVER_STOCK_LOGO_BASE}Stock${code}.svg`];}
-// Observed Naver search results group fallback colors into six recurring hues.
-const INSTRUMENT_FALLBACK_COLORS=["#cf6530","#dc9a24","#50896a","#4d75a8","#8e4ca4","#be3b7c"] as const;
-function instrumentFallbackSeed(instrument:Pick<Instrument,"market"|"symbol"|"name">){const code=normalizeNaverLogoCode(instrument.symbol).replace(/\.(?:O|K|N|P|A)$/i,"").normalize("NFKC").trim();return code||instrument.name.normalize("NFKC").trim();}
-function instrumentFallbackColor(instrument:Pick<Instrument,"market"|"symbol"|"name">){const seed=instrumentFallbackSeed(instrument);let hash=0;for(let i=0;i<seed.length;i+=1)hash=(Math.imul(hash,31)+seed.charCodeAt(i))|0;const index=((hash%INSTRUMENT_FALLBACK_COLORS.length)+INSTRUMENT_FALLBACK_COLORS.length)%INSTRUMENT_FALLBACK_COLORS.length;return INSTRUMENT_FALLBACK_COLORS[index];}
-function instrumentFallbackLetter(name:string,symbol:string){const clean=(name||symbol||"?").trim();const first=Array.from(clean)[0]??Array.from(symbol.trim())[0]??"?";return /[A-Za-z]/.test(first)?first.toUpperCase():first;}
-function InstrumentLogo({instrument,size="md"}:{instrument:Pick<Instrument,"market"|"symbol"|"exchange"|"name">;size?:"sm"|"md"|"lg"}){const[attempt,setAttempt]=useState(0);useEffect(()=>setAttempt(0),[instrument.market,instrument.symbol]);const candidates=instrumentLogoCandidates(instrument);const src=candidates[attempt];const failed=!src;return <span className={`instrument-logo ${size}${failed?" fallback":""}`} style={failed?{backgroundColor:instrumentFallbackColor(instrument)}:undefined}>{failed?<span aria-hidden="true">{instrumentFallbackLetter(instrument.name,instrument.symbol)}</span>:<img src={src} alt={`${instrument.name} ë¡œê³ `} onError={()=>setAttempt(value=>value+1)}/>}</span>;}
-function dDay(endsAt:number){const days=Math.ceil((endsAt-Date.now())/86_400_000);if(days<0)return"ì¢…ë£Œ";if(days===0)return"D-DAY";return`D-${days}`;}
-function formatEndDate(value:number){return new Intl.DateTimeFormat("ko-KR",{timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"}).format(value);}
-function LiveMarketStrip({quotes,onPick}:{quotes:MarketIndexQuote[];onPick:(id:string,market:Market)=>void}){
-  const expected=[
-    {id:"KOSPI",name:"ì½”ìŠ¤í”¼",market:"KR" as Market},
-    {id:"KOSDAQ",name:"ì½”ìŠ¤ë‹¥",market:"KR" as Market},
-    {id:"SPX",name:"S&P 500",market:"US" as Market},
-    {id:"COMP",name:"ë‚˜ìŠ¤ë‹¥ ì¢…í•©",market:"US" as Market},
-    {id:"BTC",name:"ë¹„íŠ¸ì½”ì¸",market:"CRYPTO" as Market},
-    {id:"USDKRW",name:"ì›/ë‹¬ëŸ¬ í™˜ìœ¨",market:"US" as Market},
-  ];
-  return <div className="live-market-strip">{expected.map(meta=>{
-    const item=quotes.find(q=>q.id===meta.id);
-    const isFx=meta.id==="USDKRW";
-    return <button key={meta.id} data-market-strip-usdkrw={isFx?"1":undefined} onClick={()=>onPick(meta.id,meta.market)}>
-      <span>{meta.name}<small data-market-strip-usdkrw-source={isFx?"1":undefined}>{item?"ë„¤ì´ë²„ì¦ê¶Œ":"ì‹œì„¸ í™•ì¸ ì¤‘"}</small></span>
-      <strong data-market-strip-usdkrw-price={isFx?"1":undefined}>{item?`${item.price.toLocaleString("ko-KR",{minimumFractionDigits:isFx?2:0,maximumFractionDigits:2})}${item.unit}`:"-"}</strong>
-      <em data-market-strip-usdkrw-rate={isFx?"1":undefined} className={(item?.rate??0)>=0?"up":"down"}>{item?`${item.rate>=0?"+":""}${item.rate.toFixed(2)}%`:""}</em>
-    </button>;
-  })}</div>;
-}
-function NewsPanel({items,title,loading=false,usSplit=false}:{items:NewsItem[];title:string;loading?:boolean;usSplit?:boolean}){
-  const[newsTab,setNewsTab]=useState<"LOCAL"|"WORLD">("WORLD");
-  const filtered=usSplit?items.filter(item=>item.kind===newsTab):items;
-  const sorted=[...filtered].sort((a,b)=>b.publishedAt-a.publishedAt);
-  return <section className="np-panel np-news">
-    <div className="np-section-title"><h2>{title}</h2><span>{sorted.length?`${Math.min(sorted.length,10)}ê±´ Â· ìµœì‹ ìˆœ`:""}</span></div>
-    {usSplit&&<div className="us-news-tabs" role="tablist" aria-label="ë¯¸êµ­ì£¼ì‹ ë‰´ìŠ¤ êµ¬ë¶„">
-      <button type="button" role="tab" aria-selected={newsTab==="WORLD"} className={newsTab==="WORLD"?"active":""} onClick={()=>setNewsTab("WORLD")}>í•´ì™¸ ë‰´ìŠ¤</button>
-      <button type="button" role="tab" aria-selected={newsTab==="LOCAL"} className={newsTab==="LOCAL"?"active":""} onClick={()=>setNewsTab("LOCAL")}>êµ­ë‚´ ë‰´ìŠ¤</button>
-    </div>}
-    {sorted.length?sorted.slice(0,10).map(item=><article key={`${item.kind??"NEWS"}:${item.link}:${item.publishedAt}`}><a href={item.link} target="_blank" rel="noreferrer">{item.title}</a><span>{item.source} Â· {relativeTime(item.publishedAt)}</span></article>):<p className="np-empty">{loading?"ë„¤ì´ë²„ì¦ê¶Œ ë‰´ìŠ¤ë¥¼ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘ì…ë‹ˆë‹¤.":usSplit?(newsTab==="LOCAL"?"í‘œì‹œí•  êµ­ë‚´ ë‰´ìŠ¤ê°€ ì—†ìŠµë‹ˆë‹¤.":"í‘œì‹œí•  í•´ì™¸ ë‰´ìŠ¤ê°€ ì—†ìŠµë‹ˆë‹¤."):"í‘œì‹œí•  ë‰´ìŠ¤ê°€ ì—†ìŠµë‹ˆë‹¤."}</p>}
-  </section>;
-}
-function formatPopularPrice(item:PopularStock){
-  if(!Number.isFinite(item.price)||item.price<=0)return"-";
-  return item.currency==="USD"
-    ? `$${item.price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`
-    : item.price.toLocaleString("ko-KR",{maximumFractionDigits:0});
-}
-function PopularStocksPanel({domestic,us,onSelect}:{domestic:PopularStock[];us:PopularStock[];onSelect:(item:PopularStock)=>void}){
-  const[open,setOpen]=useState(false);
-  const[tab,setTab]=useState<"KR"|"US">("KR");
-  const[featuredIndex,setFeaturedIndex]=useState(0);
-  const featuredRows=domestic.slice(0,10);
-  const featured=featuredRows[featuredIndex]??featuredRows[0]??null;
-  const rows=tab==="KR"?domestic:us;
-  const choose=(item:PopularStock)=>{setOpen(false);onSelect(item);};
-
-  useEffect(()=>{
-    if(featuredIndex<featuredRows.length)return;
-    setFeaturedIndex(0);
-  },[featuredIndex,featuredRows.length]);
-
-  useEffect(()=>{
-    if(open||featuredRows.length<2)return;
-    const timer=setInterval(()=>setFeaturedIndex(index=>(index+1)%featuredRows.length),3000);
-    return()=>clearInterval(timer);
-  },[open,featuredRows.length]);
-
-  useEffect(()=>{
-    if(!open)return;
-    const previous=document.body.style.overflow;
-    const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape")setOpen(false);};
-    document.body.style.overflow="hidden";
-    window.addEventListener("keydown",onKey);
-    return()=>{document.body.style.overflow=previous;window.removeEventListener("keydown",onKey);};
-  },[open]);
-
-  return <><section className="np-popular-stocks">
-    <div className="np-popular-compact">
-      <button type="button" className="np-popular-primary" onClick={()=>featured&&onSelect(featured)} disabled={!featured} aria-label={featured?`${featured.rank}ìœ„ ${featured.name} ì‹œì„¸ ë³´ê¸°`:"ì¸ê¸° ì¢…ëª© ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘"}>
-        <span className="np-popular-badge">ì¸ê¸° ì¢…ëª©</span>
-        {featured?<><b className="np-popular-rank" key={`rank:${featured.market}:${featured.symbol}`}>{featured.rank}</b><strong className="np-popular-name" key={`name:${featured.market}:${featured.symbol}`}>{featured.name}</strong><em className={`np-popular-rate ${featured.changeRate>=0?"up":"down"}`} key={`rate:${featured.market}:${featured.symbol}`}>{featured.changeRate>=0?"+":""}{featured.changeRate.toFixed(2)}%</em></>:<><b>1</b><strong>ì¸ê¸° ì¢…ëª© ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘</strong><em>-</em></>}
-      </button>
-      <button type="button" className="np-popular-expand" onClick={()=>setOpen(true)} aria-label="ì¸ê¸° ì¢…ëª© 1ìœ„ë¶€í„° 10ìœ„ê¹Œì§€ ë³´ê¸°"><ChevronDown aria-hidden="true"/></button>
-    </div>
-  </section>
-  {open&&<div className="popular-stocks-layer" role="presentation" onMouseDown={()=>setOpen(false)}>
-    <section className="popular-stocks-sheet" role="dialog" aria-modal="true" aria-labelledby="popular-stocks-title" onMouseDown={event=>event.stopPropagation()}>
-      <div className="popular-stocks-sheet-head">
-        <h2 id="popular-stocks-title">ì¸ê¸° ì¢…ëª©</h2>
-        <button type="button" className="popular-stocks-close" onClick={()=>setOpen(false)} aria-label="ì¸ê¸° ì¢…ëª© ë‹«ê¸°"><X/></button>
-      </div>
-      <Tabs value={tab} onValueChange={value=>setTab(value as "KR"|"US")} className="popular-stocks-tabs">
-        <TabsList className="popular-stocks-tab-list">
-          <TabsTrigger value="KR">êµ­ë‚´</TabsTrigger>
-          <TabsTrigger value="US">ë¯¸êµ­</TabsTrigger>
-        </TabsList>
-        <TabsContent value={tab} className="popular-stocks-list">
-          {rows.length?rows.slice(0,10).map(item=><button type="button" key={`${item.market}:${item.symbol}`} onClick={()=>choose(item)}>
-            <b className="popular-stock-rank">{item.rank}</b>
-            <span className="popular-stock-logo"><InstrumentLogo instrument={item} size="md"/><i aria-hidden="true"><Flame/></i></span>
-            <span className="popular-stock-name"><strong>{item.name}</strong><small>{displaySymbol(item.market,item.symbol)}</small></span>
-            <span className="popular-stock-price"><strong>{formatPopularPrice(item)}</strong><em className={item.changeRate>=0?"up":"down"}>{item.change>=0?"+":""}{item.change.toLocaleString(item.currency==="USD"?"en-US":"ko-KR",{maximumFractionDigits:item.currency==="USD"?2:0})} ({Math.abs(item.changeRate).toFixed(2)}%)</em></span>
-          </button>):<p className="np-empty">{tab==="KR"?"êµ­ë‚´ ì¸ê¸° ì¢…ëª©ì„ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘ì…ë‹ˆë‹¤.":"ë¯¸êµ­ ì¸ê¸° ì¢…ëª©ì„ ë¶ˆëŸ¬ì˜¤ëŠ” ì¤‘ì…ë‹ˆë‹¤."}</p>}
-        </TabsContent>
-      </Tabs>
-    </section>
-  </div>}</>;
-}
-
-function RankingPanel({rows,participantId,onSelect}:{rows:LeaderboardRow[];participantId:string|null;onSelect:(row:LeaderboardRow)=>void}){return <section className="np-panel np-ranking"><div className="np-section-title"><h2>ì‹¤ì‹œê°„ ëŒ€íšŒ ìˆœìœ„</h2><span>{rows.length}ëª…</span></div><div className="ranking-head"><span>ìˆœìœ„Â·ì°¸ê°€ì</span><span>ì´ìì‚°</span><span>ìˆ˜ìµë¥ </span></div>{rows.length?rows.map(row=>{const value=returnRate(row.totalAssetKrw,row.initialCashKrw);const ranked=row.rank!==null;return <button className={row.participantId===participantId?"mine":""} onClick={()=>onSelect(row)} key={row.participantId}><b>{ranked?row.rank:""}</b><span><strong>{row.nickname}</strong><small>{displayRecentSymbols(row.recentSymbols)}</small></span><span>{formatKrw(row.totalAssetKrw)}</span><em className={value>=0?"up":"down"}>{value>=0?"+":""}{value.toFixed(2)}%</em><ChevronRight/></button>}):<p className="np-empty">ëŒ€íšŒë¥¼ ë§Œë“¤ê±°ë‚˜ ì´ˆëŒ€ì½”ë“œë¡œ ì°¸ê°€í•´ì£¼ì„¸ìš”.</p>}</section>;}
-function TopPicksPanel({rows,onSelect}:{rows:CompetitionTopPick[];onSelect:(item:CompetitionTopPick)=>void}){return <section className="np-panel np-top-picks"><div className="np-section-title"><h2>ëŒ€íšŒ Top Pick</h2><span>2ëª… ì´ìƒ ë³´ìœ </span></div><div className="top-picks-head"><span>ìˆœìœ„Â·ì¢…ëª©</span><span>ë³´ìœ ì</span><span>í‰ê°€ê¸ˆì•¡</span></div>{rows.length?rows.map(row=><button key={`${row.market}:${row.symbol}`} onClick={()=>onSelect(row)}><b className="top-pick-rank">{row.rank}</b><span className="stock-cell"><InstrumentLogo instrument={row} size="sm"/><span><strong>{row.name}</strong><small>{displaySymbol(row.market,row.symbol)} Â· {row.market==="KR"?"êµ­ë‚´":row.market==="US"?"ë¯¸êµ­":"ì½”ì¸"}</small></span></span><strong className="top-pick-holders">{row.holderCount}ëª…</strong><span className="top-pick-value">{formatKrw(row.totalMarketValueKrw)}</span><ChevronRight/></button>):<p className="np-empty">í˜„ì¬ 2ëª… ì´ìƒì´ í•¨ê»˜ ë³´ìœ í•œ ì¢…ëª©ì´ ì—†ìŠµë‹ˆë‹¤.</p>}</section>;}
-
-type DomesticScheduleRow={label:string;start:string;end:string;tradable:boolean};
-const DOMESTIC_TRADING_SCHEDULE:{venue:DomesticVenue;rows:DomesticScheduleRow[]}[]=[
-  {venue:"KRX",rows:[
-    {label:"ì¥ì „ ì‹œê°„ì™¸ ì¢…ê°€",start:"08:40",end:"08:50",tradable:true},
-    {label:"ì¥ì „ ë™ì‹œí˜¸ê°€",start:"08:50",end:"09:00",tradable:false},
-    {label:"ì •ê·œì¥",start:"09:00",end:"15:20",tradable:true},
-    {label:"ì¥í›„ ë™ì‹œí˜¸ê°€",start:"15:20",end:"15:30",tradable:false},
-    {label:"ì •ê·œì¥ ë§ˆê°",start:"15:30",end:"15:40",tradable:false},
-    {label:"ì¥í›„ ì‹œê°„ì™¸ ì¢…ê°€",start:"15:40",end:"16:00",tradable:true},
-    {label:"ì• í”„í„°ë§ˆì¼“",start:"16:00",end:"20:00",tradable:true},
-    {label:"ì¥ ë§ˆê°",start:"20:00",end:"08:40",tradable:false},
-  ]},
-  {venue:"NXT",rows:[
-    {label:"í”„ë¦¬ë§ˆì¼“",start:"08:00",end:"08:50",tradable:true},
-    {label:"í”„ë¦¬ë§ˆì¼“ ë§ˆê°",start:"08:50",end:"09:00",tradable:false},
-    {label:"ì •ê·œì¥",start:"09:00",end:"15:20",tradable:true},
-    {label:"ì •ê·œì¥ ë§ˆê°",start:"15:20",end:"15:40",tradable:false},
-    {label:"ì• í”„í„°ë§ˆì¼“",start:"15:40",end:"20:00",tradable:true},
-    {label:"ì¥ ë§ˆê°",start:"20:00",end:"08:00",tradable:false},
-  ]},
-];
-function scheduleMinutes(value:string){const[hour,minute]=value.split(":").map(Number);return hour*60+minute;}
-function isScheduleCurrent(row:DomesticScheduleRow,minutes:number){const start=scheduleMinutes(row.start);const end=scheduleMinutes(row.end);return start<end?minutes>=start&&minutes<end:minutes>=start||minutes<end;}
-function seoulClock(){const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Seoul",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());const value=(type:Intl.DateTimeFormatPartTypes)=>parts.find(part=>part.type===type)?.value??"00";const hour=value("hour");const minute=value("minute");const weekday=value("weekday");return{minutes:Number(hour)*60+Number(minute),label:`${hour}:${minute}`,isWeekday:["Mon","Tue","Wed","Thu","Fri"].includes(weekday)};}
-function ScheduleRows({rows,minutes,prefix,forceClosed=false}:{rows:DomesticScheduleRow[];minutes:number|null;prefix:string;forceClosed?:boolean}){
-  const viewportRef=useRef<HTMLDivElement|null>(null);
-  const currentIndex=forceClosed?rows.findIndex(row=>row.label==="ì¥ ë§ˆê°"):minutes===null?-1:rows.findIndex(row=>isScheduleCurrent(row,minutes));
-  useLayoutEffect(()=>{if(currentIndex<0||typeof window==="undefined"||!window.matchMedia("(max-width:760px)").matches)return;const viewport=viewportRef.current;if(!viewport)return;const current=viewport.querySelector<HTMLElement>(".domestic-schedule-row.current");if(!current)return;const viewportRect=viewport.getBoundingClientRect();const currentRect=current.getBoundingClientRect();const currentTop=currentRect.top-viewportRect.top+viewport.scrollTop;viewport.scrollTop=Math.max(0,currentTop-(viewport.clientHeight-currentRect.height)/2);},[currentIndex]);
-  return <div className="schedule-rows-viewport" ref={viewportRef}>{rows.map(row=>{const current=forceClosed?row.label==="ì¥ ë§ˆê°":minutes!==null&&isScheduleCurrent(row,minutes);return <div className={`domestic-schedule-row${current?" current":""}${current&&forceClosed?" closed-current":""}`} key={`${prefix}:${row.label}`}>
-    <span className="domestic-session-name">{current&&<i className={`schedule-live-dot${forceClosed?" closed":""}`} aria-label="í˜„ì¬ ì‹œê°„ëŒ€"/>}<b>{row.label}</b></span>
-    <span className="domestic-session-time">{row.start}~{row.end}</span>
-    <span className={row.tradable?"schedule-order open":"schedule-order closed"}>{row.tradable?"ê°€ëŠ¥":"ë¶ˆê°€"}</span>
-  </div>})}</div>;
-}
-function DomesticTradingSchedule(){
-  const[now,setNow]=useState<{minutes:number;label:string;isWeekday:boolean}|null>(null);
-  const[isHoliday,setIsHoliday]=useState(false);
-  useEffect(()=>{const update=()=>setNow(seoulClock());update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
-  useEffect(()=>{let active=true;const load=()=>fetch("/api/market-status?market=KR&live=1",{cache:"no-store"}).then(async response=>response.ok?await response.json() as MarketSession:null).then(session=>{if(active&&session)setIsHoliday(session.isHoliday===true||session.label.includes("íœ´ì¥ì¼"));}).catch(()=>undefined);void load();const timer=setInterval(load,300_000);return()=>{active=false;clearInterval(timer);};},[]);
-  const forceClosed=Boolean(now&&!now.isWeekday)||isHoliday;
-  return <div className="domestic-schedule">
-    <div className="domestic-schedule-now"><span className={`schedule-live-dot${forceClosed?" closed":""}`}/><span>{forceClosed?(isHoliday?"íœ´ì¥ì¼ Â· ì¥ ë§ˆê°":"ì£¼ë§ Â· ì¥ ë§ˆê°"):"í•œêµ­ì‹œê°„ í˜„ì¬"}</span><strong>{now?.label??"--:--"}</strong></div>
-    <div className="domestic-schedule-grid">{DOMESTIC_TRADING_SCHEDULE.map(group=><section className="domestic-venue-card" key={group.venue}>
-      <div className="domestic-venue-head"><strong>{group.venue}</strong><span>ì£¼ë¬¸ ì‹œê°„í‘œ</span></div>
-      <div className="domestic-schedule-head"><span>êµ¬ë¶„</span><span>ì‹œê°„</span><span>ì£¼ë¬¸</span></div>
-      <ScheduleRows rows={group.rows} minutes={now?.minutes??null} prefix={group.venue} forceClosed={forceClosed}/>
-    </section>)}</div>
-  </div>;
-}
-
-function usTradingScheduleRows(isDst:boolean):DomesticScheduleRow[]{
-  return isDst?[
-    {label:"í”„ë¦¬ë§ˆì¼“",start:"17:00",end:"22:30",tradable:true},
-    {label:"ì •ê·œì¥",start:"22:30",end:"05:00",tradable:true},
-    {label:"ì• í”„í„°ë§ˆì¼“",start:"05:00",end:"08:50",tradable:true},
-    {label:"ì¥ ë§ˆê°",start:"08:50",end:"17:00",tradable:false},
-  ]:[
-    {label:"í”„ë¦¬ë§ˆì¼“",start:"18:00",end:"23:30",tradable:true},
-    {label:"ì •ê·œì¥",start:"23:30",end:"06:00",tradable:true},
-    {label:"ì• í”„í„°ë§ˆì¼“",start:"06:00",end:"09:50",tradable:true},
-    {label:"ì¥ ë§ˆê°",start:"09:50",end:"18:00",tradable:false},
-  ];
-}
-function newYorkMarketClock(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",timeZoneName:"short"}).formatToParts(new Date());const value=(type:Intl.DateTimeFormatPartTypes)=>parts.find(part=>part.type===type)?.value??"";return{isDst:value("timeZoneName").toUpperCase().includes("EDT"),isWeekday:["Mon","Tue","Wed","Thu","Fri"].includes(value("weekday"))};}
-function UsTradingSchedule(){
-  const[state,setState]=useState<{minutes:number;label:string;isDst:boolean;isWeekday:boolean}|null>(null);
-  const[isHoliday,setIsHoliday]=useState(false);
-  useEffect(()=>{const update=()=>{const seoul=seoulClock();const ny=newYorkMarketClock();setState({minutes:seoul.minutes,label:seoul.label,isDst:ny.isDst,isWeekday:ny.isWeekday});};update();const timer=setInterval(update,30_000);return()=>clearInterval(timer);},[]);
-  useEffect(()=>{let active=true;const load=()=>fetch("/api/market-status?market=US&live=1",{cache:"no-store"}).then(async response=>response.ok?await response.json() as MarketSession:null).then(session=>{if(active&&session)setIsHoliday(session.isHoliday===true||session.label.includes("íœ´ì¥ì¼"));}).catch(()=>undefined);void load();const timer=setInterval(load,300_000);return()=>{active=false;clearInterval(timer);};},[]);
-  const rows=usTradingScheduleRows(state?.isDst??true);
-  const forceClosed=Boolean(state&&!state.isWeekday)||isHoliday;
-  return <div className="domestic-schedule us-schedule">
-    <div className="market-schedule-title"><strong>ë¯¸êµ­ì£¼ì‹</strong><span>í•œêµ­ì‹œê°„ ê¸°ì¤€ Â· {state?(state.isDst?"ì„œë¨¸íƒ€ì„":"í‘œì¤€ì‹œ"):"í™•ì¸ ì¤‘"}</span></div>
-    <div className="domestic-schedule-now"><span className={`schedule-live-dot${forceClosed?" closed":""}`}/><span>{forceClosed?(isHoliday?"ë¯¸êµ­ íœ´ì¥ì¼ Â· ì¥ ë§ˆê°":"ë¯¸êµ­ ì£¼ë§ Â· ì¥ ë§ˆê°"):"í•œêµ­ì‹œê°„ í˜„ì¬"}</span><strong>{state?.label??"--:--"}</strong></div>
-    <div className="domestic-schedule-grid"><section className="domestic-venue-card us-venue-card">
-      <div className="domestic-venue-head"><strong>ë¯¸êµ­ì£¼ì‹</strong><span>{state?.isDst?"ì„œë¨¸íƒ€ì„ ì ìš©":"í‘œì¤€ì‹œ ì ìš©"}</span></div>
-      <div className="domestic-schedule-head"><span>êµ¬ë¶„</span><span>ì‹œê°„</span><span>ì£¼ë¬¸</span></div>
-      <ScheduleRows rows={rows} minutes={state?.minutes??null} prefix="US" forceClosed={forceClosed}/>
-    </section></div>
-  </div>;
-}
-
-function CryptoTradingSchedule(){
-  return <div className="crypto-trading-schedule">
-    <div><span><b>ê°€ìƒìì‚°</b><small>ë„¤ì´ë²„ì¦ê¶Œ ì‹œì„¸ ê¸°ì¤€</small></span><strong>24ì‹œê°„</strong><em>ê°€ëŠ¥</em></div>
-  </div>;
-}
-
-export default function TradingDashboard(){
-  const[auth,setAuth]=useState<"loading"|User|null>("loading");const[view,setView]=useState<AppView>("home");const[market,setMarket]=useState<Market>("KR");const[marketTab,setMarketTab]=useState<MarketTab>("KR");const[selected,setSelected]=useState<Quote>(DEFAULTS.KR);const[selectedIndexId,setSelectedIndexId]=useState<MarketIndexId>("KOSPI");const[indexDetail,setIndexDetail]=useState<MarketIndexDetail|null>(null);const[indexStatus,setIndexStatus]=useState<"loading"|"live"|"unavailable">("loading");const[domesticVenue,setDomesticVenue]=useState<DomesticVenue>("KRX");const[quoteStatus,setQuoteStatus]=useState<"loading"|"live"|"unavailable">("loading");const[indices,setIndices]=useState<MarketIndexQuote[]>([]);const[competitions,setCompetitions]=useState<Competition[]>([]);const[competitionId,setCompetitionId]=useState<string|null>(null);const[leaderboard,setLeaderboard]=useState<LeaderboardRow[]>([]);const[topPicks,setTopPicks]=useState<CompetitionTopPick[]>([]);const[portfolio,setPortfolio]=useState<Portfolio|null>(null);const[selectedParticipant,setSelectedParticipant]=useState<LeaderboardRow|null>(null);const[marketSession,setMarketSession]=useState<MarketSession>(LOADING_MARKET_SESSION);const[revision,setRevision]=useState(0);const[watchlist,setWatchlist]=useState<WatchlistItem[]>([]);const[popularStocks,setPopularStocks]=useState<{domestic:PopularStock[];us:PopularStock[]}>({domestic:[],us:[]});const[newsItems,setNewsItems]=useState<NewsItem[]>([]);const[newsLoading,setNewsLoading]=useState(false);const[lastViewed,setLastViewed]=useState<Partial<Record<Market,Instrument>>>({});const[lastViewedMarket,setLastViewedMarket]=useState<Market>("KR");const[positionSortKey,setPositionSortKey]=useState<PositionSortKey>("marketValue");const[positionSortDirection,setPositionSortDirection]=useState<"asc"|"desc">("desc");
-  const selectionRequestRef=useRef(0);
-  const currentCompetition=competitions.find(item=>item.status==="active")??null;const activeCompetition=currentCompetition??competitions.find(item=>item.id===competitionId)??competitions[0]??null;const participantId=activeCompetition?.participantId??null;const myRank=leaderboard.find(row=>row.participantId===participantId);
-  useEffect(()=>{fetch("/api/auth/me",{cache:"no-store"}).then(async r=>r.ok?(await r.json() as{user:User}).user:null).then(setAuth).catch(()=>setAuth(null));},[]);
-  useEffect(()=>{if(!auth||auth==="loading")return;try{const raw=window.localStorage.getItem(`marketmate:last-viewed:${auth.id}`);if(!raw)return;const saved=JSON.parse(raw) as{lastMarket?:Market;instruments?:Partial<Record<Market,Instrument>>};const instruments=saved.instruments??{};setLastViewed(instruments);if(saved.lastMarket&&instruments[saved.lastMarket]?.symbol)setLastViewedMarket(saved.lastMarket);}catch{}},[auth]);
-  const loadCompetitions=useCallback(()=>{fetch("/api/competitions",{cache:"no-store"}).then(async r=>r.ok?await r.json() as{competitions?:Competition[]}:null).then(data=>{const items=data?.competitions??[];const joined=items.find(item=>item.status==="active");setCompetitions(items);setCompetitionId(current=>joined?.id??(current&&items.some(item=>item.id===current)?current:items[0]?.id??null));}).catch(()=>undefined);},[]);
-  const loadWatchlist=useCallback(()=>{if(!auth||auth==="loading")return;const apply=(data:{items?:WatchlistItem[]}|null)=>{if(data?.items)setWatchlist(data.items);};fetch("/api/watchlist?mode=fast",{cache:"no-store"}).then(async r=>r.ok?await r.json() as{items?:WatchlistItem[];refreshing?:boolean}:null).then(data=>{apply(data);return fetch("/api/watchlist",{cache:"no-store"}).then(async r=>r.ok?await r.json() as{items?:WatchlistItem[]}:null).then(apply).catch(()=>undefined);}).catch(()=>{void fetch("/api/watchlist",{cache:"no-store"}).then(async r=>r.ok?await r.json() as{items?:WatchlistItem[]}:null).then(apply).catch(()=>undefined);});},[auth]);
-  const loadAccount=useCallback(()=>{if(!participantId){setPortfolio(null);return;}fetch(`/api/portfolio?participantId=${encodeURIComponent(participantId)}`,{cache:"no-store"}).then(async r=>r.ok?await r.json() as Portfolio:null).then(setPortfolio).catch(()=>undefined);},[participantId]);
-  useEffect(()=>{if(auth&&auth!=="loading")loadCompetitions();},[auth,loadCompetitions]);
-  useEffect(()=>{const timer=setTimeout(loadWatchlist,0);return()=>clearTimeout(timer);},[loadWatchlist]);
-  useEffect(()=>{if(!auth||auth==="loading"||view!=="home")return;let active=true;let timer:ReturnType<typeof setTimeout>|undefined;const schedule=(delay:number)=>{if(active)timer=setTimeout(load,Math.max(10_000,Math.min(120_000,delay)));};const load=()=>fetch("/api/popular-stocks",{cache:"no-store"}).then(async r=>r.ok?await r.json() as{domestic?:PopularStock[];us?:PopularStock[];pollingInterval?:number}:null).then(data=>{if(!active)return;if(data){setPopularStocks({domestic:data.domestic??[],us:data.us??[]});}schedule(data?.pollingInterval??30_000);}).catch(()=>{if(active)schedule(30_000);});void load();return()=>{active=false;if(timer)clearTimeout(timer);};},[auth,view]);
-  useEffect(()=>{if(!["home","market","portfolio"].includes(view))return;loadAccount();const timer=setInterval(loadAccount,15_000);return()=>clearInterval(timer);},[loadAccount,view]);
-  useEffect(()=>{if(!["home","competition"].includes(view))return;if(!activeCompetition){setLeaderboard([]);setTopPicks([]);return;}let active=true;const load=()=>fetch(`/api/leaderboard?competitionId=${encodeURIComponent(activeCompetition.id)}`,{cache:"no-store"}).then(async r=>r.ok?await r.json() as{leaderboard?:LeaderboardRow[];topPicks?:CompetitionTopPick[]}:null).then(data=>{if(active){setLeaderboard(data?.leaderboard??[]);setTopPicks(data?.topPicks??[]);}}).catch(()=>undefined);void load();const timer=setInterval(load,15_000);return()=>{active=false;clearInterval(timer);};},[activeCompetition,revision,view]);
-  useEffect(()=>{if(!auth||auth==="loading")return;let active=true;let timer:ReturnType<typeof setTimeout>|undefined;const schedule=(delay:number)=>{if(active)timer=setTimeout(load,Math.max(2_000,Math.min(120_000,delay)));};const load=()=>fetch("/api/market-overview",{cache:"no-store"}).then(async r=>r.ok?await r.json() as{quotes:MarketIndexQuote[];pollingInterval?:number}:null).then(data=>{if(!active)return;if(data?.quotes)setIndices(data.quotes);schedule(data?.pollingInterval??10_000);}).catch(()=>{if(active)schedule(10_000);});void load();return()=>{active=false;if(timer)clearTimeout(timer);};},[auth]);
-  useEffect(()=>{if(!auth||auth==="loading"||view!=="market"||marketTab==="INDEX")return;let active=true;let timer:ReturnType<typeof setTimeout>|undefined;const schedule=(delay:number)=>{if(active)timer=setTimeout(load,Math.max(1_000,Math.min(120_000,delay)));};const load=()=>{setQuoteStatus(current=>current==="live"?current:"loading");const venueParam=selected.market==="KR"?`&venue=${domesticVenue}`:"";fetch(`/api/quotes?market=${selected.market}&symbols=${encodeURIComponent(selected.symbol)}&exchange=${encodeURIComponent(selected.exchange)}${venueParam}`,{cache:"no-store"}).then(async r=>{const data=await r.json() as{quotes?:Array<{price:number;change:number;changeRate:number;currency:"KRW"|"USD";exchangeRate:number;pollingInterval?:number;venue?:string;tradingVenue?:DomesticVenue;availableVenues?:DomesticVenue[];referencePrice?:number;open?:number;high?:number;low?:number;volume?:number;tradingValue?:number;high52Week?:number;low52Week?:number}>};if(!r.ok||!data.quotes?.[0])throw new Error();const q=data.quotes[0];if(active){if(selected.market==="KR"&&q.tradingVenue&&q.tradingVenue!==domesticVenue)setDomesticVenue(q.tradingVenue);setSelected(current=>current.market===selected.market&&current.symbol===selected.symbol?{...current,exchange:q.venue??current.exchange,price:q.price,change:q.change,rate:q.changeRate,currency:q.currency,exchangeRate:q.exchangeRate,referencePrice:q.referencePrice,open:q.open,high:q.high,low:q.low,volume:q.volume,tradingValue:q.tradingValue,high52Week:q.high52Week,low52Week:q.low52Week,tradingVenue:q.tradingVenue,availableVenues:q.availableVenues}:current);setQuoteStatus("live");schedule(q.pollingInterval??5_000);}}).catch(()=>{if(active){setQuoteStatus("unavailable");schedule(10_000);}});};void load();return()=>{active=false;if(timer)clearTimeout(timer);};},[auth,selected.market,selected.symbol,selected.exchange,domesticVenue,view,marketTab]);
-  useEffect(()=>{if(!auth||auth==="loading"||view!=="market"||marketTab==="INDEX"||quoteStatus!=="live"||!selected.high52Week||!selected.low52Week)return;const controller=new AbortController();const params=new URLSearchParams({market:selected.market,symbol:selected.symbol,exchange:selected.exchange,high:String(selected.high52Week),low:String(selected.low52Week)});fetch(`/api/quote-extrema-dates?${params.toString()}`,{cache:"no-store",signal:controller.signal}).then(async r=>r.ok?await r.json() as{high52WeekDate?:string;low52WeekDate?:string}:null).then(data=>{if(controller.signal.aborted)return;setSelected(current=>current.market===selected.market&&current.symbol===selected.symbol?{...current,high52WeekDate:data?.high52WeekDate??null,low52WeekDate:data?.low52WeekDate??null}:current);}).catch(()=>{if(!controller.signal.aborted)setSelected(current=>current.market===selected.market&&current.symbol===selected.symbol?{...current,high52WeekDate:null,low52WeekDate:null}:current);});return()=>controller.abort();},[auth,view,marketTab,quoteStatus,selected.market,selected.symbol,selected.exchange,selected.high52Week,selected.low52Week]);
-  useEffect(()=>{if(!auth||auth==="loading"||!["home","market","news"].includes(view)||(view==="market"&&marketTab==="INDEX"))return;const key=`news-v2:${selected.market}:${selected.symbol}`;const cached=clientNewsCache.get(key);if(cached&&cached.expiresAt>Date.now()){setNewsItems(cached.items);setNewsLoading(false);return;}const controller=new AbortController();setNewsLoading(true);const params=new URLSearchParams({market:selected.market,name:selected.name,symbol:selected.symbol,exchange:selected.exchange});fetch(`/api/news?${params.toString()}`,{signal:controller.signal}).then(async r=>r.ok?await r.json() as{items:NewsItem[]}:null).then(data=>{const items=(data?.items??[]).sort((a,b)=>b.publishedAt-a.publishedAt);clientNewsCache.set(key,{items,expiresAt:Date.now()+90_000});setNewsItems(items);}).catch(()=>setNewsItems([])).finally(()=>{if(!controller.signal.aborted)setNewsLoading(false);});return()=>controller.abort();},[auth,selected.market,selected.symbol,selected.name,selected.exchange,view,marketTab]);
-  useEffect(()=>{if(!auth||auth==="loading"||view!=="market"||marketTab==="INDEX")return;let active=true;const load=()=>{const venueParam=market==="KR"?`&venue=${domesticVenue}`:"";return fetch(`/api/market-status?market=${market}&live=1${venueParam}`,{cache:"no-store"}).then(async r=>r.ok?await r.json() as MarketSession:null).then(value=>{if(active&&value)setMarketSession(value);}).catch(()=>undefined);};void load();const timer=setInterval(load,15_000);return()=>{active=false;clearInterval(timer);};},[auth,market,domesticVenue,view,marketTab]);
-  useEffect(()=>{if(!auth||auth==="loading"||view!=="market"||marketTab!=="INDEX")return;let active=true;let timer:ReturnType<typeof setTimeout>|undefined;const schedule=(delay:number)=>{if(active)timer=setTimeout(load,Math.max(2_000,Math.min(120_000,delay)));};const load=()=>{setIndexStatus(current=>current==="live"?current:"loading");fetch(`/api/index-detail?id=${encodeURIComponent(selectedIndexId)}`,{cache:"no-store"}).then(async r=>{const data=await r.json() as{quote?:MarketIndexDetail};if(!r.ok||!data.quote)throw new Error();if(active){setIndexDetail(data.quote);setIndexStatus("live");schedule(data.quote.pollingInterval??10_000);}}).catch(()=>{if(active){setIndexStatus("unavailable");schedule(10_000);}});};void load();return()=>{active=false;if(timer)clearTimeout(timer);};},[auth,view,marketTab,selectedIndexId]);
-  const persistLastViewed=useCallback((nextMarket:Market,instruments:Partial<Record<Market,Instrument>>)=>{if(!auth||auth==="loading")return;try{window.localStorage.setItem(`marketmate:last-viewed:${auth.id}`,JSON.stringify({lastMarket:nextMarket,instruments}));}catch{}},[auth]);
-  const quoteFromInstrument=useCallback((instrument:Instrument):Quote=>({...instrument,price:0,change:0,rate:0,exchangeRate:1}),[]);
-  const rememberInstrument=useCallback((instrument:Instrument)=>{const normalized:Instrument={market:instrument.market,symbol:instrument.symbol,name:instrument.name,exchange:instrument.exchange,currency:instrument.currency};setLastViewedMarket(normalized.market);setLastViewed(current=>{const next={...current,[normalized.market]:normalized};persistLastViewed(normalized.market,next);return next;});},[persistLastViewed]);
-  const restoreRemembered=(next:Market)=>{const remembered=lastViewed[next];if(!remembered?.symbol||!remembered.name)return false;setSelected(quoteFromInstrument(remembered));return true;};
-  const openMarketView=()=>{const next=lastViewed[lastViewedMarket]?.symbol?lastViewedMarket:selected.market;if(next!==market)setMarketSession(LOADING_MARKET_SESSION);setMarket(next);setMarketTab(next);restoreRemembered(next);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
-  const chooseInstrument=useCallback((instrument:Instrument)=>{const requestId=++selectionRequestRef.current;if(instrument.market!==market)setMarketSession(LOADING_MARKET_SESSION);rememberInstrument(instrument);setMarket(instrument.market);setMarketTab(instrument.market);setSelected(quoteFromInstrument(instrument));setView("market");window.scrollTo({top:0,behavior:"smooth"});void localizeUsQuoteInstrument(instrument).then(localized=>{if(requestId!==selectionRequestRef.current||localized.name===instrument.name)return;rememberInstrument(localized);setSelected(current=>current.market===localized.market&&current.symbol===localized.symbol?{...current,name:localized.name}:current);});},[market,rememberInstrument,quoteFromInstrument]);
-  useEffect(()=>{const onOpenInstrument=(event:Event)=>{const detail=(event as CustomEvent<Instrument>).detail;if(!detail||!["KR","US","CRYPTO"].includes(detail.market)||!detail.symbol||!detail.name||!detail.exchange||!["KRW","USD"].includes(detail.currency))return;const normalized:Instrument={market:detail.market,symbol:detail.symbol,name:detail.name,exchange:detail.exchange,currency:detail.currency};chooseInstrument(normalized);};window.addEventListener("marketmate:open-instrument",onOpenInstrument);return()=>window.removeEventListener("marketmate:open-instrument",onOpenInstrument);},[chooseInstrument]);
-  const changeMarket=(next:Market)=>{if(next!==market)setMarketSession(LOADING_MARKET_SESSION);setMarket(next);setMarketTab(next);if(!restoreRemembered(next)&&selected.market!==next)setSelected(DEFAULTS[next]);setLastViewedMarket(next);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
-  const openIndexView=(id:MarketIndexId)=>{setSelectedIndexId(id);setIndexDetail(current=>current?.id===id?current:null);setIndexStatus("loading");setMarketTab("INDEX");setView("market");window.scrollTo({top:0,behavior:"smooth"});};
-  const openBitcoinView=()=>{if(market!=="CRYPTO")setMarketSession(LOADING_MARKET_SESSION);setQuoteStatus("loading");setMarket("CRYPTO");setMarketTab("CRYPTO");setSelected(DEFAULTS.CRYPTO);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
-  const pickMarketOverviewById=(id:string,nextMarket:Market)=>{if(id==="BTC"){openBitcoinView();return;}if(isMarketIndexId(id)){openIndexView(id);return;}changeMarket(nextMarket);};
-  const pickMarketOverview=(item:MarketIndexQuote)=>pickMarketOverviewById(item.id,item.market);
-  const changeDomesticVenue=(venue:DomesticVenue)=>{if(venue===domesticVenue)return;if(venue==="NXT"&&selected.availableVenues&&!selected.availableVenues.includes("NXT"))return;setMarketSession(LOADING_MARKET_SESSION);setQuoteStatus("loading");setDomesticVenue(venue);};
-  const logout=async()=>{await fetch("/api/auth/logout",{method:"POST"});setAuth(null);};
-  const selectedInWatchlist=watchlist.some(item=>item.market===selected.market&&item.symbol===selected.symbol);
-  const toggleWatchlist=async()=>{const instrumentId=`${selected.market}:${selected.symbol}`;const response=await fetch(selectedInWatchlist?`/api/watchlist?instrumentId=${encodeURIComponent(instrumentId)}`:"/api/watchlist",{method:selectedInWatchlist?"DELETE":"POST",headers:{"content-type":"application/json"},body:selectedInWatchlist?undefined:JSON.stringify({market:selected.market,symbol:selected.symbol,name:selected.name,exchange:selected.exchange,currency:selected.currency})});if(response.ok)loadWatchlist();};
-  const leaveCompetition=async()=>{const target=currentCompetition??activeCompetition;if(!target||!window.confirm(`${target.name} ëŒ€íšŒì—ì„œ ë‚˜ê°ˆê¹Œìš”? ë‚´ ëª¨ì˜íˆ¬ì ê¸°ë¡ì´ ì‚­ì œë©ë‹ˆë‹¤.`))return;const response=await fetch(`/api/competitions/leave?competitionId=${encodeURIComponent(target.id)}`,{method:"DELETE"});const result=await response.json() as{error?:string};if(!response.ok)return window.alert(result.error??"ëŒ€íšŒì—ì„œ ë‚˜ê°€ì§€ ëª»í–ˆìŠµë‹ˆë‹¤.");await loadCompetitions();setPortfolio(null);setLeaderboard([]);setTopPicks([]);};
-  const handleFilled=()=>{loadAccount();setRevision(value=>value+1);};const assets=portfolio?.account.totalAssetKrw??myRank?.totalAssetKrw??0;const initial=activeCompetition?.initialCashKrw??0;const rate=returnRate(assets,initial);const unrealizedPnl=portfolio?.positions.reduce((sum,p)=>sum+Number(p.unrealizedPnlKrw??0),0)??0;const selectedHolding=portfolio?.positions.find(p=>p.market===selected.market&&p.symbol===selected.symbol)?.quantityMicros??0;
-  const sortedPositions=[...(portfolio?.positions??[])].sort((a,b)=>{const direction=positionSortDirection==="asc"?1:-1;if(positionSortKey==="name"){const result=a.name.localeCompare(b.name,"ko-KR",{numeric:true,sensitivity:"base"});return result*direction;}const read=(position:Portfolio["positions"][number])=>{if(positionSortKey==="quantity")return position.quantityMicros;if(positionSortKey==="averagePrice")return position.averagePriceKrwMicros;if(positionSortKey==="marketValue")return Number(position.marketValueKrw??0);if(positionSortKey==="unrealizedPnl")return Number(position.unrealizedPnlKrw??0);return positionReturnRate(position);};const diff=read(a)-read(b);if(diff!==0)return diff*direction;return a.name.localeCompare(b.name,"ko-KR",{numeric:true,sensitivity:"base"});});
-  if(auth==="loading")return <main className="auth-shell"><div className="auth-loading">ë§ˆì¼“ë©”ì´íŠ¸ë¥¼ ì—¬ëŠ” ì¤‘...</div></main>;if(!auth)return <AuthScreen onAuthenticated={setAuth}/>;
-  const nav:(readonly[AppView,string])[]=[["home","í™ˆ"],["market","ì‹œì„¸"],["watchlist","ê´€ì‹¬"],["competition","ëª¨ì˜íˆ¬ìëŒ€íšŒ"],["news","ë‰´ìŠ¤"],["portfolio","MY"]];
-  const mobileNavItems = [["home",Home,"í™ˆ"],["watchlist",Star,"ê´€ì‹¬"],["market",LineChart,"ì‹œì„¸"],["competition",Trophy,"ëŒ€íšŒ"],["news",Newspaper,"ë‰´ìŠ¤"],["portfolio",WalletCards,"MY"]] as const;
-  const holdings=<section className="np-panel holdings"><div className="np-section-title"><h2>ë‚´ íˆ¬ìí˜„í™©</h2><div className="flex items-center gap-2"><select aria-label="ë³´ìœ ì¢…ëª© ì •ë ¬ ê¸°ì¤€" value={positionSortKey} onChange={event=>setPositionSortKey(event.target.value as PositionSortKey)} className="h-8 rounded-md border border-[#dfe3e6] bg-white px-2 text-xs text-[#59636c]"><option value="name">ì¢…ëª© ì´ë¦„</option><option value="quantity">ë³´ìœ ìˆ˜ëŸ‰</option><option value="averagePrice">í‰ê· ë‹¨ê°€</option><option value="marketValue">í‰ê°€ê¸ˆì•¡</option><option value="unrealizedPnl">í‰ê°€ì†ìµ</option><option value="returnRate">ìˆ˜ìµë¥ </option></select><button type="button" onClick={()=>setPositionSortDirection(value=>value==="asc"?"desc":"asc")} className="h-8 rounded-md border border-[#dfe3e6] bg-white px-2 text-xs text-[#59636c]">{positionSortDirection==="asc"?"ì˜¤ë¦„ì°¨ìˆœ â†‘":"ë‚´ë¦¼ì°¨ìˆœ â†“"}</button><button onClick={loadAccount}><RefreshCw/> ìƒˆë¡œê³ ì¹¨</button></div></div><div className="asset-summary"><span>ì´ ìì‚°<strong>{formatKrw(assets)}</strong></span><span>ì£¼ë¬¸ ê°€ëŠ¥ í˜„ê¸ˆ<strong>{formatKrw(portfolio?.account.availableCashKrw??0)}</strong></span><span>í‰ê°€ì†ìµ<strong className={unrealizedPnl>=0?"up":"down"}>{formatKrw(unrealizedPnl)}</strong></span><span>ì‹¤í˜„ì†ìµ<strong className={(portfolio?.account.realizedPnlKrw??0)>=0?"up":"down"}>{formatKrw(portfolio?.account.realizedPnlKrw??0)}</strong></span><span>ìˆ˜ìµë¥ <strong className={rate>=0?"up":"down"}>{rate>=0?"+":""}{rate.toFixed(2)}%</strong></span></div><div className="desktop-position-table"><Table><TableHeader><TableRow><TableHead>ì¢…ëª©</TableHead><TableHead>ë³´ìœ </TableHead><TableHead>í‰ê· ë‹¨ê°€</TableHead><TableHead>í‰ê°€ê¸ˆì•¡</TableHead><TableHead>í‰ê°€ì†ìµ</TableHead><TableHead>ìˆ˜ìµë¥ </TableHead></TableRow></TableHeader><TableBody>{sortedPositions.length?sortedPositions.map(p=>{const instrument:Instrument={market:p.market,symbol:p.symbol,name:p.name,exchange:p.exchange||(p.market==="KR"?"KRX":p.market==="US"?"NAS":"NAVER"),currency:p.currency as"KRW"|"USD"};return <TableRow key={`${p.market}:${p.symbol}`} onClick={()=>chooseInstrument(instrument)}><TableCell><span className="stock-cell"><InstrumentLogo instrument={instrument} size="sm"/><span>{p.name}<small>{displaySymbol(p.market,p.symbol)} Â· {instrument.exchange}</small></span></span></TableCell><TableCell>{formatQuantity(p.quantityMicros)}</TableCell><TableCell>{formatKrw(p.averagePriceKrwMicros/1_000_000)}</TableCell><TableCell>{p.currentPriceKrwMicros?formatKrw(p.marketValueKrw??0):"ì‹œì„¸ ëŒ€ê¸°"}</TableCell><TableCell className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatKrw(p.unrealizedPnlKrw??0):"-"}</TableCell><TableCell className={positionReturnRate(p)>=0?"up":"down"}>{p.currentPriceKrwMicros?formatReturnRate(positionReturnRate(p)):"-"}</TableCell></TableRow>}):<TableRow><TableCell colSpan={6} className="empty-cell">{participantId?"ì•„ì§ ë³´ìœ í•œ ì¢…ëª©ì´ ì—†ìŠµë‹ˆë‹¤.":"ëŒ€íšŒì— ì°¸ê°€í•˜ë©´ íˆ¬ìí˜„í™©ì´ í‘œì‹œë©ë‹ˆë‹¤."}</TableCell></TableRow>}</TableBody></Table></div><div className="mobile-position-list">{sortedPositions.length?sortedPositions.map(p=>{const instrument:Instrument={market:p.market,symbol:p.symbol,name:p.name,exchange:p.exchange||(p.market==="KR"?"KRX":p.market==="US"?"NAS":"NAVER"),currency:p.currency as"KRW"|"USD"};return <button key={`mobile:${p.market}:${p.symbol}`} onClick={()=>chooseInstrument(instrument)}><span className="stock-cell"><InstrumentLogo instrument={instrument} size="sm"/><span><b>{p.name}</b><small>{displaySymbol(p.market,p.symbol)} Â· {instrument.exchange} Â· {formatQuantity(p.quantityMicros)}{p.market==="CRYPTO"?"ê°œ":"ì£¼"}</small></span></span><span><strong>{p.currentPriceKrwMicros?formatKrw(p.marketValueKrw??0):"ì‹œì„¸ ëŒ€ê¸°"}</strong><em className={(p.unrealizedPnlKrw??0)>=0?"up":"down"}>{p.currentPriceKrwMicros?`${formatKrw(p.unrealizedPnlKrw??0)} Â· ${formatReturnRate(positionReturnRate(p))}`:"-"}</em></span></button>}):<p className="np-empty">{participantId?"ì•„ì§ ë³´ìœ í•œ ì¢…ëª©ì´ ì—†ìŠµë‹ˆë‹¤.":"ëŒ€íšŒì— ì°¸ê°€í•˜ë©´ íˆ¬ìí˜„í™©ì´ í‘œì‹œë©ë‹ˆë‹¤."}</p>}</div></section>;
-  return <div className="marketmate-v2"><header className="np-desktop-header"><div className="np-head"><button className="np-brand" onClick={()=>setView("home")}><span>MM</span><b>ë§ˆì¼“ë©”ì´íŠ¸</b></button><SearchBox onSelect={chooseInstrument}/><div className="np-head-actions">{auth.role==="admin"&&<AdminDialog/>}{!currentCompetition&&<JoinDialog onChanged={loadCompetitions}/>}<AccountSettingsDialog user={auth} onUpdated={setAuth} onDeleted={()=>setAuth(null)}/><button aria-label="ë¡œê·¸ì•„ì›ƒ" onClick={logout}><LogOut/></button></div></div><nav>{nav.map(([key,label])=><button key={key} className={view===key?"active":""} onClick={()=>key==="market"?openMarketView():setView(key)}>{label}</button>)}</nav><LiveMarketStrip quotes={indices} onPick={pickMarketOverviewById}/></header><header className="np-mobile-header"><div><button className="np-brand" onClick={()=>setView("home")}><span>MM</span><b>ë§ˆì¼“ë©”ì´íŠ¸</b></button><div className="np-mobile-account-actions"><AccountSettingsDialog user={auth} onUpdated={setAuth} onDeleted={()=>setAuth(null)} compact/><button aria-label="ë¡œê·¸ì•„ì›ƒ" onClick={logout}><LogOut/></button></div></div></header>
-    {view==="home"&&<main className="np-page np-home"><section className="np-home-main"><div className="np-market-status"><span><i/>êµ­ë‚´ Â· ë„¤ì´ë²„ì¦ê¶Œ market-status</span><span><i/>ë¯¸êµ­ Â· ë„¤ì´ë²„ì¦ê¶Œ ì„¸ì…˜Â·ì„œë¨¸íƒ€ì„</span><span><i/>ê°€ìƒìì‚° Â· ë„¤ì´ë²„ì¦ê¶Œ 24ì‹œê°„ ì‹œì„¸</span></div><PopularStocksPanel domestic={popularStocks.domestic} us={popularStocks.us} onSelect={chooseInstrument}/><LiveMarketStrip quotes={indices} onPick={pickMarketOverviewById}/><section className="np-panel np-market-focus"><div className="np-section-title"><h2>ì£¼ìš” ì§€ìˆ˜Â·ê°€ìƒìì‚°</h2><button onClick={()=>openIndexView("KOSPI")}>ì‹œì„¸ ë³´ê¸° <ChevronRight/></button></div><div className="index-board">{indices.map(item=><button key={item.id} onClick={()=>pickMarketOverview(item)}><span>{item.name}<small>ë„¤ì´ë²„ì¦ê¶Œ Â· ì‹¤ì‹œê°„</small></span><strong>{item.price.toLocaleString("ko-KR",{maximumFractionDigits:item.id==="BTC"?0:2})}{item.unit}</strong><em className={item.rate>=0?"up":"down"}>{item.change>=0?"+":""}{item.change.toLocaleString("ko-KR",{maximumFractionDigits:2})} ({item.rate>=0?"+":""}{item.rate.toFixed(2)}%)</em></button>)}</div></section><NewsPanel items={newsItems} title="ì£¼ìš” ì‹œì¥ ë‰´ìŠ¤" loading={newsLoading}/></section><aside><section className="np-panel np-my-summary"><div className="np-section-title"><h2>ë‚´ ëŒ€íšŒ</h2><button onClick={()=>setView("competition")}>ì „ì²´ <ChevronRight/></button></div><div className="contest-summary"><span>{activeCompetition?.name??"ì°¸ê°€ ì¤‘ì¸ ëŒ€íšŒ ì—†ìŒ"}{activeCompetition&&<b>{dDay(activeCompetition.endsAt)}</b>}</span><strong>{myRank?(myRank.rank!==null?`${myRank.rank}ìœ„ / ${leaderboard.length}ëª…`:`ìˆœìœ„ ëŒ€ê¸° / ${leaderboard.length}ëª…`):"ëŒ€íšŒì— ì°¸ê°€í•´ë³´ì„¸ìš”"}</strong><em className={rate>=0?"up":"down"}>{rate>=0?"+":""}{rate.toFixed(2)}%</em></div></section><section className="np-panel np-watch-preview"><div className="np-section-title"><h2>ê´€ì‹¬ ì¢…ëª©</h2><button onClick={()=>setView("watchlist")}>ì „ì²´ <ChevronRight/></button></div>{watchlist.slice(0,6).map(item=><button key={item.id} onClick={()=>chooseInstrument(item)}><InstrumentLogo instrument={item} size="sm"/><span><b>{item.name}</b><small>{displaySymbol(item.market,item.symbol)}</small></span><strong>{formatWatchPrice(item)}<em className={(item.changeRatePpm??0)>=0?"up":"down"}>{((item.changeRatePpm??0)/10_000).toFixed(2)}%</em></strong></button>)}{!watchlist.length&&<p className="np-empty">ê´€ì‹¬ ì¢…ëª©ì„ ì¶”ê°€í•´ë³´ì„¸ìš”.</p>}</section></aside></main>}
-    {view==="market"&&<main className={`np-page np-trading market-${marketTab.toLowerCase()}${marketTab==="INDEX"?" index-mode":""}`}><section className="np-trading-main"><div className="np-market-tabs">{([["INDEX","ì§€ìˆ˜"],["KR","êµ­ë‚´"],["US","ë¯¸êµ­"],["CRYPTO","ê°€ìƒìì‚°"]] as const).map(([key,label])=><button className={marketTab===key?"active":""} onClick={()=>key==="INDEX"?openIndexView(selectedIndexId):changeMarket(key)} key={key}>{label}</button>)}</div>
-      {marketTab==="INDEX"?<><div className="np-index-selector">{MARKET_INDEX_IDS.map(id=><button key={id} className={selectedIndexId===id?"active":""} onClick={()=>openIndexView(id)}>{MARKET_INDEX_META[id].name}</button>)}</div>{(()=>{const overview=indices.find(item=>item.id===selectedIndexId);const current=indexDetail?.id===selectedIndexId?indexDetail:overview;const meta=MARKET_INDEX_META[selectedIndexId];const detail=indexDetail?.id===selectedIndexId?indexDetail:null;const chartQuote={market:meta.market,symbol:meta.symbol,name:meta.name,exchange:meta.exchange};return <section className="np-panel np-quote np-index-quote"><div className="np-quote-head"><span className="stock-title"><span><small>{selectedIndexId==="USDKRW"?"í™˜ìœ¨":meta.exchange} Â· ë„¤ì´ë²„ì¦ê¶Œ</small><h1>{meta.name}</h1></span></span><span className={`live-pill${indexStatus==="unavailable"?" pending":""}`}><i/>{indexStatus==="live"?"ë„¤ì´ë²„ ì‹¤ì‹œê°„":indexStatus==="loading"?"í™•ì¸ ì¤‘":"ì‹œì„¸ ì§€ì—°"}</span></div><div className="np-price"><div className="np-price-main"><strong>{current?formatMarketIndexValue(current,current.price):"ì‹œì„¸ í™•ì¸ ì¤‘"}</strong>{current&&current.price>0&&<span className={current.rate>=0?"up":"down"}>{current.change>=0?"â–²":"â–¼"} {Math.abs(current.change).toLocaleString("ko-KR",{maximumFractionDigits:2})} ({current.rate>=0?"+":""}{current.rate.toFixed(2)}%)</span>}</div></div>{selectedIndexId!=="USDKRW"&&<div className="np-stats"><span>ê¸°ì¤€ê°€<b>{current?formatMarketIndexValue(current,detail?.referencePrice):"-"}</b></span><span>ì‹œê°€<b className={quoteMetricDirectionClass(detail?.open,detail?.referencePrice)}>{current?formatMarketIndexValue(current,detail?.open):"-"}</b></span><span>ê³ ê°€<b className="up">{current?formatMarketIndexValue(current,detail?.high):"-"}</b></span><span>ì €ê°€<b className="down">{current?formatMarketIndexValue(current,detail?.low):"-"}</b></span><span className="np-stat-dated"><span className="np-stat-label">52ì£¼ ìµœê³ <small>{detail?.high52WeekDate===undefined?"í™•ì¸ ì¤‘":formatQuoteMetricDate(detail.high52WeekDate)||"-"}</small></span><b className="up">{current?formatMarketIndexValue(current,detail?.high52Week):"-"}</b></span><span className="np-stat-dated"><span className="np-stat-label">52ì£¼ ìµœì €<small>{detail?.low52WeekDate===undefined?"í™•ì¸ ì¤‘":formatQuoteMetricDate(detail.low52WeekDate)||"-"}</small></span><b className="down">{current?formatMarketIndexValue(current,detail?.low52Week):"-"}</b></span><span>ê±°ë˜ëŸ‰<b>{formatQuoteVolume(detail?.volume)}</b></span><span>ê±°ë˜ëŒ€ê¸ˆ<b>{formatMarketIndexTradingValue(detail?.tradingValue)}</b></span></div>}<div className="np-chart"><MarketChart quote={chartQuote} indexId={selectedIndexId} fxChartImages={detail?.chartImages}/></div></section>;})()}</>:<><section className="np-panel np-quote"><div className="np-quote-head"><span className="stock-title"><InstrumentLogo key={`${selected.market}:${selected.symbol}`} instrument={selected} size="lg"/><span><small>{displaySymbol(selected.market,selected.symbol)} Â· {selected.exchange}</small><h1>{selected.name}<button className={selectedInWatchlist?"starred":""} onClick={toggleWatchlist} aria-label="ê´€ì‹¬ì¢…ëª©"><Star fill={selectedInWatchlist?"currentColor":"none"}/></button></h1></span></span><span className="live-pill"><i/>{quoteStatus==="live"?"ë„¤ì´ë²„ ì‹¤ì‹œê°„":quoteStatus==="loading"?"í™•ì¸ ì¤‘":"ì‹œì„¸ ì§€ì—°"}</span></div><div className={`np-price${selected.market==="KR"?" np-price-domestic":""}`}><div className="np-price-main"><strong>{formatPrice(selected)}</strong>{selected.price>0&&<span className={selected.rate>=0?"up":"down"}>{selected.change>=0?"â–²":"â–¼"} {Math.abs(selected.change).toLocaleString()} ({selected.rate>=0?"+":""}{selected.rate.toFixed(2)}%)</span>}</div>{selected.market==="KR"&&<div className="np-domestic-venue-switch"><div><button type="button" className={domesticVenue==="KRX"?"active":""} onClick={()=>changeDomesticVenue("KRX")}>KRX</button><button type="button" className={domesticVenue==="NXT"?"active":""} disabled={Boolean(selected.availableVenues)&&!selected.availableVenues?.includes("NXT")} onClick={()=>changeDomesticVenue("NXT")}>NXT</button></div></div>}</div><div className="np-stats"><span>ê¸°ì¤€ê°€<b>{formatQuoteMetricPrice(selected,selected.referencePrice)}</b></span><span>ì‹œê°€<b className={quoteMetricDirectionClass(selected.open,selected.referencePrice)}>{formatQuoteMetricPrice(selected,selected.open)}</b></span><span>ê³ ê°€<b className="up">{formatQuoteMetricPrice(selected,selected.high)}</b></span><span>ì €ê°€<b className="down">{formatQuoteMetricPrice(selected,selected.low)}</b></span><span className="np-stat-dated"><span className="np-stat-label">52ì£¼ ìµœê³ <small>{selected.high52WeekDate===undefined?"í™•ì¸ ì¤‘":formatQuoteMetricDate(selected.high52WeekDate)||"-"}</small></span><b className="up">{formatQuoteMetricPrice(selected,selected.high52Week)}</b></span><span className="np-stat-dated"><span className="np-stat-label">52ì£¼ ìµœì €<small>{selected.low52WeekDate===undefined?"í™•ì¸ ì¤‘":formatQuoteMetricDate(selected.low52WeekDate)||"-"}</small></span><b className="down">{formatQuoteMetricPrice(selected,selected.low52Week)}</b></span><span>ê±°ë˜ëŸ‰<b>{formatQuoteVolume(selected.volume)}</b></span><span>ê±°ë˜ëŒ€ê¸ˆ<b>{formatQuoteTradingValue(selected)}</b></span></div><div className="np-chart"><MarketChart quote={selected}/></div></section><div className="np-mobile-order"><OrderPanel quote={selected} participantId={participantId} availableCashKrw={portfolio?.account.availableCashKrw??0} heldQuantityMicros={selectedHolding} session={marketSession} domesticVenue={domesticVenue} onDomesticVenueChange={changeDomesticVenue} onFilled={handleFilled}/></div><NewsPanel items={newsItems} title={`${selected.name} ê´€ë ¨ ë‰´ìŠ¤`} loading={newsLoading} usSplit={selected.market==="US"}/></>}</section>{marketTab!=="INDEX"&&<aside><OrderPanel quote={selected} participantId={participantId} availableCashKrw={portfolio?.account.availableCashKrw??0} heldQuantityMicros={selectedHolding} session={marketSession} domesticVenue={domesticVenue} onDomesticVenueChange={changeDomesticVenue} onFilled={handleFilled}/></aside>}</main>}
-    {view==="watchlist"&&<main className="np-page np-single"><section className="np-panel np-watch-page"><div className="np-section-title"><h1>ê´€ì‹¬ ì¢…ëª©</h1><span>{watchlist.length}ê°œ</span></div><div className="watch-table-head"><span>ì¢…ëª©</span><span>í˜„ì¬ê°€</span><span>ë“±ë½ë¥ </span><span>ì‹œì¥</span></div>{watchlist.length?watchlist.map(item=><button key={item.id} onClick={()=>chooseInstrument(item)}><span className="stock-cell"><InstrumentLogo instrument={item}/><span><b>{item.name}</b><small>{displaySymbol(item.market,item.symbol)} Â· {item.exchange}</small></span></span><strong>{formatWatchPrice(item)}</strong><em className={(item.changeRatePpm??0)>=0?"up":"down"}>{((item.changeRatePpm??0)/10_000).toFixed(2)}%</em><span>{item.market==="KR"?"êµ­ë‚´":item.market==="US"?"ë¯¸êµ­":"ì½”ì¸"}</span><ChevronRight/></button>):<p className="np-empty large">ì‹œì„¸ í™”ë©´ì—ì„œ ë³„ì„ ëˆŒëŸ¬ ê´€ì‹¬ ì¢…ëª©ì„ ì¶”ê°€í•˜ì„¸ìš”.</p>}</section></main>}
-    {view==="competition"&&<main className="np-page np-competition"><section className="competition-main"><section className="np-panel contest-overview"><div><span>ì°¸ê°€ ì¤‘ì¸ ëŒ€íšŒ</span><h1>{activeCompetition?.name??"ì•„ì§ ì°¸ê°€í•œ ëŒ€íšŒê°€ ì—†ìŠµë‹ˆë‹¤"}</h1>{activeCompetition&&<p>ì¢…ë£Œì¼ {formatEndDate(activeCompetition.endsAt)} Â· <b>{dDay(activeCompetition.endsAt)}</b></p>}</div><div className="contest-actions">{currentCompetition?<button className="leave-button" onClick={leaveCompetition}><DoorOpen/>ëŒ€íšŒ ë‚˜ê°€ê¸°</button>:<>{activeCompetition&&<button className="leave-button" onClick={leaveCompetition}><DoorOpen/>ê¸°ë¡ ì‚­ì œ</button>}<JoinDialog onChanged={loadCompetitions}/></>}</div>{!currentCompetition&&competitions.length>1&&<select value={activeCompetition?.id} onChange={event=>setCompetitionId(event.target.value)}>{competitions.map(item=><option value={item.id} key={item.id}>{item.name} Â· {dDay(item.endsAt)}</option>)}</select>}</section><RankingPanel rows={leaderboard} participantId={participantId} onSelect={setSelectedParticipant}/><TopPicksPanel rows={topPicks} onSelect={chooseInstrument}/></section><aside><section className="np-panel competition-guide"><div className="np-section-title"><h2>ì°¸ê°€ ë°©ë²•</h2></div><ol><li><b>ê³„ì • ë§Œë“¤ê¸°</b><span>ì²˜ìŒ ì´ìš©ì—ì„œ ë‹‰ë„¤ì„ê³¼ ìˆ«ì PIN 4ìë¦¬ë¥¼ ë“±ë¡í•©ë‹ˆë‹¤.</span></li><li><b>ëŒ€íšŒ ì°¸ê°€ ë˜ëŠ” ê°œì„¤</b><span>ì´ˆëŒ€ì½”ë“œë¡œ ì°¸ê°€í•˜ê±°ë‚˜ ìƒˆ ëŒ€íšŒë¥¼ ê°œì„¤í•©ë‹ˆë‹¤. ì§„í–‰ ì¤‘ì¸ ëŒ€íšŒëŠ” í•œ ê³„ì •ë‹¹ 1ê°œë§Œ ê°€ëŠ¥í•©ë‹ˆë‹¤.</span></li><li><b>ì¢…ëª© ê²€ìƒ‰ í›„ ëª¨ì˜ì£¼ë¬¸</b><span>ì‹œì„¸ íƒ­ì—ì„œ êµ­ë‚´Â·ë¯¸êµ­ì£¼ì‹ê³¼ ê°€ìƒìì‚°ì„ ì„ íƒí•´ ì‹œì¥ê°€ ë˜ëŠ” ì§€ì •ê°€ë¡œ ì£¼ë¬¸í•©ë‹ˆë‹¤.</span></li><li><b>ìˆœìœ„Â·íˆ¬ìí˜„í™© í™•ì¸</b><span>ì°¸ê°€ ì¦‰ì‹œ ìˆœìœ„í‘œì— í‘œì‹œë˜ë©°, ì²« ì²´ê²° ì „ì—ëŠ” ìˆœìœ„ ìˆ«ì ì—†ì´ ë§¨ ì•„ë˜ì— í‘œì‹œë©ë‹ˆë‹¤. ë‹‰ë„¤ì„ì„ ëˆ„ë¥´ë©´ ë³´ìœ ì¢…ëª©ê³¼ ì²´ê²°ë‚´ì—­ì„ í™•ì¸í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</span></li><li><b>ëŒ€íšŒ ë‚˜ê°€ê¸°</b><span>í˜„ì¬ ëŒ€íšŒì—ì„œ ë‚˜ê°„ ë’¤ ë‹¤ë¥¸ ëŒ€íšŒì— ì°¸ê°€í•˜ê±°ë‚˜ ìƒˆ ëŒ€íšŒë¥¼ ê°œì„¤í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</span></li></ol></section><section className="np-panel trading-guide"><div className="np-section-title"><h2>ê±°ë˜ì‹œê°„Â·ìœ ì˜ì‚¬í•­</h2></div><DomesticTradingSchedule/><UsTradingSchedule/><CryptoTradingSchedule/><ul><li>ì´ˆë¡ìƒ‰ ë¶ˆì´ ì¼œì§„ í–‰ì´ í˜„ì¬ í•œêµ­ì‹œê°„ì— í•´ë‹¹í•˜ëŠ” ê±°ë˜ êµ¬ê°„ì´ë©°, ì£¼ë§Â·íœ´ì¥ì¼ì—ëŠ” ì¥ ë§ˆê° ìƒíƒœë¡œ í‘œì‹œë©ë‹ˆë‹¤.</li><li>ë¯¸êµ­ì£¼ì‹ ì‹œê°„í‘œëŠ” ë¯¸êµ­ ì„œë¨¸íƒ€ì„/í‘œì¤€ì‹œë¥¼ ìë™ íŒë³„í•´ í•œêµ­ì‹œê°„ìœ¼ë¡œ í‘œì‹œí•©ë‹ˆë‹¤.</li><li>ê°€ìƒìì‚°ì€ 24ì‹œê°„ ê±°ë˜ ê°€ëŠ¥í•˜ë©°, ëª¨ë“  ì£¼ë¬¸ì€ ëª¨ì˜ì²´ê²°ë¡œ ì‹¤ì œ ê³„ì¢Œì— ì „ì†¡ë˜ì§€ ì•ŠìŠµë‹ˆë‹¤.</li><li>ì‹¤ì œ ì²´ê²°ë‚´ì—­ì´ 1ê±´ ì´ìƒ ìƒê¸°ë©´ ì´ìì‚° ê¸°ì¤€ìœ¼ë¡œ ìˆœìœ„ ìˆ«ìê°€ ë¶€ì—¬ë©ë‹ˆë‹¤. ê±°ë˜ë‚´ì—­ì´ ì—†ëŠ” ì°¸ê°€ìëŠ” ì´ìì‚°ê³¼ ê´€ê³„ì—†ì´ ìˆœìœ„í‘œ ë§¨ ì•„ë˜ì— í‘œì‹œë©ë‹ˆë‹¤.</li><li>ê°™ì€ ëŒ€íšŒ ì°¸ê°€ìëŠ” ìˆœìœ„í‘œì˜ ë‹‰ë„¤ì„ì„ ëˆŒëŸ¬ ì„œë¡œì˜ ë³´ìœ ì¢…ëª©ê³¼ ëª¨ì˜ì²´ê²° ë‚´ì—­ì„ í™•ì¸í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</li><li>ì§„í–‰ ì¤‘ì¸ ëŒ€íšŒì— ì°¸ê°€í•˜ëŠ” ë™ì•ˆì—ëŠ” ë‹‰ë„¤ì„ì„ ë³€ê²½í•  ìˆ˜ ì—†ìœ¼ë©° PINì€ ë³€ê²½í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</li><li>ì§€ì •ê°€ëŠ” ì¡°ê±´ ì¶©ì¡± ì‹œì—ë§Œ ì²´ê²°ë˜ë©° ë¯¸ì²´ê²° ì£¼ë¬¸ìœ¼ë¡œ ë‚¨ì„ ìˆ˜ ìˆê³ , í™˜ìœ¨Â·ì‹œì„¸ ì§€ì—°ì— ë”°ë¼ ì²´ê²°ê¸ˆì•¡ì´ ë‹¬ë¼ì§ˆ ìˆ˜ ìˆìŠµë‹ˆë‹¤.</li><li>ëŒ€íšŒ ì¢…ë£Œ í›„ì—ëŠ” ì‹ ê·œ ì£¼ë¬¸ì´ ì œí•œë©ë‹ˆë‹¤.</li><li>ëŒ€íšŒì—ì„œ ë‚˜ê°€ë©´ í•´ë‹¹ ëŒ€íšŒì˜ íˆ¬ì ê¸°ë¡ì´ ì‚­ì œë©ë‹ˆë‹¤. ëŒ€íšŒì¥ì€ ë‹¤ë¥¸ ì°¸ê°€ìê°€ ë‚¨ì•„ ìˆìœ¼ë©´ ë‚˜ê°€ê¸°ê°€ ì œí•œë  ìˆ˜ ìˆìŠµë‹ˆë‹¤.</li><li>ê³„ì • íƒˆí‡´ëŠ” í˜„ì¬ PIN ì…ë ¥ì´ í•„ìš”í•˜ë©° ê³„ì •ê³¼ ëª¨ì˜íˆ¬ì ë°ì´í„°ê°€ ì˜êµ¬ ì‚­ì œë©ë‹ˆë‹¤. ì§ì ‘ ê°œì„¤í•œ ëŒ€íšŒê°€ ìˆë‹¤ë©´ í•´ë‹¹ ëŒ€íšŒ ê¸°ë¡ë„ í•¨ê»˜ ì‚­ì œë©ë‹ˆë‹¤.</li></ul></section></aside></main>}
-    {view==="portfolio"&&<main className="np-page np-single np-portfolio-page">{holdings}<section className="np-panel trade-history"><div className="np-section-title"><h2>ë‚´ ì²´ê²°ë‚´ì—­</h2><span>{portfolio?.fills.length??0}ê±´</span></div>{portfolio?.fills.length?portfolio.fills.slice(0,50).map(fill=><div className="trade-row" key={fill.id}><span><b>{fill.name}</b><small>{fill.market} Â· {displaySymbol(fill.market,fill.symbol)}{fill.market==="KR"&&fill.venue?` Â· ${fill.venue}`:""} Â· {formatDateTime(fill.executedAt)}</small></span><span><b className={fill.side==="buy"?"up":"down"}>{fill.side==="buy"?"ë§¤ìˆ˜":"ë§¤ë„"} {formatQuantity(fill.quantityMicros)}{fill.market==="CRYPTO"?"ê°œ":"ì£¼"}</b><small className={fill.returnRate == null ? "" : fill.returnRate >= 0 ? "up" : "down"}>{formatKrw(fillValueKrw(fill))} Â· {fill.returnRateKind === "realized" ? "ì‹¤í˜„" : "í˜„ì¬"} {formatReturnRate(fill.returnRate)}</small></span></div>):<p className="np-empty large">ì•„ì§ ì²´ê²°ëœ ëª¨ì˜ì£¼ë¬¸ì´ ì—†ìŠµë‹ˆë‹¤.</p>}</section></main>}
-    {view==="news"&&<main className="np-page np-single"><NewsPanel items={newsItems} title={`${selected.name} ë° ì£¼ìš” ì‹œì¥ ë‰´ìŠ¤`} loading={newsLoading} usSplit={selected.market==="US"}/></main>}
-    <ParticipantActivityDialog row={selectedParticipant} onClose={()=>setSelectedParticipant(null)}/>{auth.role==="admin"&&<div className="np-mobile-admin"><AdminDialog/></div>}<nav className="np-mobile-bottom">{mobileNavItems.map(([key,Icon,label])=>{const I=Icon as typeof Home;return <button key={key} className={view===key?"active":""} onClick={()=>key==="market"?openMarketView():setView(key as AppView)}><I/><span>{label}</span></button>})}</nav></div>;
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíßµÕ:-jZ.¶›­–)Ş³R'W6R6Æ–VçB#° ¦–×÷'B²W6T6ÆÆ&6²ÂW6T6öçFW‡BÂW6TVffV7BÂW6TÆ–÷WDVffV7BÂW6U&VbÂW6U7FFRÒg&öÒ'&V7B#°¦–×÷'BÖ&¶WD6†'Bg&öÒ$ööÖ&¶WBÖ6†'B#°¦–×÷'B²õE–çWD6öçFW‡BÒg&öÒ&–çWBÖ÷G#°¦–×÷'B²6†Wg&öäF÷vâÂ6†Wg&öå&–v‡BÂ6†Wg&öåWÂFö÷$÷VâÂfÆÖRÂ†öÖRÂÆ–æT6†'BÂÆöt÷WBÂæWw7W"Â&Vg&W6„7rÂ6V&6‚Â6†–VÆD6†V6²Â7F"ÂG&6ƒ"ÂG&÷‡’ÂvÆÆWD6&G2Â‚Òg&öÒ&ÇV6–FR×&V7B#°¦–×÷'B²'WGFöâÒg&öÒ$ö6ö×öæVçG2÷V’ö'WGFöâ#°¦–×÷'B²–çWBÒg&öÒ$ö6ö×öæVçG2÷V’ö–çWB#°¦–×÷'B²–çWDõEÂ–çWDõEw&÷WÒg&öÒ$ö6ö×öæVçG2÷V’ö–çWBÖ÷G#°¦–×÷'B°¢F–ÆörÂF–Æöt6öçFVçBÂF–ÆötFW67&—F–öâÂF–Æötfö÷FW"ÂF–Æöt†VFW"À¢F–ÆöuF—FÆRÂF–ÆöuG&–vvW"À§Òg&öÒ$ö6ö×öæVçG2÷V’öF–Æör#°¦–×÷'B²F'2ÂF'46öçFVçBÂF'4Æ—7BÂF'5G&–vvW"Òg&öÒ$ö6ö×öæVçG2÷V’÷F'2#°¦–×÷'B²F&ÆRÂF&ÆT&öG’ÂF&ÆT6VÆÂÂF&ÆT†VBÂF&ÆT†VFW"ÂF&ÆU&÷rÒg&öÒ$ö6ö×öæVçG2÷V’÷F&ÆR#° §G—RÖ&¶WBÒ$µ""Â%U2"Â$5%•Dò#°§G—RÖ&¶WEF"Ò$”äDU‚"ÂÖ&¶WC°§G—RÖ&¶WD–æFW„–BÒ$´õ5’"Â$´õ4D"Â%5‚"Â$4ôÕ"Â%U4Dµ%r#°§G—RFöÖW7F–5fVçVRÒ$µ%‚"Â$å…B#°§G—RW6W"Ò²–C¢7G&–æs²æ–6¶æÖS¢7G&–æs²&öÆS¢&ÖVÖ&W""Â&FÖ–â"Ó°§G—R–ç7G'VÖVçBÒ²Ö&¶WC¢Ö&¶WC²7–Ö&öÃ¢7G&–æs²æÖS¢7G&–æs²W†6†ævS¢7G&–æs²7W'&Væ7“¢$µ%r"Â%U4B"Ó°§G—RV÷FRÒ–ç7G'VÖVçBb°¢&–6S¢çVÖ&W#²6†ævS¢çVÖ&W#²&FS¢çVÖ&W#²W†6†ævU&FS¢çVÖ&W#°¢&VfW&Væ6U&–6Só¢çVÖ&W#²÷Vãó¢çVÖ&W#²†–vƒó¢çVÖ&W#²Æ÷só¢çVÖ&W#²föÇVÖSó¢çVÖ&W#²G&F–æufÇVSó¢çVÖ&W#°¢†–vƒS%vVV³ó¢çVÖ&W#²Æ÷sS%vVV³ó¢çVÖ&W#²†–vƒS%vVV´FFSó¢7G&–ærÂçVÆÃ²Æ÷sS%vVV´FFSó¢7G&–ærÂçVÆÃ²G&F–æufVçVSó¢FöÖW7F–5fVçVS²f–Æ&ÆUfVçVW3ó¢FöÖW7F–5fVçVUµÓ°§Ó°§G—R6ö×WF—F–öâÒ°¢–C¢7G&–æs²æÖS¢7G&–æs²–çf—FT6öFS¢7G&–æs²7FGW3¢7G&–æs²–æ—F–Ä66„·'s¢çVÖ&W#°¢7F'G4C¢çVÖ&W#²VæG4C¢çVÖ&W#²'F–6—çD–C¢7G&–æs²66„·'s¢çVÖ&W#°§Ó°§G—RÆVFW&&ö&E&÷rÒ°¢&æ³¢çVÖ&W"ÂçVÆÃ²'F–6—çD–C¢7G&–æs²æ–6¶æÖS¢7G&–æs²¦ö–æVDC¢çVÖ&W#²66„·'s¢çVÖ&W#²&VÆ—¦VEæÄ·'s¢çVÖ&W#°¢–æ—F–Ä66„·'s¢çVÖ&W#²F÷FÄ76WD·'s¢çVÖ&W#²Vç&VÆ—¦VEæÄ·'s¢çVÖ&W#°¢f–ÆÄ6÷VçC¢çVÖ&W#²G&FVD–ç7G'VÖVçD6÷VçC¢çVÖ&W#²&V6VçE7–Ö&öÇ3ó¢7G&–æs°§Ó°§G—R6ö×WF—F–öåF÷–6²Ò–ç7G'VÖVçBb°¢&æ³¢çVÖ&W#°¢†öÆFW$6÷VçC¢çVÖ&W#°¢F÷FÄÖ&¶WEfÇVT·'s¢çVÖ&W#°§Ó°§G—R÷'FföÆ–òÒ°¢66÷VçC¢²66„·'s¢çVÖ&W#²&W6W'fVD66„·'s¢çVÖ&W#²f–Æ&ÆT66„·'s¢çVÖ&W#²&VÆ—¦VEæÄ·'s¢çVÖ&W#²Ö&¶WEfÇVT·'s¢çVÖ&W#²F÷FÄ76WD·'s¢çVÖ&W"Ó°¢÷6—F–öç3¢'&“Ç°¢Ö&¶WC¢Ö&¶WC²7–Ö&öÃ¢7G&–æs²æÖS¢7G&–æs²W†6†ævS¢7G&–æs²7W'&Væ7“¢7G&–æs²VçF—G”Ö–7&÷3¢çVÖ&W#°¢fW&vU&–6T·'tÖ–7&÷3¢çVÖ&W#²&VÆ—¦VEæÄ·'s¢çVÖ&W#²7W'&VçE&–6T·'tÖ–7&÷3ó¢çVÖ&W#°¢Ö&¶WEfÇVT·'só¢çVÖ&W#²Vç&VÆ—¦VEæÄ·'só¢çVÖ&W#°¢Óã°¢f–ÆÇ3¢f–ÆÅµÓ°§Ó°§G—Rf–ÆÂÒ°¢–C¢7G&–æs²6–FS¢&'W’"Â'6VÆÂ#²fVçVSó¢FöÖW7F–5fVçVRÂçVÆÃ²VçF—G”Ö–7&÷3¢çVÖ&W#²&–6TÖ–7&÷3¢çVÖ&W#²g…&FTÖ–7&÷3¢çVÖ&W#°¢W†V7WFVDC¢çVÖ&W#²Ö&¶WC¢Ö&¶WC²7–Ö&öÃ¢7G&–æs²æÖS¢7G&–æs²7W'&Væ7“¢7G&–æs°¢&WGW&å&FSó¢çVÖ&W"ÂçVÆÃ²&WGW&å&FT¶–æCó¢&7W'&VçB"Â'&VÆ—¦VB#°§Ó°§G—R'F–6—çD7F—f—G’Ò°¢'F–6—çC¢²–C¢7G&–æs²æ–6¶æÖS¢7G&–ærÓ°¢÷6—F–öç3¢÷'FföÆ–õ²'÷6—F–öç2%Ó°¢f–ÆÇ3¢f–ÆÅµÓ°§Ó°§G—R÷&FW"Ò²–C¢7G&–æs²6–FS¢&'W’"Â'6VÆÂ#²÷&FW%G—S¢&Ö&¶WB"Â&Æ–Ö—B#²fVçVSó¢FöÖW7F–5fVçVRÂçVÆÃ²VçF—G”Ö–7&÷3¢çVÖ&W#²Æ–Ö—E&–6TÖ–7&÷3ó¢çVÖ&W#²f–ÆÆVEVçF—G”Ö–7&÷3¢çVÖ&W#²7FGW3¢7G&–æs²&V¦V7F–öå&V6öãó¢7G&–æs²7&VFVDC¢çVÖ&W#²Ö&¶WC¢Ö&¶WC²7–Ö&öÃ¢7G&–æs²æÖS¢7G&–æs²7W'&Væ7“¢7G&–ærÓ°§G—RÖ&¶WE6W76–öâÒ°¢—4÷Vã¢&ööÆVã²Æ&VÃ¢7G&–æs²æ÷F–6S¢7G&–æs²6÷W&6Só¢$ädU"#²7FÆSó¢&ööÆVã²—4†öÆ–F“ó¢&ööÆVã²W†6†ævSó¢7G&–æs°¢7W'&VçE6W76–öãó¢7G&–æs²—4F–Æ–v‡E6f–æuF–ÖSó¢&ööÆVã²÷VåF–ÖT·7Có¢7G&–æs²6Æ÷6UF–ÖT·7Có¢7G&–æs°§Ó°§G—RFÖ–äFFÒ°¢W6W'3¢'&“Ç²–C§7G&–æs²æ–6¶æÖS§7G&–æs²&öÆS§7G&–æs²—47F—fS¦çVÖ&W#²7&VFVDC¦çVÖ&W#²6ö×WF—F–öä6÷VçC¦çVÖ&W#²f–ÆÄ6÷VçC¦çVÖ&W"Óã°¢6ö×WF—F–öç3¢'&“Ç²–C§7G&–æs²æÖS§7G&–æs²–çf—FT6öFS§7G&–æs²7FGW3§7G&–æs²÷væW$æ–6¶æÖS§7G&–æs²'F–6—çD6÷VçC¦çVÖ&W#²f–ÆÄ6÷VçC¦çVÖ&W"Óã°¢'F–6—çG3¢'&“Ç²–C§7G&–æs²6ö×WF—F–öä–C§7G&–æs²æ–6¶æÖS§7G&–æs²66„·'s¦çVÖ&W#²—4÷væW#¦çVÖ&W"Óã°¢VF—C¢'&“Ç²–C§7G&–æs²7F–öã§7G&–æs²F&vWEG—S§7G&–æs²F&vWD–Có§7G&–æs²FWF–Ç3§7G&–æs²7&VFVDC¦çVÖ&W#²7F÷$æ–6¶æÖS§7G&–ærÓã°¢†VÇFƒ¢²VæF–æt÷&FW'3¦çVÖ&W#²&V¦V7FVD÷&FW'3¦çVÖ&W#²7F—fU6W76–öç3¦çVÖ&W#²ÆFW7EV÷FTCó¦çVÖ&W"Ó°§Ó°§G—RvF6†Æ—7D—FVÒÒ–ç7G'VÖVçBb²–C§7G&–æs²&–6T·'tÖ–7&÷3ó¦çVÖ&W#²6†ævU&FUÓó¦çVÖ&W#²g…&FTÖ–7&÷3ó¦çVÖ&W#²&V6V—fVDCó¦çVÖ&W"Ó°§G—R÷VÆ%7Fö6²Ò–ç7G'VÖVçBb°¢&æ³¦çVÖ&W#°¢&–6S¦çVÖ&W#°¢6†ævS¦çVÖ&W#°¢6†ævU&FS¦çVÖ&W#°§Ó°§G—RæWw4—FVÒÒ²F—FÆS§7G&–æs²Æ–æ³§7G&–æs²6÷W&6S§7G&–æs²V&Æ—6†VDC¦çVÖ&W#²¶–æCó¢$Äô4Â'Â%tõ$ÄB"Ó°§G—RÖ&¶WD–æFW…V÷FRÒ²–C§7G&–æs²æÖS§7G&–æs²Ö&¶WC¤Ö&¶WC²&–6S¦çVÖ&W#²6†ævS¦çVÖ&W#²&FS¦çVÖ&W#²Væ—C§7G&–æs²6÷W&6S¢$ädU"#²F–ÖW7F×¦çVÖ&W#²öÆÆ–æt–çFW'fÃó¦çVÖ&W"Ó°§G—RÖ&¶WD–æFW„FWF–ÂÒÖ&¶WD–æFW…V÷FRb°¢7–Ö&öÃ§7G&–æs²W†6†ævS§7G&–æs²7W'&Væ7“¢$µ%r'Â%U4B#²&VfW&Væ6U&–6Só¦çVÖ&W#²÷Vãó¦çVÖ&W#²†–vƒó¦çVÖ&W#²Æ÷só¦çVÖ&W#°¢föÇVÖSó¦çVÖ&W#²G&F–æufÇVSó¦çVÖ&W#²†–vƒS%vVV³ó¦çVÖ&W#²Æ÷sS%vVV³ó¦çVÖ&W#°¢†–vƒS%vVV´FFSó§7G&–æs²Æ÷sS%vVV´FFSó§7G&–æs°¢66„'W“ó¦çVÖ&W#²66…6VÆÃó¦çVÖ&W#²6VæCó¦çVÖ&W#²&V6V—fSó¦çVÖ&W#°¢6†'D–ÖvW3ó¥'F–ÃÅ&V6÷&CÂ#Ò'Â#4Ò'Â#’"Ç7G&–æsãã°§Ó°§G—Rf–WrÒ&†öÖR"Â&Ö&¶WB"Â'vF6†Æ—7B"Â&6ö×WF—F–öâ"Â'÷'FföÆ–ò"Â&æWw2#°§G—R÷6—F–öå6÷'D¶W’Ò&æÖR"Â'VçF—G’"Â&fW&vU&–6R"Â&Ö&¶WEfÇVR"Â'Vç&VÆ—¦VEæÂ"Â'&WGW&å&FR#° ¦6öç7B6Æ–VçDæWw466†RÒæWrÖÇ7G&–ærÂ²—FV×3¤æWw4—FVÕµÓ²W‡—&W4C¦çVÖ&W"Óâ‚“°¦6öç7BÄôD”äuôÔ$´UEõ4U54”ôã¢Ö&¶WE6W76–öâÒ¶—4÷Vã¦fÇ6RÆÆ&VÃ¢.Ù™^ÉÛ‚ÊI"Ææ÷F–6S¢.¸JNÉÛN»(NÊiŞ«hÂ«¹éÈ¹Î«NÉØBÙ™^ÉÛÙY«:ÉèÈ«^¸¸¸ºBâ'Ó° ¦6öç7BDTdTÅE3¢&V6÷&CÄÖ&¶WBÂV÷FSâÒ°¢µ#¢²Ö&¶WC¢$µ""Â7–Ö&öÃ¢#S“3"ÂæÖS¢.È+ÎÈKÊNÉé"ÂW†6†ævS¢$´õ5’"Â7W'&Væ7“¢$µ%r"Â&–6S¢Â6†ævS¢Â&FS¢ÂW†6†ævU&FS¢ÒÀ¢U3¢²Ö&¶WC¢%U2"Â7–Ö&öÃ¢$Âäò"ÂæÖS¢.ÉZÙHÂ"ÂW†6†ævS¢$ä2"Â7W'&Væ7“¢%U4B"Â&–6S¢Â6†ævS¢Â&FS¢ÂW†6†ævU&FS¢ÒÀ¢5%•Dó¢²Ö&¶WC¢$5%•Dò"Â7–Ö&öÃ¢$µ%rÔ%D2"ÂæÖS¢.»˜NØ«ËÙNÉÛ‚"ÂW†6†ævS¢$ädU""Â7W'&Væ7“¢$µ%r"Â&–6S¢Â6†ævS¢Â&FS¢ÂW†6†ævU&FS¢ÒÀ§Ó° ¦6öç7BÔ$´UEô”äDU…ô”E3¢Ö&¶WD–æFW„–EµÒÒ²$´õ5’"Â$´õ4D"Â%5‚"Â$4ôÕ"Â%U4Dµ%r%Ó°¦6öç7BÔ$´UEô”äDU…ôÔUD¢&V6÷&CÄÖ&¶WD–æFW„–BÂ²æÖS§7G&–æs²Ö&¶WC¤Ö&¶WC²7–Ö&öÃ§7G&–æs²W†6†ævS§7G&–æs²7W'&Væ7“¢$µ%r'Â%U4B#²Væ—C§7G&–ærÓâÒ°¢´õ5“¢²æÖS¢.ËÙNÈªNÙKÂ"ÂÖ&¶WC¢$µ""Â7–Ö&öÃ¢$´õ5’"ÂW†6†ævS¢$µ%‚"Â7W'&Væ7“¢$µ%r"ÂVæ—C¢""ÒÀ¢´õ4D¢²æÖS¢.ËÙNÈªN¸ºR"ÂÖ&¶WC¢$µ""Â7–Ö&öÃ¢$´õ4D"ÂW†6†ævS¢$µ%‚"Â7W'&Væ7“¢$µ%r"ÂVæ—C¢""ÒÀ¢5ƒ¢²æÖS¢%2eS"ÂÖ&¶WC¢%U2"Â7–Ö&öÃ¢"ä”å‚"ÂW†6†ævS¢$”äDU‚"Â7W'&Væ7“¢%U4B"ÂVæ—C¢""ÒÀ¢4ôÕ¢²æÖS¢.¸)ÈªN¸ºRÊ(^ÙZ’"ÂÖ&¶WC¢%U2"Â7–Ö&öÃ¢"ä•„”2"ÂW†6†ævS¢$”äDU‚"Â7W'&Væ7“¢%U4B"ÂVæ—C¢""ÒÀ¢U4Dµ%s¢²æÖS¢.É¹ş¸ºÎ¹úÂÙ™ÉÊ‚"ÂÖ&¶WC¢%U2"Â7–Ö&öÃ¢%U4Dµ%r"ÂW†6†ævS¢$e‚"Â7W'&Væ7“¢$µ%r"ÂVæ—C¢.É¹"ÒÀ§Ó° ¦gVæ7F–öâ—4Ö&¶WD–æFW„–B‡fÇVS§7G&–ær“¢fÇVR—2Ö&¶WD–æFW„–B°¢&WGW&âÔ$´UEô”äDU…ô”E2æ–æ6ÇVFW2‡fÇVR2Ö&¶WD–æFW„–B“°§Ğ ¦gVæ7F–öâf÷&ÖDÖ&¶WD–æFW…fÇVR†–æFWƒ¥–6³ÄÖ&¶WD–æFW…V÷FRÂ&–B'Â'Væ—B#âÂfÇVSó¦çVÖ&W"’°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂçVÖ&W"‡fÇVR’ÃÒ’&WGW&â"Ò#°¢6öç7Bf÷&ÖGFVBÒçVÖ&W"‡fÇVR’çFôÆö6ÆU7G&–ær‚&¶òÔµ""Â°¢Ö–æ–×VÔg&7F–öäF–v—G3¢–æFW‚æ–BÓÓÒ%U4Dµ%r"ò"¢À¢Ö†–×VÔg&7F–öäF–v—G3¢"À¢Ò“°¢&WGW&âG¶f÷&ÖGFVGÒG¶–æFW‚çVæ—GÖ°§Ğ ¦gVæ7F–öâf÷&ÖDÖ&¶WD–æFW…G&F–æufÇVR‡fÇVSó¦çVÖ&W"’°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂçVÖ&W"‡fÇVR’ÃÒ’&WGW&â"Ò#°¢&WGW&âæWr–çFÂäçVÖ&W$f÷&ÖB‚&¶òÔµ""Â²æ÷FF–öã¢&6ö×7B"ÂÖ†–×VÔg&7F–öäF–v—G3£"Ò’æf÷&ÖB„çVÖ&W"‡fÇVR’“°§Ğ ¦gVæ7F–öâf÷&ÖE&–6R‡V÷FS¢V÷FR’°¢–b‚V÷FRç&–6R’&WGW&â.È¹ÎÈK‚Ù™^ÉÛ‚ÊI#°¢&WGW&âV÷FRæ7W'&Væ7’ÓÓÒ%U4B ¢òBG·V÷FRç&–6RçFôÆö6ÆU7G&–ær‚&VâÕU2"Â²Ö–æ–×VÔg&7F–öäF–v—G3¢"ÂÖ†–×VÔg&7F–öäF–v—G3¢"Ò—Ö ¢¢G·V÷FRç&–6RçFôÆö6ÆU7G&–ær‚&¶òÔµ""—ŞÉ¹°§Ğ ¦gVæ7F–öâf÷&ÖD·'r‡fÇVS¢çVÖ&W"’°¢&WGW&â(*’G´ÖF‚ç&÷VæB‡fÇVRÇÂ’çFôÆö6ÆU7G&–ær‚&¶òÔµ""—Ö°§Ğ ¦gVæ7F–öâf÷&ÖEV÷FTÖWG&–5&–6R‡V÷FS¢V÷FRÂfÇVSó¢çVÖ&W"’°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂçVÖ&W"‡fÇVR’ÃÒ’&WGW&â"Ò#°¢–b‡V÷FRæ7W'&Væ7’ÓÓÒ%U4B"’°¢&WGW&âG´çVÖ&W"‡fÇVR’çFôÆö6ÆU7G&–ær‚&VâÕU2"Â²Ö–æ–×VÔg&7F–öäF–v—G3¢"ÂÖ†–×VÔg&7F–öäF–v—G3¢BÒ—Ö°¢Ğ¢&WGW&âçVÖ&W"‡fÇVR’çFôÆö6ÆU7G&–ær‚&¶òÔµ""Â²Ö†–×VÔg&7F–öäF–v—G3¢V÷FRæÖ&¶WBÓÓÒ$5%•Dò"bbçVÖ&W"‡fÇVR’ÂòB¢Ò“°§Ğ ¦gVæ7F–öâf÷&ÖEV÷FTÖWG&–4FFR‡fÇVSó¢7G&–ærÂçVÆÂ’°¢–b‚fÇVR’&WGW&â"#°¢6öç7BÖF6‚ÒfÇVRæÖF6‚‚õâ…ÆG³GÒ’Ò…ÆG³'Ò’Ò…ÆG³'Ò’Bò“°¢&WGW&âÖF6‚òG¶ÖF6…³×ÒâG¶ÖF6…³%×ÒâG¶ÖF6…³5×Òæ¢fÇVS°§Ğ ¦gVæ7F–öâV÷FTÖWG&–4F—&V7F–öä6Æ72‡fÇVSó¢çVÖ&W"Â&VfW&Væ6U&–6Só¢çVÖ&W"’°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂçVÖ&W"‡fÇVR’ÃÒÇÂçVÖ&W"æ—4f–æ—FR‡&VfW&Væ6U&–6R’ÇÂçVÖ&W"‡&VfW&Væ6U&–6R’ÃÒ’&WGW&âVæFVf–æVC°¢–b„çVÖ&W"‡fÇVR’âçVÖ&W"‡&VfW&Væ6U&–6R’’&WGW&â'W#°¢–b„çVÖ&W"‡fÇVR’ÂçVÖ&W"‡&VfW&Væ6U&–6R’’&WGW&â&F÷vâ#°¢&WGW&âVæFVf–æVC°§Ğ ¦gVæ7F–öâf÷&ÖEV÷FUföÇVÖR‡fÇVSó¢çVÖ&W"’°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂçVÖ&W"‡fÇVR’ÃÒ’&WGW&â"Ò#°¢&WGW&âçVÖ&W"‡fÇVR’çFôÆö6ÆU7G&–ær‚&¶òÔµ""Â²Ö†–×VÔg&7F–öäF–v—G3¢bÒ“°§Ğ ¦gVæ7F–öâf÷&ÖEV÷FUG&F–æufÇVR‡V÷FS¢V÷FR’°¢6öç7BfÇVRÒçVÖ&W"‡V÷FRçG&F–æufÇVRóò“°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂfÇVRÃÒ’&WGW&â"Ò#°¢6öç7B6ö×7BÒæWr–çFÂäçVÖ&W$f÷&ÖB‡V÷FRæ7W'&Væ7’ÓÓÒ%U4B"ò&VâÕU2"¢&¶òÔµ""Â°¢æ÷FF–öã¢&6ö×7B"À¢Ö†–×VÔg&7F–öäF–v—G3¢"À¢Ò’æf÷&ÖB‡fÇVR“°¢&WGW&âV÷FRæ7W'&Væ7’ÓÓÒ%U4B"òG¶6ö×7GÖ¢G¶6ö×7GŞÉ¹°§Ğ ¦gVæ7F–öâ&WGW&å&FR‡F÷FÃ¢çVÖ&W"Â–æ—F–Ã¢çVÖ&W"’°¢&WGW&â–æ—F–Ââò‚‡F÷FÂÒ–æ—F–Â’ò–æ—F–Â’¢¢°§Ğ ¦gVæ7F–öâ÷6—F–öå&WGW&å&FR‡÷6—F–öã¢÷'FföÆ–õ²'÷6—F–öç2%Õ¶çVÖ&W%Ò’°¢6öç7B6÷7D&6—4·'rÒ‡÷6—F–öâçVçF—G”Ö–7&÷2òóó’¢‡÷6—F–öâæfW&vU&–6T·'tÖ–7&÷2òóó“°¢&WGW&â6÷7D&6—4·'râò„çVÖ&W"‡÷6—F–öâçVç&VÆ—¦VEæÄ·'róò’ò6÷7D&6—4·'r’¢¢°§Ğ ¦gVæ7F–öâf÷&ÖE&WGW&å&FR‡fÇVS¢çVÖ&W"ÂçVÆÂÂVæFVf–æVB’°¢–b‡fÇVRÓÒçVÆÂÇÂçVÖ&W"æ—4f–æ—FR‡fÇVR’’&WGW&â"Ò#°¢&WGW&âG·fÇVRãÒò"²"¢"'ÒG·fÇVRçFôf—†VBƒ"—ÒV°§Ğ ¦gVæ7F–öâf÷&ÖEVçF—G’‡VçF—G”Ö–7&÷3¢çVÖ&W"’°¢&WGW&â‡VçF—G”Ö–7&÷2òóó’çFôÆö6ÆU7G&–ær‚&¶òÔµ""Â²Ö†–×VÔg&7F–öäF–v—G3¢bÒ“°§Ğ ¦gVæ7F–öâf–ÆÅfÇVT·'r†f–ÆÃ¢f–ÆÂ’°¢&WGW&â†f–ÆÂçVçF—G”Ö–7&÷2òóó’¢†f–ÆÂç&–6TÖ–7&÷2òóó’¢†f–ÆÂæg…&FTÖ–7&÷2òóó“°§Ğ ¦gVæ7F–öâf÷&ÖDFFUF–ÖR‡fÇVS¢çVÖ&W"’°¢&WGW&âæWr–çFÂäFFUF–ÖTf÷&ÖB‚&¶òÔµ""Â²ÖöçFƒ¢#"ÖF–v—B"ÂF“¢#"ÖF–v—B"Â†÷W#¢#"ÖF–v—B"ÂÖ–çWFS¢#"ÖF–v—B"Ò’æf÷&ÖB‡fÇVR“°§Ğ ¦gVæ7F–öâf÷&ÖD¦ö–äFFR‡fÇVS¢çVÖ&W"’°¢&WGW&âæWr–çFÂäFFUF–ÖTf÷&ÖB‚&¶òÔµ""Â°¢F–ÖU¦öæS¢$6–õ6V÷VÂ"À¢–V#¢&çVÖW&–2"À¢ÖöçFƒ¢#"ÖF–v—B"À¢F“¢#"ÖF–v—B"À¢Ò’æf÷&ÖB‡fÇVR’ç&WÆ6R‚õÂåÇ3òörÂ"â"’ç&WÆ6R‚õÂâBòÂ""“°§Ğ ¦gVæ7F–öâF—7Æ•7–Ö&öÂ†Ö&¶WC¢Ö&¶WBÂ7–Ö&öÃ¢7G&–ær’°¢&WGW&âÖ&¶WBÓÓÒ%U2"ò7–Ö&öÂç&WÆ6R‚õÂâƒó¤÷Ä·ÄçÅÄ’Bö’Â""’¢7–Ö&öÃ°§Ğ ¦6öç7BW5V÷FTæÖT66†RÒæWrÖÇ7G&–ærÂ7G&–æsâ‚“° ¦7–æ2gVæ7F–öâÆö6Æ—¦UW5V÷FT–ç7G'VÖVçB†–ç7G'VÖVçC¢–ç7G'VÖVçB“¢&öÖ—6SÄ–ç7G'VÖVçCâ°¢–b†–ç7G'VÖVçBæÖ&¶WBÓÒ%U2"ÇÂõ¾«ŞÙê5ÒòçFW7B†–ç7G'VÖVçBææÖR’’&WGW&â–ç7G'VÖVçC°¢6öç7B66†T¶W’ÒG¶–ç7G'VÖVçBç7–Ö&öÇÓ¢G¶–ç7G'VÖVçBæW†6†ævWÖ°¢6öç7B66†VDæÖRÒW5V÷FTæÖT66†RævWB†66†T¶W’“°¢–b†66†VDæÖR’&WGW&â²ââæ–ç7G'VÖVçBÂæÖS¢66†VDæÖRÓ°¢G'’°¢6öç7B&×2ÒæWrU$Å6V&6…&×2‡²7–Ö&öÃ¢–ç7G'VÖVçBç7–Ö&öÂÂW†6†ævS¢–ç7G'VÖVçBæW†6†ævRÂfÆÆ&6³¢–ç7G'VÖVçBææÖRÒ“°¢6öç7B&W7öç6RÒv—BfWF6‚†ö’ö–ç7G'VÖVçG2öF—7Æ’ÖæÖSòG·&×2çFõ7G&–ær‚—Ö“°¢–b‚&W7öç6Ræö²’&WGW&â–ç7G'VÖVçC°¢6öç7B–ÆöBÒv—B&W7öç6Ræ§6öâ‚’2²æÖSó¢7G&–ærÓ°¢6öç7BæÖRÒG—Vöb–ÆöBææÖRÓÓÒ'7G&–ær"bb–ÆöBææÖRçG&–Ò‚’ò–ÆöBææÖRçG&–Ò‚’¢–ç7G'VÖVçBææÖS°¢–b‚õ¾«ŞÙê5ÒòçFW7B†æÖR’’W5V÷FTæÖT66†Rç6WB†66†T¶W’ÂæÖR“°¢&WGW&âæÖRÓÓÒ–ç7G'VÖVçBææÖRò–ç7G'VÖVçB¢²ââæ–ç7G'VÖVçBÂæÖRÓ°¢Ò6F6‚°¢&WGW&â–ç7G'VÖVçC°¢Ğ§Ğ ¦gVæ7F–öâF—7Æ•&V6VçE7–Ö&öÇ2‡fÇVSó¢7G&–ær’°¢–b‚fÇVR’&WGW&â.«¹é‚ÉxnÉØÂ#°¢&WGW&âfÇVRç&WÆ6R‚ò…´Õ£Ó’Õ×³Ã'Ò•Ââƒó¤÷Ä·ÄçÅÄ•Æ"öv’Â"C"“°§Ğ ¦gVæ7F–öâ–å6Æ÷B‡²–æFW‚Ó¢²–æFWƒ¢çVÖ&W"Ò’°¢6öç7B6öçFW‡BÒW6T6öçFW‡B„õE–çWD6öçFW‡B“°¢6öç7B6Æ÷BÒ6öçFW‡Còç6Æ÷G5¶–æFW…Ó°¢&WGW&âÆF—bFFÖ7F—fS×·6Æ÷Còæ—47F—fWÒ6Æ74æÖSÒ&WF‚×–â×6Æ÷B#ç·6Æ÷Còæ6†"ò.(
+""¢çVÆÇ×·6Æ÷Còæ†4f¶T6&WBbbÆ’6Æ74æÖSÒ&WF‚×–âÖ6&WB"óçÓÂöF—cã°§Ğ ¦gVæ7F–öâWF…67&VVâ‡²öäWF†VçF–6FVBÓ¢²öäWF†VçF–6FVC¢‡W6W#¢W6W"’Óâfö–BÒ’°¢6öç7B¶ÖöFRÂ6WDÖöFUÒÒW6U7FFSÂ&Æöv–â"Â'&Vv—7FW"#â‚&Æöv–â"“°¢6öç7B¶æ–6¶æÖRÂ6WDæ–6¶æÖUÒÒW6U7FFR‚""“°¢6öç7B·–âÂ6WE–åÒÒW6U7FFR‚""“°¢6öç7B·7FGW2Â6WE7FGW5ÒÒW6U7FFR‚""“°¢6öç7B¶'W7’Â6WD'W7•ÒÒW6U7FFR†fÇ6R“° ¢6öç7B7V&Ö—BÒ7–æ2‚’Óâ°¢–b†'W7’’&WGW&ã°¢6WD'W7’‡G'VR“°¢6WE7FGW2‚""“°¢G'’°¢6öç7B&W7öç6RÒv—BfWF6‚†ö’öWF‚òG¶ÖöFWÖÂ°¢ÖWF†öC¢%õ5B"À¢†VFW'3¢²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡²æ–6¶æÖRÂ–âÒ’À¢Ò“°¢6öç7B&W7VÇBÒv—B&W7öç6Ræ§6öâ‚’2²W6W#ó¢W6W#²W'&÷#ó¢7G&–ærÓ°¢–b‚&W7öç6Ræö²ÇÂ&W7VÇBçW6W"’&WGW&â6WE7FGW2‡&W7VÇBæW'&÷"óò.ºÎ«{ÉÛÙYÊxº«¾ÙhÈ«^¸¸¸ºBâ"“°¢öäWF†VçF–6FVB‡&W7VÇBçW6W"“°¢Ò6F6‚°¢6WE7FGW2‚.É{«+ÉÛBÉ¹Ù™ÎÙYÊxÉX®È«^¸¸¸ºBâÉêÈ¹ÂÙ¸B¸ºNÈ¹ÂÈ¹Î¸øNÙ[NÊ;ÎÈKÉ©Bâ"“°¢Òf–æÆÇ’°¢6WD'W7’†fÇ6R“°¢Ğ¢Ó° ¢&WGW&â€¢ÆÖ–â6Æ74æÖSÒ&WF‚×6†VÆÂ#à¢Ç6V7F–öâ6Æ74æÖSÒ&WF‚Ö6&B#à¢ÆF—b6Æ74æÖSÒ&WF‚Ö'&æB#ãÇ7ãäÔÓÂ÷7ããÆ#îºxËÉ>º™NÉÛNØ«ƒÂö#ãÂöF—cà¢Æƒç¶ÖöFRÓÓÒ&Æöv–â"ò.Ë™Î«ZÎ¹:N«;ÂØŠÎÉé¸ÈÙ¨ÂÈ¹ÎÉéÙY«‹"¢.È8‚¸¸¸JNÉèBºxÎ¹:N«‹'ÓÂöƒà¢Çä6†DuB«8NÊ	RÉxnÉÛB¸¸¸JNÉèN«;ÂÈŠ¾Éé»˜N»»(Ù‹ºÂÉÛNÉªÙZ¸¸¸ºBãÂ÷à¢ÆF—b6Æ74æÖSÒ&ÖöFR×7v—F6‚WF‚ÖÖöFR"&öÆSÒ'F&Æ—7B"&–ÖÆ&VÃÒ.ºÎ«{ÉÛ‚»
+È¹Ò#à¢Æ'WGFöâ&öÆSÒ'F""&–×6VÆV7FVC×¶ÖöFRÓÓÒ&Æöv–â'Ò6Æ74æÖS×¶ÖöFRÓÓÒ&Æöv–â"ò&7F—fR"¢"'Òöä6Æ–6³×²‚’Óâ²6WDÖöFR‚&Æöv–â"“²6WE7FGW2‚""“²×ÓîºÎ«{ÉÛƒÂö'WGFöãà¢Æ'WGFöâ&öÆSÒ'F""&–×6VÆV7FVC×¶ÖöFRÓÓÒ'&Vv—7FW"'Ò6Æ74æÖS×¶ÖöFRÓÓÒ'&Vv—7FW""ò&7F—fR"¢"'Òöä6Æ–6³×²‚’Óâ²6WDÖöFR‚'&Vv—7FW""“²6WE7FGW2‚""“²×ÓîË)ÉØÂÉÛNÉª“Âö'WGFöãà¢ÂöF—cà¢ÆÆ&VÂ6Æ74æÖSÒ&WF‚Öf–VÆB#î¸¸¸JNÉè@¢Ä–çWBfÇVS×¶æ–6¶æÖWÒöä6†ævS×¶WfVçBÓâ6WDæ–6¶æÖR†WfVçBçF&vWBçfÇVR—ÒÖ„ÆVæwFƒ×³'ÒWFô6ö×ÆWFSÒ'W6W&æÖR"Æ6V†öÆFW#Ò.ÙYÎ«ˆ+~ÉˆºËŒ+~ÈŠ¾Éé'ã.Éé"óà¢ÂöÆ&VÃà¢ÆÆ&VÂ6Æ74æÖSÒ&WF‚Öf–VÆB#îÈŠ¾Éé»˜N»»(Ù‹‚NÉéºjÀ¢Ä–çWDõEÖ„ÆVæwFƒ×³GÒfÇVS×·–çÒöä6†ævS×·fÇVRÓâ6WE–â‡fÇVRç&WÆ6R‚õÄBörÂ""’—Ò–çWDÖöFSÒ&çVÖW&–2"WFô6ö×ÆWFS×¶ÖöFRÓÓÒ&Æöv–â"ò&7W'&VçB×77v÷&B"¢&æWr×77v÷&B'Óà¢Ä–çWDõEw&÷W6Æ74æÖSÒ&WF‚×–â#à¢µ³ÂÂ"Â5ÒæÖ†–æFW‚ÓâÅ–å6Æ÷B¶W“×¶–æFW‡Ò–æFWƒ×¶–æFW‡Òóâ—Ğ¢Âô–çWDõEw&÷Wà¢Âô–çWDõEà¢ÂöÆ&VÃà¢¶ÖöFRÓÓÒ'&Vv—7FW""bbÆF—b6Æ74æÖSÒ&WF‚Öæ÷F–6R#î¸¸¸JNÉèNÉØ¸ÈÙ¨ÂÈ‰ÎÉÈNÙÎÉyÙÎÈ¹Î¹	º›ÊI»;^ÉËÎºÂºxÎ¹:BÈ‰‚ÉxnÈ«^¸¸¸ºBãÂöF—cçĞ¢·7FGW2bbÇ6Æ74æÖSÒ&WF‚ÖW'&÷""&öÆSÒ&ÆW'B#ç·7FGW7ÓÂ÷çĞ¢Ä'WGFöâöä6Æ–6³×·7V&Ö—GÒF—6&ÆVC×¶'W7’ÇÂæ–6¶æÖRçG&–Ò‚’æÆVæwF‚Â"ÇÂ–âæÆVæwF‚ÓÒGÒ6Æ74æÖSÒ&WF‚×7V&Ö—B#à¢¶'W7’ò.Ù™^ÉÛ‚ÊIâââ"¢ÖöFRÓÓÒ&Æöv–â"ò.ºÎ«{ÉÛ‚"¢.«Éè^ÙY«:È¹ÎÉé'Ğ¢Âô'WGFöãà¢Ç6ÖÆÃî»˜N»»(Ù‹‚^Ù¨ÂÉŠNºY‚È¹Â»hB¸ùÉX‚ºÎ«{ÉÛÉÛBÊ	ÎÙYÎ¹
+¸¸¸ºBãÂ÷6ÖÆÃà¢Â÷6V7F–öãà¢ÂöÖ–ãà¢“°§Ğ ¦gVæ7F–öâ6V&6„&÷‚‡²öå6VÆV7BÓ¢²öå6VÆV7C¢†–ç7G'VÖVçC¢–ç7G'VÖVçB’Óâfö–BÒ’°¢6öç7B·VW'’Â6WEVW'•ÒÒW6U7FFR‚""“°¢6öç7B·&W7VÇG2Â6WE&W7VÇG5ÒÒW6U7FFSÄ–ç7G'VÖVçEµÓâ…µÒ“°¢6öç7B¶ÆöF–ærÂ6WDÆöF–æuÒÒW6U7FFR†fÇ6R“°¢W6TVffV7B‚‚’Óâ°¢6öç7BfÇVRÒVW'’çG&–Ò‚“°¢–b‚fÇVR’²6WE&W7VÇG2…µÒ“²6WDÆöF–ær†fÇ6R“²&WGW&ã²Ğ¢6öç7B6öçG&öÆÆW"ÒæWr&÷'D6öçG&öÆÆW"‚“°¢6öç7BF–ÖW"Ò6WEF–ÖV÷WB‚‚’Óâ°¢6WDÆöF–ær‡G'VR“°¢fWF6‚†ö’ö–ç7G'VÖVçG2÷6V&6ƒ÷ÒG¶Væ6öFUU$”6ö×öæVçB‡fÇVR—ÖÂ²6–væÃ¢6öçG&öÆÆW"ç6–væÂÒ¢çF†Vâ†7–æ2&W7öç6RÓâ°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"‚%4T$4…ôd”ÄTB"“°¢&WGW&âv—B&W7öç6Ræ§6öâ‚’2²–ç7G'VÖVçG3ó¢–ç7G'VÖVçEµÒÓ°¢Ò¢çF†Vâ†FFÓâ6WE&W7VÇG2†FFæ–ç7G'VÖVçG2óòµÒ’¢æ6F6‚‚‚’Óâ6öçG&öÆÆW"ç6–væÂæ&÷'FVBbb6WE&W7VÇG2…µÒ’¢æf–æÆÇ’‚‚’Óâ6öçG&öÆÆW"ç6–væÂæ&÷'FVBbb6WDÆöF–ær†fÇ6R’“°¢ÒÂƒ“°¢&WGW&â‚’Óâ²6ÆV%F–ÖV÷WB‡F–ÖW"“²6öçG&öÆÆW"æ&÷'B‚“²Ó°¢ÒÂ·VW'•Ò“°¢6öç7B6†ö÷6RÒ†–ç7G'VÖVçC¢–ç7G'VÖVçB’Óâ²öå6VÆV7B†–ç7G'VÖVçB“²6WEVW'’‚""“²6WE&W7VÇG2…µÒ“²Ó°¢&WGW&â€¢ÆF—b6Æ74æÖSÒ'6V&6‚×w&#à¢Å6V&6‚&–Ö†–FFVãÒ'G'VR"óà¢Æ–çWBfÇVS×·VW'—Òöä6†ævS×¶WfVçBÓâ6WEVW'’†WfVçBçF&vWBçfÇVR—ÒÆ6V†öÆFW#Ò.¸JNÉÛN»(NÊiŞ«hÎÉyÈIÂ«ZŞ¸+L+~ºû«ZŞÊ;ÎÈ¹Ü+~ËÙNÉÛ‚«(È8’"&–ÖÆ&VÃÒ.Ê(^ºª’«(È8’"óà¢·VW'’bbÆ'WGFöâ&–ÖÆ&VÃÒ.«(È8ÉkBÊxÉ««‹"öä6Æ–6³×²‚’Óâ6WEVW'’‚""—ÓãÅ‚óãÂö'WGFöãçĞ¢·VW'’bb€¢ÆF—b6Æ74æÖSÒ'6V&6‚×&W7VÇG2#à¢¶ÆöF–æròÇîÊ(^ºªÉØBËî¸©BÊIââãÂ÷â¢&W7VÇG2æÆVæwF‚ò&W7VÇG2æÖ†—FVÒÓâ€¢Æ'WGFöâ¶W“×¶G¶—FVÒæÖ&¶WGÓ¢G¶—FVÒç7–Ö&öÇÖÒöä6Æ–6³×²‚’Óâ6†ö÷6R†—FVÒ—Óà¢Ç7â6Æ74æÖSÒ'6V&6‚×&W7VÇB×7Fö6²#ãÄ–ç7G'VÖVçDÆövò–ç7G'VÖVçC×¶—FV×Ò6—¦SÒ'6Ò"óãÇ7ããÇ7G&öæsç¶—FVÒææÖWÓÂ÷7G&öæsãÇ6ÖÆÃç¶F—7Æ•7–Ö&öÂ†—FVÒæÖ&¶WBÆ—FVÒç7–Ö&öÂ—Ò+r¶—FVÒæW†6†ævWÓÂ÷6ÖÆÃãÂ÷7ããÂ÷7ãà¢Æ#ç¶—FVÒæÖ&¶WBÓÓÒ$µ""ò.«ZŞ¸+B"¢—FVÒæÖ&¶WBÓÓÒ%U2"ò.ºû«ZÒ"¢.ËÙNÉÛ‚'ÓÂö#à¢Âö'WGFöãà¢’’¢ÇîÉÛÎË™ÙY¸©BÊ(^ºªÉÛBÉxnÈ«^¸¸¸ºBãÂ÷çĞ¢ÂöF—cà¢—Ğ¢ÂöF—cà¢“°§Ğ ¦gVæ7F–öâ&VÆF—fUF–ÖR‡fÇVS¦çVÖ&W"’°¢–b‚çVÖ&W"æ—4f–æ—FR‡fÇVR’ÇÂfÇVRÃÒ’&WGW&â.¸*ÊyÂºûÈ8#°¢6öç7BÖ–çWFW2ÒÖF‚æÖ‚ƒÂÖF‚æfÆö÷"‚„FFRææ÷r‚’×fÇVR’ócó’“°¢–b†Ö–çWFW2Â’&WGW&â.»
+«ˆ‚ÊB#°¢–b†Ö–çWFW2Âc’&WGW&âG¶Ö–çWFW7Ş»hBÊF°¢–b†Ö–çWFW2ÂóCC’&WGW&âG´ÖF‚æfÆö÷"†Ö–çWFW2óc—ŞÈ¹Î«BÊF°¢&WGW&âG´ÖF‚æfÆö÷"†Ö–çWFW2óóCC—ŞÉÛÂÊF°§Ğ ¦gVæ7F–öâf÷&ÖEvF6…&–6R†—FVÓ¥vF6†Æ—7D—FVÒ’°¢–b‚—FVÒç&–6T·'tÖ–7&÷2’&WGW&â.È¹ÎÈK‚¸È«‹#°¢6öç7B·'rÒ—FVÒç&–6T·'tÖ–7&÷2óóó°¢–b†—FVÒæ7W'&Væ7’ÓÓÒ%U4B"’&WGW&âBG²†·'rò‚†—FVÒæg…&FTÖ–7&÷2óòóó’óóó’’çFôÆö6ÆU7G&–ær‚&VâÕU2"Ç¶Ö†–×VÔg&7F–öäF–v—G3£'Ò—Ö°¢&WGW&âG´ÖF‚ç&÷VæB†·'r’çFôÆö6ÆU7G&–ær‚&¶òÔµ""—ŞÉ¹°§Ğ ¦gVæ7F–öâ¦ö–äF–Æör‡²öä6†ævVBÓ¢²öä6†ævVC¢‚’Óâfö–BÒ’°¢6öç7B¶ÖöFRÂ6WDÖöFUÒÒW6U7FFSÂ&¦ö–â"Â&7&VFR#â‚&¦ö–â"“°¢6öç7B¶6öFRÂ6WD6öFUÒÒW6U7FFR‚""“°¢6öç7B¶æÖRÂ6WDæÖUÒÒW6U7FFR‚.Ë™Î«ZÂØŠÎÉé¸ÈÙ¨Â"“°¢6öç7B¶66‚Â6WD66…ÒÒW6U7FFR‚#"“°¢6öç7B¶VæG4öâÂ6WDVæG4öåÒÒW6U7FFR‚‚’Óâ°¢6öç7BFFRÒæWrFFR„FFRææ÷r‚’²3¢ƒeóCó“°¢&WGW&âæWr–çFÂäFFUF–ÖTf÷&ÖB‚&VâÔ4"Â²F–ÖU¦öæS¢$6–õ6V÷VÂ"Â–V#¢&çVÖW&–2"ÂÖöçFƒ¢#"ÖF–v—B"ÂF“¢#"ÖF–v—B"Ò’æf÷&ÖB†FFR“°¢Ò“°¢6öç7B·7FGW2Â6WE7FGW5ÒÒW6U7FFR‚""“°¢6öç7B7V&Ö—BÒ7–æ2‚’Óâ°¢6WE7FGW2‚.Ë)ºjÂÊIâââ"“°¢6öç7Bæ÷rÒFFRææ÷r‚“°¢6öç7BVæG4BÒFFRç'6R†G¶VæG4öçÕC#3£S“£S’³“£“°¢–b†ÖöFRÓÓÒ&7&VFR"bb‚çVÖ&W"æ—4f–æ—FR†VæG4B’ÇÂVæG4BÃÒæ÷r’’&WGW&â6WE7FGW2‚.ÉŠN¸©‚ÉÛNÙ¸NÉÙ‚Ê(^º8ÎÉÛÎÉØBÈJØ9ŞÙ[NÊ;ÎÈKÉ©Bâ"“°¢6öç7B–ÆöBÒÖöFRÓÓÒ&¦ö–â"ò²–çf—FT6öFS¢6öFRÒ¢°¢æÖRÂ–æ—F–Ä66„·'s¢çVÖ&W"†66‚’Â7F'G4C¢æ÷rÒóÂVæG4BÀ¢Ó°¢6öç7B&W7öç6RÒv—BfWF6‚†ÖöFRÓÓÒ&¦ö–â"ò"ö’ö6ö×WF—F–öç2ö¦ö–â"¢"ö’ö6ö×WF—F–öç2"Â°¢ÖWF†öC¢%õ5B"Â†VFW'3¢²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ"ÒÂ&öG“¢¥4ôâç7G&–æv–g’‡–ÆöB’À¢Ò“°¢6öç7B&W7VÇBÒv—B&W7öç6Ræ§6öâ‚’2²W'&÷#ó¢7G&–æs²6ö×WF—F–öãó¢²–çf—FT6öFSó¢7G&–ærÒÓ°¢–b‚&W7öç6Ræö²’&WGW&â6WE7FGW2‡&W7VÇBæW'&÷"óò.Ë)ºjÎÙYÊxº«¾ÙhÈ«^¸¸¸ºBâ"“°¢6WE7FGW2†ÖöFRÓÓÒ&¦ö–â"ò.¸ÈÙ¨ÎÉyË«ÙhÈ«^¸¸¸ºBâ"¢¸ÈÙ¨Îº[ÂºxÎ¹:NÉxÈ«^¸¸¸ºBâËH¸ÈËÙN¹9Ã¢G·&W7VÇBæ6ö×WF—F–öãòæ–çf—FT6öFWÖ“°¢öä6†ævVB‚“°¢Ó°¢&WGW&â€¢ÄF–Æösà¢ÄF–ÆöuG&–vvW"46†–ÆCãÄ'WGFöâ6Æ74æÖSÒ&6öçFW7BÖ'WGFöâ#ãÅG&÷‡’óâ¸ÈÙ¨ÂË«Âô'WGFöããÂôF–ÆöuG&–vvW#à¢ÄF–Æöt6öçFVçB6Æ74æÖSÒ'&÷VæFVBÓ'†Â&÷&FW"ÓÓ6Ó¦Ö‚×rÖÖB#à¢ÄF–Æöt†VFW"6Æ74æÖSÒ&&÷&FW"Ö"‚Ób’ÓR#à¢ÄF–ÆöuF—FÆSç¶ÖöFRÓÓÒ&¦ö–â"ò.ËH¸ÈËÙN¹9ÎºÂË«"¢.È8‚¸ÈÙ¨ÂºxÎ¹:N«‹'ÓÂôF–ÆöuF—FÆSà¢ÄF–ÆötFW67&—F–öãîºª¹:Ë«Éé««	ÉØ«ˆÉZÉËÎºÂÈ¹ÎÉéÙZ¸¸¸ºBãÂôF–ÆötFW67&—F–öãà¢ÂôF–Æöt†VFW#à¢ÆF—b6Æ74æÖSÒ'76R×’ÓB‚Ób’Ó"#à¢ÆF—b6Æ74æÖSÒ&ÖöFR×7v—F6‚#ãÆ'WGFöâ6Æ74æÖS×¶ÖöFRÓÓÒ&¦ö–â"ò&7F—fR"¢"'Òöä6Æ–6³×²‚’Óâ6WDÖöFR‚&¦ö–â"—Óî¸ÈÙ¨ÂË«Âö'WGFöããÆ'WGFöâ6Æ74æÖS×¶ÖöFRÓÓÒ&7&VFR"ò&7F—fR"¢"'Òöä6Æ–6³×²‚’Óâ6WDÖöFR‚&7&VFR"—Óî¸ÈÙ¨Â«	ÎÈJCÂö'WGFöããÂöF—cà¢¶ÖöFRÓÓÒ&¦ö–â"òÆÆ&VÂ6Æ74æÖSÒ&f–VÆBÖÆ&VÂ#îËH¸ÈËÙN¹9ÃÄ–çWBfÇVS×¶6öFWÒöä6†ævS×¶WfVçBÓâ6WD6öFR†WfVçBçF&vWBçfÇVRçFõWW$66R‚’—ÒÆ6V†öÆFW#Ò$ÔDRÕ……………‚"6Æ74æÖSÒ&×BÓ"WW&66R"óãÂöÆ&VÃâ¢Ãà¢ÆÆ&VÂ6Æ74æÖSÒ&f–VÆBÖÆ&VÂ#î¸ÈÙ¨ÂÉÛNºhCÄ–çWBfÇVS×¶æÖWÒöä6†ævS×¶WfVçBÓâ6WDæÖR†WfVçBçF&vWBçfÇVR—Ò6Æ74æÖSÒ&×BÓ""Ö„ÆVæwFƒ×³cÒóãÂöÆ&VÃà¢ÆÆ&VÂ6Æ74æÖSÒ&f–VÆBÖÆ&VÂ#îÈ¹ÎÉéÉé«ˆƒÄ–çWBfÇVS×¶66‡Òöä6†ævS×¶WfVçBÓâ6WD66‚†WfVçBçF&vWBçfÇVRç&WÆ6R‚õÄBörÂ""’—Ò6Æ74æÖSÒ&×BÓ""–çWDÖöFSÒ&çVÖW&–2"óãÂöÆ&VÃà¢ÆÆ&VÂ6Æ74æÖSÒ&f–VÆBÖÆ&VÂ#î¸ÈÙ¨ÂÊ(^º8ÎÉÛÃÄ–çWBG—SÒ&FFR"fÇVS×¶VæG4öçÒöä6†ævS×¶WfVçBÓâ6WDVæG4öâ†WfVçBçF&vWBçfÇVR—Ò6Æ74æÖSÒ&×BÓ""óãÇ6ÖÆÃîÈJØ9ŞÙYÂ¸*ÊyÎÉÙ‚#3£S’„µ5BÉyÊ(^º8Î¹
+¸¸¸ºBãÂ÷6ÖÆÃãÂöÆ&VÃà¢ÂóçĞ¢ÂöF—cà¢ÄF–Æötfö÷FW"6Æ74æÖSÒ'‚Ób"Ób#ãÆF—b6Æ74æÖSÒ'rÖgVÆÂ#ç·7FGW2bbÇ6Æ74æÖSÒ&Ö"Ó2FW‡BÖ6VçFW"FW‡B×‡2FW‡BÖ×WFVBÖf÷&Vw&÷VæB"&öÆSÒ'7FGW2#ç·7FGW7ÓÂ÷çÓÄ'WGFöâöä6Æ–6³×·7V&Ö—GÒ6Æ74æÖSÒ'rÖgVÆÂ&rÕ²3–“sEÒ†÷fW#¦&rÕ²3CƒsVEÒ#ç¶ÖöFRÓÓÒ&¦ö–â"ò.Ë«ÙY«‹"¢.¸ÈÙ¨ÂºxÎ¹:N«‹'ÓÂô'WGFöããÂöF—cãÂôF–Æötfö÷FW#à¢ÂôF–Æöt6öçFVçCà¢ÂôF–Æösà¢“°§Ğ ¦gVæ7F–öâ'F–6—çD7F—f—G”F–Æör‡²&÷rÂöä6Æ÷6RÓ¢²&÷s¢ÆVFW&&ö&E&÷rÂçVÆÃ²öä6Æ÷6S¢‚’Óâfö–BÒ’°¢6öç7B¶7F—f—G’Â6WD7F—f—G•ÒÒW6U7FFSÅ'F–6—çD7F—f—G’ÂçVÆÃâ†çVÆÂ“°¢6öç7B·7FGW2Â6WE7FGW5ÒÒW6U7FFR‚""“°¢W6TVffV7B‚‚’Óâ°¢–b‚&÷r’²6WD7F—f—G’†çVÆÂ“²6WE7FGW2‚""“²&WGW&ã²Ğ¢6öç7B6öçG&öÆÆW"ÒæWr&÷'D6öçG&öÆÆW"‚“°¢6WE7FGW2‚.«¹é¸+NÉzŞÉØB»h¹úÎÉŠN¸©BÊIâââ"“°¢fWF6‚†ö’÷'F–6—çG2ö7F—f—G“÷'F–6—çD–CÒG¶Væ6öFUU$”6ö×öæVçB‡&÷rç'F–6—çD–B—ÖÂ²66†S¢&æò×7F÷&R"Â6–væÃ¢6öçG&öÆÆW"ç6–væÂÒ¢çF†Vâ†7–æ2&W7öç6RÓâ°¢6öç7B&W7VÇBÒv—B&W7öç6Ræ§6öâ‚’2'F–6—çD7F—f—G’b²W'&÷#ó¢7G&–ærÓ°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"‡&W7VÇBæW'&÷"óò.«¹é¸+NÉzŞÉØB»h¹úÎÉŠNÊxº«¾ÙhÈ«^¸¸¸ºBâ"“°¢6WD7F—f—G’‡&W7VÇB“²6WE7FGW2‚""“°¢Ò¢æ6F6‚†W'&÷"Óâ²–b‚6öçG&öÆÆW"ç6–væÂæ&÷'FVB’6WE7FGW2†W'&÷"–ç7Fæ6VöbW'&÷"òW'&÷"æÖW76vR¢.«¹é¸+NÉzŞÉØB»h¹úÎÉŠNÊxº«¾ÙhÈ«^¸¸¸ºBâ"“²Ò“°¢&WGW&â‚’Óâ6öçG&öÆÆW"æ&÷'B‚“°¢ÒÂ·&÷uÒ“°¢&WGW&âÄF–Æör÷Vã×´&ööÆVâ‡&÷r—Òöä÷Vä6†ævS×¶÷VâÓâ²–b‚÷Vâ’öä6Æ÷6R‚“²×ÓãÄF–Æöt6öçFVçB6Æ74æÖSÒ&7F—f—G’ÖF–Æör6Ó¦Ö‚×rÓ'†Â#à¢ÄF–Æöt†VFW#ãÄF–ÆöuF—FÆSç·&÷sòææ–6¶æÖWŞ¸¹ÉÙ‚ØŠÎÉéÙˆNÙš“ÂôF–ÆöuF—FÆSãÄF–ÆötFW67&—F–öãç·&÷ròË«ÉÛÂG¶f÷&ÖD¦ö–äFFR‡&÷ræ¦ö–æVDB—Ò+r¢"'Ş«	ÉØ¸ÈÙ¨ÂË«ÉéÉy«(Â«;^«	Î¹	¸©B»;NÉÊÊ(^ºª«;ÂºªÉÙË+N«+¸+NÉzŞÉè^¸¸¸ºBãÂôF–ÆötFW67&—F–öããÂôF–Æöt†VFW#à¢·7FGW2òÇ6Æ74æÖSÒ&7F—f—G’×7FGW2#ç·7FGW7ÓÂ÷â¢ÅF'2FVfVÇEfÇVSÒ'÷6—F–öç2#ãÅF'4Æ—7B6Æ74æÖSÒ&7F—f—G’×F'2#ãÅF'5G&–vvW"fÇVSÒ'÷6—F–öç2#î»;NÉÊÊ(^ºª’¶7F—f—G“òç÷6—F–öç2æÆVæwF‚óòÓÂõF'5G&–vvW#ãÅF'5G&–vvW"fÇVSÒ&f–ÆÇ2#îË+N«+¸+NÉzÒ¶7F—f—G“òæf–ÆÇ2æÆVæwF‚óòÓÂõF'5G&–vvW#ãÂõF'4Æ—7Cà¢ÅF'46öçFVçBfÇVSÒ'÷6—F–öç2"6Æ74æÖSÒ&7F—f—G’ÖÆ—7B#ç¶7F—f—G“òç÷6—F–öç2æÆVæwF‚ò7F—f—G’ç÷6—F–öç2æÖ‡÷6—F–öâÓâÆF—b¶W“×¶G·÷6—F–öâæÖ&¶WGÓ¢G·÷6—F–öâç7–Ö&öÇÖÓãÇ7ããÆ#ç·÷6—F–öâææÖWÓÂö#ãÇ6ÖÆÃç·÷6—F–öâæÖ&¶WGÒ+r¶F—7Æ•7–Ö&öÂ‡÷6—F–öâæÖ&¶WBÇ÷6—F–öâç7–Ö&öÂ—Ò+r·÷6—F–öâæW†6†ævWÓÂ÷6ÖÆÃãÂ÷7ããÇ7ããÆ#ç¶f÷&ÖEVçF—G’‡÷6—F–öâçVçF—G”Ö–7&÷2—ÓÂö#ãÇ6ÖÆÂ6Æ74æÖS×²‡÷6—F–öâçVç&VÆ—¦VEæÄ·'róò’ãÒò'W"¢&F÷vâ'Óç¶f÷&ÖD·'r‡÷6—F–öâçVç&VÆ—¦VEæÄ·'róò—Ò+r·÷6—F–öâæ7W'&VçE&–6T·'tÖ–7&÷2òf÷&ÖE&WGW&å&FR‡÷6—F–öå&WGW&å&FR‡÷6—F–öâ’’¢"Ò'ÓÂ÷6ÖÆÃãÂ÷7ããÂöF—câ’¢ÇîÙˆNÉêÂ»;NÉÊÊ(^ºªÉÛBÉxnÈ«^¸¸¸ºBãÂ÷çÓÂõF'46öçFVçCà¢ÅF'46öçFVçBfÇVSÒ&f–ÆÇ2"6Æ74æÖSÒ&7F—f—G’ÖÆ—7B#ç¶7F—f—G“òæf–ÆÇ2æÆVæwF‚ò7F—f—G’æf–ÆÇ2æÖ†f–ÆÂÓâÆF—b¶W“×¶f–ÆÂæ–GÓãÇ7ããÆ#ç¶f–ÆÂææÖWÓÂö#ãÇ6ÖÆÃç¶f÷&ÖDFFUF–ÖR†f–ÆÂæW†V7WFVDB—×¶f–ÆÂæÖ&¶WCÓÓÒ$µ""bff–ÆÂçfVçVSö+rG¶f–ÆÂçfVçVWÖ¢"'Ò+r¶f÷&ÖEVçF—G’†f–ÆÂçVçF—G”Ö–7&÷2—×¶f–ÆÂæÖ&¶WBÓÓÒ$5%•Dò"ò.«	Â"¢.Ê;Â'ÓÂ÷6ÖÆÃãÂ÷7ããÇ7ããÆ"6Æ74æÖS×¶f–ÆÂç6–FRÓÓÒ&'W’"ò'W"¢&F÷vâ'Óç¶f–ÆÂç6–FRÓÓÒ&'W’"ò.ºzNÈ‰‚"¢.ºzN¸øB'ÓÂö#ãÇ6ÖÆÂ6Æ74æÖS×¶f–ÆÂç&WGW&å&FRÓÒçVÆÂò""¢f–ÆÂç&WGW&å&FRãÒò'W"¢&F÷vâ'Óç¶f÷&ÖD·'r†f–ÆÅfÇVT·'r†f–ÆÂ’—Ò+r¶f–ÆÂç&WGW&å&FT¶–æBÓÓÒ'&VÆ—¦VB"ò.ÈºNÙˆB"¢.ÙˆNÉêÂ'Ò¶f÷&ÖE&WGW&å&FR†f–ÆÂç&WGW&å&FR—ÓÂ÷6ÖÆÃãÂ÷7ããÂöF—câ’¢ÇîÉXNÊxË+N«+¸+NÉzŞÉÛBÉxnÈ«^¸¸¸ºBãÂ÷çÓÂõF'46öçFVçCà¢ÂõF'3çĞ¢ÂôF–Æöt6öçFVçCãÂôF–Æösã°§Ğ ¦gVæ7F–öâ66÷VçE6WGF–æw4F–Æör‡²W6W"ÂöåWFFVBÂöäFVÆWFVBÂ6ö×7BÒfÇ6RÓ¢²W6W#¢W6W#²öåWFFVC¢‡W6W#¢W6W"’Óâfö–C²öäFVÆWFVC¢‚’Óâfö–C²6ö×7Có¢&ööÆVâÒ’°¢6öç7B¶÷VâÂ6WD÷VåÒÒW6U7FFR†fÇ6R“°¢6öç7B¶æ–6¶æÖRÂ6WDæ–6¶æÖUÒÒW6U7FFR‡W6W"ææ–6¶æÖR“°¢6öç7B¶7W'&VçE–âÂ6WD7W'&VçE–åÒÒW6U7FFR‚""“°¢6öç7B¶æWu–âÂ6WDæWu–åÒÒW6U7FFR‚""“°¢6öç7B¶6öæf—&Õ–âÂ6WD6öæf—&Õ–åÒÒW6U7FFR‚""“°¢6öç7B¶æ–6¶æÖTÆö6¶VBÂ6WDæ–6¶æÖTÆö6¶VEÒÒW6U7FFR†fÇ6R“°¢6öç7B·7FGW2Â6WE7FGW5ÒÒW6U7FFR‚""“°¢6öç7B¶'W7’Â6WD'W7•ÒÒW6U7FFR†fÇ6R“° ¢W6TVffV7B‚‚’Óâ²6WDæ–6¶æÖR‡W6W"ææ–6¶æÖR“²ÒÂ·W6W"ææ–6¶æÖUÒ“°¢W6TVffV7B‚‚’Óâ°¢–b‚÷Vâ’&WGW&ã°¢ÆWB7F—fRÒG'VS°¢6WE7FGW2‚""“°¢6WD7W'&VçE–â‚""“°¢6WDæWu–â‚""“°¢6WD6öæf—&Õ–â‚""“°¢fWF6‚‚"ö’öWF‚ö66÷VçB"Â²66†S¢&æò×7F÷&R"Ò¢çF†Vâ†7–æ2&W7öç6RÓâ°¢6öç7B&W7VÇBÒv—B&W7öç6Ræ§6öâ‚’2²W6W#ó¢W6W#²æ–6¶æÖTÆö6¶VCó¢&ööÆVã²W'&÷#ó¢7G&–ærÓ°¢–b‚&W7öç6Ræö²ÇÂ&W7VÇBçW6W"’F‡&÷ræWrW'&÷"‡&W7VÇBæW'&÷"óò.«8NÊ	RÊ	^»;Nº[Â»h¹úÎÉŠNÊxº«¾ÙhÈ«^¸¸¸ºBâ"“°¢–b‚7F—fR’&WGW&ã°¢6WDæ–6¶æÖR‡&W7VÇBçW6W"ææ–6¶æÖR“°¢6WDæ–6¶æÖTÆö6¶VB„&ööÆVâ‡&W7VÇBææ–6¶æÖTÆö6¶VB’“°¢öåWFFVB‡&W7VÇBçW6W"“°¢Ò¢æ6F6‚†W'&÷"Óâ7F—fRbb6WE7FGW2†W'&÷"–ç7Fæ6VöbW'&÷"òW'&÷"æÖW76vR¢.«8NÊ	RÊ	^»;Nº[Â»h¹úÎÉŠNÊxº«¾ÙhÈ«^¸¸¸ºBâ"’“°¢&WGW&â‚’Óâ²7F—fRÒfÇ6S²Ó°¢ÒÂ¶÷VâÂöåWFFVEÒ“° ¢6öç7B6fRÒ7–æ2‚’Óâ°¢–b†'W7’’&WGW&ã°¢–b†æWu–âbbæWu–âÓÒ6öæf—&Õ–â’°¢6WE7FGW2‚.È8‚»˜N»»(Ù‹‚Ù™^ÉÛÉÛBÉÛÎË™ÙYÊxÉX®È«^¸¸¸ºBâ"“°¢&WGW&ã°¢Ğ¢6WD'W7’‡G'VR“°¢6WE7FGW2‚""“°¢G'’°¢6öç7B&W7öç6RÒv—BfWF6‚‚"ö’öWF‚ö66÷VçB"Â°¢ÖWF†öC¢%D4‚"À¢†VFW'3¢²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡°¢7W'&VçE–âÀ¢æ–6¶æÖRÀ¢âââ†æWu–âò²æWu–âÒ¢·Ò’À¢Ò’À¢Ò“°¢6öç7B&W7VÇBÒv—B&W7öç6Ræ§6öâ‚’2²W6W#ó¢W6W#²æ–6¶æÖTÆö6¶VCó¢&ööÆVã²W'&÷#ó¢7G&–ærÓ°¢–b‚&W7öç6Ræö²ÇÂ&W7VÇBçW6W"’°¢–b‡&W7VÇBææ–6¶æÖTÆö6¶VB’6WDæ–6¶æÖTÆö6¶VB‡G'VR“°¢6WE7FGW2‡&W7VÇBæW'&÷"óò.«8NÊ	RÊ	^»;Nº[Â»8«+ŞÙYÊxº«¾ÙhÈ«^¸¸¸ºBâ"“°¢&WGW&ã°¢Ğ¢öåWFFVB‡&W7VÇBçW6W"“°¢6WDæ–6¶æÖR‡&W7VÇBçW6W"ææ–6¶æÖR“°¢6WDæ–6¶æÖTÆö6¶VB„&ööÆVâ‡&W7VÇBææ–6¶æÖTÆö6¶VB’“°¢6WD7W'&VçE–â‚""“°¢6WDæWu–â‚""“°¢6WD6öæf—&Õ–â‚""“°¢6WE7FGW2‚.«8NÊ	RÊ	^»;Nº[Â»8«+ŞÙhÈ«^¸¸¸ºBâ"“°¢Ò6F6‚°¢6WE7FGW2‚.É{«+ÉÛBÉ¹Ù™ÎÙYÊxÉX®È«^¸¸¸ºBâÉêÈ¹ÂÙ¸B¸ºNÈ¹ÂÈ¹Î¸øNÙ[NÊ;ÎÈKÉ©Bâ"“°¢Òf–æÆÇ’°¢6WD'W7’†fÇ6R“°¢Ğ¢Ó° ¢6öç7BFVÆWFT66÷VçBÒ7–æ2‚’Óâ°¢–b†'W7’’&WGW&ã°¢–b†7W'&VçE–âæÆVæwF‚ÓÒB’°¢6WE7FGW2‚.«8NÊ	^ÉØBÈ*ŞÊ	ÎÙYº
+Nº›BÙˆNÉêÂ»˜N»»(Ù‹‚NÉéºjÎº[ÂÉè^º
+^Ù[NÊ;ÎÈKÉ©Bâ"“°¢&WGW&ã°¢Ğ¢–b‚v–æF÷ræ6öæf—&Ò‚.«8NÊ	^ÉØBÈ*ŞÊ	ÎÙYº›BË«ÊIÉÛ‚¸ÈÙ¨Â«‹ºÒÂÊ;ÎºËŒ+~Ë+N«++~»;NÉÊ¸+NÉzÒÂ«HÈºÎÊ(^ºªÉÛBºª¹È*ŞÊ	Î¹
+¸¸¸ºBâ¸+N««	ÎÈJNÙYÂ¸ÈÙ¨Î¸øBÙZ«¹‚È*ŞÊ	Î¹	º›»;^«ZÎÙZÈ‰‚ÉxnÈ«^¸¸¸ºBâÊ	^ºy«8NÊ	^ÉØBÈ*ŞÊ	ÎÙZ«˜ÎÉ©Cò"’’&WGW&ã°¢6WD'W7’‡G'VR“°¢6WE7FGW2‚""“°¢G'’°¢6öç7B&W7öç6RÒv—BfWF6‚‚"ö’öWF‚ö66÷VçB"Â°¢ÖWF†öC¢$DTÄUDR"À¢†VFW'3¢²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡²7W'&VçE–âÒ’À¢Ò“°¢6öç7B&W7VÇBÒv—B&W7öç6Ræ§6öâ‚’2²ö³ó¢&ööÆVã²W'&÷#ó¢7G&–ærÓ°¢–b‚&W7öç6Ræö²ÇÂ&W7VÇBæö²’°¢6WE7FGW2‡&W7VÇBæW'&÷"óò.«8NÊ	^ÉØBÈ*ŞÊ	ÎÙYÊxº«¾ÙhÈ«^¸¸¸ºBâ"“°¢&WGW&ã°¢Ğ¢6WD÷Vâ†fÇ6R“°¢öäFVÆWFVB‚“°¢Ò6F6‚°¢6WE7FGW2‚.É{«+ÉÛBÉ¹Ù™ÎÙYÊxÉX®È«^¸¸¸ºBâÉêÈ¹ÂÙ¸B¸ºNÈ¹ÂÈ¹Î¸øNÙ[NÊ;ÎÈKÉ©Bâ"“°¢Òf–æÆÇ’°¢6WD'W7’†fÇ6R“°¢Ğ¢Ó° ¢6öç7Bæ–6¶æÖT6†ævVBÒæ–6¶æÖRææ÷&ÖÆ—¦R‚$äd´2"’çG&–Ò‚’ÓÒW6W"ææ–6¶æÖS°¢6öç7B–ä6†ævVBÒæWu–âæÆVæwF‚â°¢6öç7B6å6fRÒ7W'&VçE–âæÆVæwF‚ÓÓÒBbb†æ–6¶æÖT6†ævVBÇÂ–ä6†ævVB’bb‚–ä6†ævVBÇÂ†æWu–âæÆVæwF‚ÓÓÒBbb6öæf—&Õ–âÓÓÒæWu–â’“° ¢&WGW&âÄF–Æör÷Vã×¶÷VçÒöä÷Vä6†ævS×·6WD÷VçÓà¢ÄF–ÆöuG&–vvW"46†–ÆCãÆ'WGFöâG—SÒ&'WGFöâ"6Æ74æÖS×¶66÷VçB×6WGF–æw2×G&–vvW"G¶6ö×7Bò"6ö×7B"¢"'ÖÒ&–ÖÆ&VÃÒ.«8NÊ	RÈJNÊ	R#î«8NÊ	RÈJNÊ	SÂö'WGFöããÂôF–ÆöuG&–vvW#à¢ÄF–Æöt6öçFVçB6Æ74æÖSÒ&66÷VçB×6WGF–æw2ÖF–Æör6Ó¦Ö‚×rÖÖB#à¢ÄF–Æöt†VFW#à¢ÄF–ÆöuF—FÆSî«8NÊ	RÈMyë]m¢G§²ÚîÆ­yÖ7F—fR—·6WD–æFW…7FGW2‚'Væf–Æ&ÆR"“·66†VGVÆRƒó“·×Ò“·Ó·fö–BÆöB‚“·&WGW&â‚“Óç¶7F—fSÖfÇ6S¶–b‡F–ÖW"–6ÆV%F–ÖV÷WB‡F–ÖW"“·Ó·ÒÅ¶WF‚Çf–WrÆÖ&¶WEF"Ç6VÆV7FVD–æFW„–EÒ“°¢6öç7BW'6—7DÆ7Ef–WvVC×W6T6ÆÆ&6²‚†æW‡DÖ&¶WC¤Ö&¶WBÆ–ç7G'VÖVçG3¥'F–ÃÅ&V6÷&CÄÖ&¶WBÄ–ç7G'VÖVçCãâ“Óç¶–b‚WF‡ÇÆWFƒÓÓÒ&ÆöF–ær"—&WGW&ã·G'—·v–æF÷ræÆö6Å7F÷&vRç6WD—FVÒ†Ö&¶WFÖFS¦Æ7B×f–WvVC¢G¶WF‚æ–GÖÄ¥4ôâç7G&–æv–g’‡¶Æ7DÖ&¶WC¦æW‡DÖ&¶WBÆ–ç7G'VÖVçG7Ò’“·Ö6F6‡·×ÒÅ¶WF…Ò“°¢6öç7BV÷FTg&öÔ–ç7G'VÖVçC×W6T6ÆÆ&6²‚†–ç7G'VÖVçC¤–ç7G'VÖVçB“¥V÷FSÓâ‡²ââæ–ç7G'VÖVçBÇ&–6S£Æ6†ævS£Ç&FS£ÆW†6†ævU&FS£Ò’ÅµÒ“°¢6öç7B&VÖVÖ&W$–ç7G'VÖVçC×W6T6ÆÆ&6²‚†–ç7G'VÖVçC¤–ç7G'VÖVçB“Óç¶6öç7Bæ÷&ÖÆ—¦VC¤–ç7G'VÖVçC×¶Ö&¶WC¦–ç7G'VÖVçBæÖ&¶WBÇ7–Ö&öÃ¦–ç7G'VÖVçBç7–Ö&öÂÆæÖS¦–ç7G'VÖVçBææÖRÆW†6†ævS¦–ç7G'VÖVçBæW†6†ævRÆ7W'&Væ7“¦–ç7G'VÖVçBæ7W'&Væ7—Ó·6WDÆ7Ef–WvVDÖ&¶WB†æ÷&ÖÆ—¦VBæÖ&¶WB“·6WDÆ7Ef–WvVB†7W'&VçCÓç¶6öç7BæW‡C×²ââæ7W'&VçBÅ¶æ÷&ÖÆ—¦VBæÖ&¶WEÓ¦æ÷&ÖÆ—¦VGÓ·W'6—7DÆ7Ef–WvVB†æ÷&ÖÆ—¦VBæÖ&¶WBÆæW‡B“·&WGW&âæW‡C·Ò“·ÒÅ·W'6—7DÆ7Ef–WvVEÒ“°¢6öç7B&W7F÷&U&VÖVÖ&W&VCÒ†æW‡C¤Ö&¶WB“Óç¶6öç7B&VÖVÖ&W&VCÖÆ7Ef–WvVE¶æW‡EÓ¶–b‚&VÖVÖ&W&VCòç7–Ö&öÇÇÂ&VÖVÖ&W&VBææÖR—&WGW&âfÇ6S·6WE6VÆV7FVB‡V÷FTg&öÔ–ç7G'VÖVçB‡&VÖVÖ&W&VB’“·&WGW&âG'VS·Ó°¢6öç7B÷VäÖ&¶WEf–WsÒ‚“Óç¶6öç7BæW‡CÖÆ7Ef–WvVE¶Æ7Ef–WvVDÖ&¶WEÓòç7–Ö&öÃöÆ7Ef–WvVDÖ&¶WC§6VÆV7FVBæÖ&¶WC¶–b†æW‡BÓÖÖ&¶WB—6WDÖ&¶WE6W76–öâ„ÄôD”äuôÔ$´UEõ4U54”ôâ“·6WDÖ&¶WB†æW‡B“·6WDÖ&¶WEF"†æW‡B“·&W7F÷&U&VÖVÖ&W&VB†æW‡B“·6WEf–Wr‚&Ö&¶WB"“·v–æF÷rç67&öÆÅFò‡·F÷£Æ&V†f–÷#¢'6Öö÷F‚'Ò“·Ó°¢6öç7B6†ö÷6T–ç7G'VÖVçC×W6T6ÆÆ&6²‚†–ç7G'VÖVçC¤–ç7G'VÖVçB“Óç¶6öç7B&WVW7D–CÒ²·6VÆV7F–öå&WVW7E&Vbæ7W'&VçC¶–b†–ç7G'VÖVçBæÖ&¶WBÓÖÖ&¶WB—6WDÖ&¶WE6W76–öâ„ÄôD”äuôÔ$´UEõ4U54”ôâ“·&VÖVÖ&W$–ç7G'VÖVçB†–ç7G'VÖVçB“·6WDÖ&¶WB†–ç7G'VÖVçBæÖ&¶WB“·6WDÖ&¶WEF"†–ç7G'VÖVçBæÖ&¶WB“·6WE6VÆV7FVB‡V÷FTg&öÔ–ç7G'VÖVçB†–ç7G'VÖVçB’“·6WEf–Wr‚&Ö&¶WB"“·v–æF÷rç67&öÆÅFò‡·F÷£Æ&V†f–÷#¢'6Öö÷F‚'Ò“·fö–BÆö6Æ—¦UW5V÷FT–ç7G'VÖVçB†–ç7G'VÖVçB’çF†Vâ†Æö6Æ—¦VCÓç¶–b‡&WVW7D–BÓ×6VÆV7F–öå&WVW7E&Vbæ7W'&VçGÇÆÆö6Æ—¦VBææÖSÓÓÖ–ç7G'VÖVçBææÖR—&WGW&ã·&VÖVÖ&W$–ç7G'VÖVçB†Æö6Æ—¦VB“·6WE6VÆV7FVB†7W'&VçCÓæ7W'&VçBæÖ&¶WCÓÓÖÆö6Æ—¦VBæÖ&¶WBbf7W'&VçBç7–Ö&öÃÓÓÖÆö6Æ—¦VBç7–Ö&öÃ÷²ââæ7W'&VçBÆæÖS¦Æö6Æ—¦VBææÖWÓ¦7W'&VçB“·Ò“·ÒÅ¶Ö&¶WBÇ&VÖVÖ&W$–ç7G'VÖVçBÇV÷FTg&öÔ–ç7G'VÖVçEÒ“°¢W6TVffV7B‚‚“Óç¶6öç7Böä÷Vä–ç7G'VÖVçCÒ†WfVçC¤WfVçB“Óç¶6öç7BFWF–ÃÒ†WfVçB27W7FöÔWfVçCÄ–ç7G'VÖVçCâ’æFWF–Ã¶–b‚FWF–ÇÇÂ²$µ""Â%U2"Â$5%•Dò%Òæ–æ6ÇVFW2†FWF–ÂæÖ&¶WB—ÇÂFWF–Âç7–Ö&öÇÇÂFWF–ÂææÖWÇÂFWF–ÂæW†6†ævWÇÂ²$µ%r"Â%U4B%Òæ–æ6ÇVFW2†FWF–Âæ7W'&Væ7’’—&WGW&ã¶6öç7Bæ÷&ÖÆ—¦VC¤–ç7G'VÖVçC×¶Ö&¶WC¦FWF–ÂæÖ&¶WBÇ7–Ö&öÃ¦FWF–Âç7–Ö&öÂÆæÖS¦FWF–ÂææÖRÆW†6†ævS¦FWF–ÂæW†6†ævRÆ7W'&Væ7“¦FWF–Âæ7W'&Væ7—Ó¶6†ö÷6T–ç7G'VÖVçB†æ÷&ÖÆ—¦VB“·Ó·v–æF÷ræFDWfVçDÆ—7FVæW"‚&Ö&¶WFÖFS¦÷VâÖ–ç7G'VÖVçB"Æöä÷Vä–ç7G'VÖVçB“·&WGW&â‚“Óçv–æF÷rç&VÖ÷fTWfVçDÆ—7FVæW"‚&Ö&¶WFÖFS¦÷VâÖ–ç7G'VÖVçB"Æöä÷Vä–ç7G'VÖVçB“·ÒÅ¶6†ö÷6T–ç7G'VÖVçEÒ“°¢6öç7B6†ævTÖ&¶WCÒ†æW‡C¤Ö&¶WB“Óç¶–b†æW‡BÓÖÖ&¶WB—6WDÖ&¶WE6W76–öâ„ÄôD”äuôÔ$´UEõ4U54”ôâ“·6WDÖ&¶WB†æW‡B“·6WDÖ&¶WEF"†æW‡B“¶–b‚&W7F÷&U&VÖVÖ&W&VB†æW‡B’bg6VÆV7FVBæÖ&¶WBÓÖæW‡B—6WE6VÆV7FVB„DTdTÅE5¶æW‡EÒ“·6WDÆ7Ef–WvVDÖ&¶WB†æW‡B“·6WEf–Wr‚&Ö&¶WB"“·v–æF÷rç67&öÆÅFò‡·F÷£Æ&V†f–÷#¢'6Öö÷F‚'Ò“·Ó°¢6öç7B÷Vä–æFW…f–WsÒ†–C¤Ö&¶WD–æFW„–B“Óç·6WE6VÆV7FVD–æFW„–B†–B“·6WD–æFW„FWF–Â†7W'&VçCÓæ7W'&VçCòæ–CÓÓÖ–Cö7W'&VçC¦çVÆÂ“·6WD–æFW…7FGW2‚&ÆöF–ær"“·6WDÖ&¶WEF"‚$”äDU‚"“·6WEf–Wr‚&Ö&¶WB"“·v–æF÷rç67&öÆÅFò‡·F÷£Æ&V†f–÷#¢'6Öö÷F‚'Ò“·Ó°¢6öç7B÷Vä&—F6ö–åf–WsÒ‚“Óç¶–b†Ö&¶WBÓÒ$5%•Dò"—6WDÖ&¶WE6W76–öâ„ÄôD”äuôÔ$´UEõ4U54”ôâ“·6WEV÷FU7FGW2‚&ÆöF–ær"“·6WDÖ&¶WB‚$5%•Dò"“·6WDÖ&¶WEF"‚$5%•Dò"“·6WE6VÆV7FVB„DTdTÅE2ä5%•Dò“·6WEf–Wr‚&Ö&¶WB"“·v–æF÷rç67&öÆÅFò‡·F÷£Æ&V†f–÷#¢'6Öö÷F‚'Ò“·Ó°¢6öç7B–6´Ö&¶WD÷fW'f–Wt'”–CÒ†–C§7G&–ærÆæW‡DÖ&¶WC¤Ö&¶WB“Óç¶–b†–CÓÓÒ$%D2"—¶÷Vä&—F6ö–åf–Wr‚“·&WGW&ã·Ö–b†—4Ö&¶WD–æFW„–B†–B’—¶÷Vä–æFW…f–Wr†–B“·&WGW&ã·Ö6†ævTÖ&¶WB†æW‡DÖ&¶WB“·Ó°¢6öç7B–6´Ö&¶WD÷fW'f–WsÒ†—FVÓ¤Ö&¶WD–æFW…V÷FR“Óç–6´Ö&¶WD÷fW'f–Wt'”–B†—FVÒæ–BÆ—FVÒæÖ&¶WB“°¢6öç7B6†ævTFöÖW7F–5fVçVSÒ‡fVçVS¤FöÖW7F–5fVçVR“Óç¶–b‡fVçVSÓÓÖFöÖW7F–5fVçVR—&WGW&ã¶–b‡fVçVSÓÓÒ$å…B"bg6VÆV7FVBæf–Æ&ÆUfVçVW2bb6VÆV7FVBæf–Æ&ÆUfVçVW2æ–æ6ÇVFW2‚$å…B"’—&WGW&ã·6WDÖ&¶WE6W76–öâ„ÄôD”äuôÔ$´UEõ4U54”ôâ“·6WEV÷FU7FGW2‚&ÆöF–ær"“·6WDFöÖW7F–5fVçVR‡fVçVR“·Ó°¢6öç7BÆöv÷WCÖ7–æ2‚“Óç¶v—BfWF6‚‚"ö’öWF‚öÆöv÷WB"Ç¶ÖWF†öC¢%õ5B'Ò“·6WDWF‚†çVÆÂ“·Ó°¢6öç7B6VÆV7FVD–åvF6†Æ—7C×vF6†Æ—7Bç6öÖR†—FVÓÓæ—FVÒæÖ&¶WCÓÓ×6VÆV7FVBæÖ&¶WBbf—FVÒç7–Ö&öÃÓÓ×6VÆV7FVBç7–Ö&öÂ“°¢6öç7BFövvÆUvF6†Æ—7CÖ7–æ2‚“Óç¶6öç7B–ç7G'VÖVçD–CÖG·6VÆV7FVBæÖ&¶WGÓ¢G·6VÆV7FVBç7–Ö&öÇÖ¶6öç7B&W7öç6SÖv—BfWF6‚‡6VÆV7FVD–åvF6†Æ—7Cöö’÷vF6†Æ—7Cö–ç7G'VÖVçD–CÒG¶Væ6öFUU$”6ö×öæVçB†–ç7G'VÖVçD–B—Ö¢"ö’÷vF6†Æ—7B"Ç¶ÖWF†öC§6VÆV7FVD–åvF6†Æ—7Cò$DTÄUDR#¢%õ5B"Æ†VFW'3§²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ'ÒÆ&öG“§6VÆV7FVD–åvF6†Æ—7C÷VæFVf–æVC¤¥4ôâç7G&–æv–g’‡¶Ö&¶WC§6VÆV7FVBæÖ&¶WBÇ7–Ö&öÃ§6VÆV7FVBç7–Ö&öÂÆæÖS§6VÆV7FVBææÖRÆW†6†ævS§6VÆV7FVBæW†6†ævRÆ7W'&Væ7“§6VÆV7FVBæ7W'&Væ7—Ò—Ò“¶–b‡&W7öç6Ræö²–ÆöEvF6†Æ—7B‚“·Ó°¢6öç7BÖ÷fUvF6†Æ—7D—FVÓÖ7–æ2†—FVÔ–C§7G&–ærÆF—&V7F–öã¢ÓÃ“Óç¶–b‡vF6†Æ—7D÷&FW$'W7’—&WGW&ã¶6öç7B7W'&VçC×vF6†Æ—7C¶6öç7B–æFWƒÖ7W'&VçBæf–æD–æFW‚†—FVÓÓæ—FVÒæ–CÓÓÖ—FVÔ–B“¶6öç7BF&vWCÖ–æFW‚¶F—&V7F–öã¶–b†–æFWƒÃÇÇF&vWCÃÇÇF&vWCãÖ7W'&VçBæÆVæwF‚—&WGW&ã¶6öç7BæW‡CÕ²ââæ7W'&VçEÓµ¶æW‡E¶–æFW…ÒÆæW‡E·F&vWEÕÓÕ¶æW‡E·F&vWEÒÆæW‡E¶–æFW…ÕÓ·6WEvF6†Æ—7B†æW‡B“·6WEvF6†Æ—7D÷&FW$'W7’‡G'VR“·G'—¶6öç7B&W7öç6SÖv—BfWF6‚‚"ö’÷vF6†Æ—7B"Ç¶ÖWF†öC¢%D4‚"Æ†VFW'3§²&6öçFVçB×G—R#¢&Æ–6F–öâö§6öâ'ÒÆ&öG“¤¥4ôâç7G&–æv–g’‡¶—FV×3¦æW‡BæÖ†—FVÓÓæ—FVÒæ–B—Ò—Ò“¶–b‚&W7öç6Ræö²—F‡&÷ræWrW'&÷"‚'vF6†Æ—7B&V÷&FW"f–ÆVB"“·Ö6F6‡·6WEvF6†Æ—7B†7W'&VçB“·v–æF÷ræÆW'B‚.«HÈºÂÊ(^ºª’È‰ÎÈIÎº[ÂÊÉê^ÙYÊxº«¾ÙhÈ«^¸¸¸ºBâ"“·Öf–æÆÇ—·6WEvF6†Æ—7D÷&FW$'W7’†fÇ6R“·×Ó°¢6öç7BÆVfT6ö×WF—F–öãÖ7–æ2‚“Óç¶6öç7BF&vWCÖ7W'&VçD6ö×WF—F–öãóö7F—fT6ö×WF—F–öã¶–b‚F&vWGÇÂv–æF÷ræ6öæf—&Ò†G·F&vWBææÖWÒ¸ÈÙ¨ÎÉyÈIÂ¸)««˜ÎÉ©Cò¸+BºªÉÙØŠÎÉé«‹ºŞÉÛBÈ*ŞÊ	Î¹
+¸¸¸ºBæ’—&WGW&ã¶6öç7B&W7öç6SÖv—BfWF6‚†ö’ö6ö×WF—F–öç2öÆVfSö6ö×WF—F–öä–CÒG¶Væ6öFUU$”6ö×öæVçB‡F&vWBæ–B—ÖÇ¶ÖWF†öC¢$DTÄUDR'Ò“¶6öç7B&W7VÇCÖv—B&W7öç6Ræ§6öâ‚’7¶W'&÷#ó§7G&–æwÓ¶–b‚&W7öç6Ræö²—&WGW&âv–æF÷ræÆW'B‡&W7VÇBæW'&÷#óò.¸ÈÙ¨ÎÉyÈIÂ¸)«Êxº«¾ÙhÈ«^¸¸¸ºBâ"“¶v—BÆöD6ö×WF—F–öç2‚“·6WE÷'FföÆ–ò†çVÆÂ“·6WDÆVFW&&ö&B…µÒ“·6WEF÷–6·2…µÒ“·Ó°¢6öç7B†æFÆTf–ÆÆVCÒ‚“Óç¶ÆöD66÷VçB‚“·6WE&Wf—6–öâ‡fÇVSÓçfÇVR³“·Ó¶6öç7B76WG3×÷'FföÆ–óòæ66÷VçBçF÷FÄ76WD·'sóö×•&æ³òçF÷FÄ76WD·'sóó¶6öç7B–æ—F–ÃÖ7F—fT6ö×WF—F–öãòæ–æ—F–Ä66„·'sóó¶6öç7B&FS×&WGW&å&FR†76WG2Æ–æ—F–Â“¶6öç7BVç&VÆ—¦VEæÃ×÷'FföÆ–óòç÷6—F–öç2ç&VGV6R‚‡7VÒÇ“Óç7VÒ´çVÖ&W"‡çVç&VÆ—¦VEæÄ·'sóó’Ã“óó¶6öç7B6VÆV7FVD†öÆF–æs×÷'FföÆ–óòç÷6—F–öç2æf–æB‡ÓçæÖ&¶WCÓÓ×6VÆV7FVBæÖ&¶WBbgç7–Ö&öÃÓÓ×6VÆV7FVBç7–Ö&öÂ“òçVçF—G”Ö–7&÷3óó°¢6öç7B6÷'FVE÷6—F–öç3Õ²âââ‡÷'FföÆ–óòç÷6—F–öç3óõµÒ•Òç6÷'B‚†Æ"“Óç¶6öç7BF—&V7F–öã×÷6—F–öå6÷'DF—&V7F–öãÓÓÒ&62#ó¢Ó¶–b‡÷6—F–öå6÷'D¶W“ÓÓÒ&æÖR"—¶6öç7B&W7VÇCÖææÖRæÆö6ÆT6ö×&R†"ææÖRÂ&¶òÔµ""Ç¶çVÖW&–3§G'VRÇ6Vç6—F—f—G“¢&&6R'Ò“·&WGW&â&W7VÇB¦F—&V7F–öã·Ö6öç7B&VCÒ‡÷6—F–öã¥÷'FföÆ–õ²'÷6—F–öç2%Õ¶çVÖ&W%Ò“Óç¶–b‡÷6—F–öå6÷'D¶W“ÓÓÒ'VçF—G’"—&WGW&â÷6—F–öâçVçF—G”Ö–7&÷3¶–b‡÷6—F–öå6÷'D¶W“ÓÓÒ&fW&vU&–6R"—&WGW&â÷6—F–öâæfW&vU&–6T·'tÖ–7&÷3¶–b‡÷6—F–öå6÷'D¶W“ÓÓÒ&Ö&¶WEfÇVR"—&WGW&âçVÖ&W"‡÷6—F–öâæÖ&¶WEfÇVT·'sóó“¶–b‡÷6—F–öå6÷'D¶W“ÓÓÒ'Vç&VÆ—¦VEæÂ"—&WGW&âçVÖ&W"‡÷6—F–öâçVç&VÆ—¦VEæÄ·'sóó“·&WGW&â÷6—F–öå&WGW&å&FR‡÷6—F–öâ“·Ó¶6öç7BF–fc×&VB†’×&VB†"“¶–b†F–fbÓÓ—&WGW&âF–fb¦F—&V7F–öã·&WGW&âææÖRæÆö6ÆT6ö×&R†"ææÖRÂ&¶òÔµ""Ç¶çVÖW&–3§G'VRÇ6Vç6—F—f—G“¢&&6R'Ò“·Ò“°¢–b†WFƒÓÓÒ&ÆöF–ær"—&WGW&âÆÖ–â6Æ74æÖSÒ&WF‚×6†VÆÂ#ãÆF—b6Æ74æÖSÒ&WF‚ÖÆöF–ær#îºxËÉ>º™NÉÛNØ«º[ÂÉzÎ¸©BÊIââãÂöF—cãÂöÖ–ãã¶–b‚WF‚—&WGW&âÄWF…67&VVâöäWF†VçF–6FVC×·6WDWF‡Òóã°¢6öç7Bæc¢‡&VFöæÇ•´f–WrÇ7G&–æuÒ•µÓÕµ²&†öÖR"Â.Ù˜‚%ÒÅ²&Ö&¶WB"Â.È¹ÎÈK‚%ÒÅ²'vF6†Æ—7B"Â.«HÈºÂ%ÒÅ²&6ö×WF—F–öâ"Â.ºªÉÙØŠÎÉé¸ÈÙ¨Â%ÒÅ²&æWw2"Â.¸›NÈªB%ÒÅ²'÷'FföÆ–ò"Â$Õ’%ÕÓ°¢6öç7BÖö&–ÆTæd—FV×2Òµ²&†öÖR"Ä†öÖRÂ.Ù˜‚%ÒÅ²'vF6†Æ—7B"Å7F"Â.«HÈºÂ%ÒÅ²&Ö&¶WB"ÄÆ–æT6†'BÂ.È¹ÎÈK‚%ÒÅ²&6ö×WF—F–öâ"ÅG&÷‡’Â.¸ÈÙ¨Â%ÒÅ²&æWw2"ÄæWw7W"Â.¸›NÈªB%ÒÅ²'÷'FföÆ–ò"ÅvÆÆWD6&G2Â$Õ’%ÕÒ26öç7C°¢6öç7B†öÆF–æw3ÓÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂ†öÆF–æw2#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#î¸+BØŠÎÉéÙˆNÙš“Âöƒ#ãÆF—b6Æ74æÖSÒ&fÆW‚—FV×2Ö6VçFW"vÓ"#ãÇ6VÆV7B&–ÖÆ&VÃÒ.»;NÉÊÊ(^ºª’Ê	^º
+Â«‹ÊH"fÇVS×·÷6—F–öå6÷'D¶W—Òöä6†ævS×¶WfVçCÓç6WE÷6—F–öå6÷'D¶W’†WfVçBçF&vWBçfÇVR2÷6—F–öå6÷'D¶W’—Ò6Æ74æÖSÒ&‚Ó‚&÷VæFVBÖÖB&÷&FW"&÷&FW"Õ²6FfS6SeÒ&r×v†—FR‚Ó"FW‡B×‡2FW‡BÕ²3S“c3f5Ò#ãÆ÷F–öâfÇVSÒ&æÖR#îÊ(^ºª’ÉÛNºhCÂö÷F–öããÆ÷F–öâfÇVSÒ'VçF—G’#î»;NÉÊÈ‰¹ø“Âö÷F–öããÆ÷F–öâfÇVSÒ&fW&vU&–6R#îØø«z¸º«Âö÷F–öããÆ÷F–öâfÇVSÒ&Ö&¶WEfÇVR#îØø««ˆÉZÂö÷F–öããÆ÷F–öâfÇVSÒ'Vç&VÆ—¦VEæÂ#îØø«ÈiÉÛSÂö÷F–öããÆ÷F–öâfÇVSÒ'&WGW&å&FR#îÈ‰ÉÛ^ºZÂö÷F–öããÂ÷6VÆV7CãÆ'WGFöâG—SÒ&'WGFöâ"öä6Æ–6³×²‚“Óç6WE÷6—F–öå6÷'DF—&V7F–öâ‡fÇVSÓçfÇVSÓÓÒ&62#ò&FW62#¢&62"—Ò6Æ74æÖSÒ&‚Ó‚&÷VæFVBÖÖB&÷&FW"&÷&FW"Õ²6FfS6SeÒ&r×v†—FR‚Ó"FW‡B×‡2FW‡BÕ²3S“c3f5Ò#ç·÷6—F–öå6÷'DF—&V7F–öãÓÓÒ&62#ò.ÉŠNºhNË
+È‰Â(i#¢.¸+NºkÎË
+È‰Â(i2'ÓÂö'WGFöããÆ'WGFöâöä6Æ–6³×¶ÆöD66÷VçGÓãÅ&Vg&W6„7róâÈ8ºÎ«:ËšƒÂö'WGFöããÂöF—cãÂöF—cãÆF—b6Æ74æÖSÒ&76WB×7VÖÖ'’#ãÇ7ãîËIÒÉéÈ+Ç7G&öæsç¶f÷&ÖD·'r†76WG2—ÓÂ÷7G&öæsãÂ÷7ããÇ7ãîÊ;ÎºË‚«¸ªRÙˆN«ˆƒÇ7G&öæsç¶f÷&ÖD·'r‡÷'FföÆ–óòæ66÷VçBæf–Æ&ÆT66„·'sóó—ÓÂ÷7G&öæsãÂ÷7ããÇ7ãîØø«ÈiÉÛSÇ7G&öær6Æ74æÖS×·Vç&VÆ—¦VEæÃãÓò'W#¢&F÷vâ'Óç¶f÷&ÖD·'r‡Vç&VÆ—¦VEæÂ—ÓÂ÷7G&öæsãÂ÷7ããÇ7ãîÈºNÙˆNÈiÉÛSÇ7G&öær6Æ74æÖS×²‡÷'FföÆ–óòæ66÷VçBç&VÆ—¦VEæÄ·'sóó“ãÓò'W#¢&F÷vâ'Óç¶f÷&ÖD·'r‡÷'FföÆ–óòæ66÷VçBç&VÆ—¦VEæÄ·'sóó—ÓÂ÷7G&öæsãÂ÷7ããÇ7ãîÈ‰ÉÛ^ºZÇ7G&öær6Æ74æÖS×·&FSãÓò'W#¢&F÷vâ'Óç·&FSãÓò"²#¢"'×·&FRçFôf—†VBƒ"—ÒSÂ÷7G&öæsãÂ÷7ããÂöF—cãÆF—b6Æ74æÖSÒ&FW6·F÷×÷6—F–öâ×F&ÆR#ãÅF&ÆSãÅF&ÆT†VFW#ãÅF&ÆU&÷sãÅF&ÆT†VCîÊ(^ºª“ÂõF&ÆT†VCãÅF&ÆT†VCî»;NÉÊÂõF&ÆT†VCãÅF&ÆT†VCîØø«z¸º«ÂõF&ÆT†VCãÅF&ÆT†VCîØø««ˆÉZÂõF&ÆT†VCãÅF&ÆT†VCîØø«ÈiÉÛSÂõF&ÆT†VCãÅF&ÆT†VCîÈ‰ÉÛ^ºZÂõF&ÆT†VCãÂõF&ÆU&÷sãÂõF&ÆT†VFW#ãÅF&ÆT&öG“ç·6÷'FVE÷6—F–öç2æÆVæwFƒ÷6÷'FVE÷6—F–öç2æÖ‡Óç¶6öç7B–ç7G'VÖVçC¤–ç7G'VÖVçC×¶Ö&¶WC§æÖ&¶WBÇ7–Ö&öÃ§ç7–Ö&öÂÆæÖS§ææÖRÆW†6†ævS§æW†6†ævWÇÂ‡æÖ&¶WCÓÓÒ$µ"#ò$µ%‚#§æÖ&¶WCÓÓÒ%U2#ò$ä2#¢$ädU""’Æ7W'&Væ7“§æ7W'&Væ7’2$µ%r'Â%U4B'Ó·&WGW&âÅF&ÆU&÷r¶W“×¶G·æÖ&¶WGÓ¢G·ç7–Ö&öÇÖÒöä6Æ–6³×²‚“Óæ6†ö÷6T–ç7G'VÖVçB†–ç7G'VÖVçB—ÓãÅF&ÆT6VÆÃãÇ7â6Æ74æÖSÒ'7Fö6²Ö6VÆÂ#ãÄ–ç7G'VÖVçDÆövò–ç7G'VÖVçC×¶–ç7G'VÖVçGÒ6—¦SÒ'6Ò"óãÇ7ãç·ææÖWÓÇ6ÖÆÃç¶F—7Æ•7–Ö&öÂ‡æÖ&¶WBÇç7–Ö&öÂ—Ò+r¶–ç7G'VÖVçBæW†6†ævWÓÂ÷6ÖÆÃãÂ÷7ããÂ÷7ããÂõF&ÆT6VÆÃãÅF&ÆT6VÆÃç¶f÷&ÖEVçF—G’‡çVçF—G”Ö–7&÷2—ÓÂõF&ÆT6VÆÃãÅF&ÆT6VÆÃç¶f÷&ÖD·'r‡æfW&vU&–6T·'tÖ–7&÷2óóó—ÓÂõF&ÆT6VÆÃãÅF&ÆT6VÆÃç·æ7W'&VçE&–6T·'tÖ–7&÷3öf÷&ÖD·'r‡æÖ&¶WEfÇVT·'sóó“¢.È¹ÎÈK‚¸È«‹'ÓÂõF&ÆT6VÆÃãÅF&ÆT6VÆÂ6Æ74æÖS×²‡çVç&VÆ—¦VEæÄ·'sóó“ãÓò'W#¢&F÷vâ'Óç·æ7W'&VçE&–6T·'tÖ–7&÷3öf÷&ÖD·'r‡çVç&VÆ—¦VEæÄ·'sóó“¢"Ò'ÓÂõF&ÆT6VÆÃãÅF&ÆT6VÆÂ6Æ74æÖS×·÷6—F–öå&WGW&å&FR‡“ãÓò'W#¢&F÷vâ'Óç·æ7W'&VçE&–6T·'tÖ–7&÷3öf÷&ÖE&WGW&å&FR‡÷6—F–öå&WGW&å&FR‡’“¢"Ò'ÓÂõF&ÆT6VÆÃãÂõF&ÆU&÷sçÒ“£ÅF&ÆU&÷sãÅF&ÆT6VÆÂ6öÅ7ã×³gÒ6Æ74æÖSÒ&V×G’Ö6VÆÂ#ç·'F–6—çD–Cò.ÉXNÊx»;NÉÊÙYÂÊ(^ºªÉÛBÉxnÈ«^¸¸¸ºBâ#¢.¸ÈÙ¨ÎÉyË«ÙYº›BØŠÎÉéÙˆNÙšÉÛBÙÎÈ¹Î¹
+¸¸¸ºBâ'ÓÂõF&ÆT6VÆÃãÂõF&ÆU&÷sçÓÂõF&ÆT&öG“ãÂõF&ÆSãÂöF—cãÆF—b6Æ74æÖSÒ&Öö&–ÆR×÷6—F–öâÖÆ—7B#ç·6÷'FVE÷6—F–öç2æÆVæwFƒ÷6÷'FVE÷6—F–öç2æÖ‡Óç¶6öç7B–ç7G'VÖVçC¤–ç7G'VÖVçC×¶Ö&¶WC§æÖ&¶WBÇ7–Ö&öÃ§ç7–Ö&öÂÆæÖS§ææÖRÆW†6†ævS§æW†6†ævWÇÂ‡æÖ&¶WCÓÓÒ$µ"#ò$µ%‚#§æÖ&¶WCÓÓÒ%U2#ò$ä2#¢$ädU""’Æ7W'&Væ7“§æ7W'&Væ7’2$µ%r'Â%U4B'Ó·&WGW&âÆ'WGFöâ¶W“×¶Öö&–ÆS¢G·æÖ&¶WGÓ¢G·ç7–Ö&öÇÖÒöä6Æ–6³×²‚“Óæ6†ö÷6T–ç7G'VÖVçB†–ç7G'VÖVçB—ÓãÇ7â6Æ74æÖSÒ'7Fö6²Ö6VÆÂ#ãÄ–ç7G'VÖVçDÆövò–ç7G'VÖVçC×¶–ç7G'VÖVçGÒ6—¦SÒ'6Ò"óãÇ7ããÆ#ç·ææÖWÓÂö#ãÇ6ÖÆÃç¶F—7Æ•7–Ö&öÂ‡æÖ&¶WBÇç7–Ö&öÂ—Ò+r¶–ç7G'VÖVçBæW†6†ævWÒ+r¶f÷&ÖEVçF—G’‡çVçF—G”Ö–7&÷2—×·æÖ&¶WCÓÓÒ$5%•Dò#ò.«	Â#¢.Ê;Â'ÓÂ÷6ÖÆÃãÂ÷7ããÂ÷7ããÇ7ããÇ7G&öæsç·æ7W'&VçE&–6T·'tÖ–7&÷3öf÷&ÖD·'r‡æÖ&¶WEfÇVT·'sóó“¢.È¹ÎÈK‚¸È«‹'ÓÂ÷7G&öæsãÆVÒ6Æ74æÖS×²‡çVç&VÆ—¦VEæÄ·'sóó“ãÓò'W#¢&F÷vâ'Óç·æ7W'&VçE&–6T·'tÖ–7&÷3öG¶f÷&ÖD·'r‡çVç&VÆ—¦VEæÄ·'sóó—Ò+rG¶f÷&ÖE&WGW&å&FR‡÷6—F–öå&WGW&å&FR‡’—Ö¢"Ò'ÓÂöVÓãÂ÷7ããÂö'WGFöãçÒ“£Ç6Æ74æÖSÒ&çÖV×G’#ç·'F–6—çD–Cò.ÉXNÊx»;NÉÊÙYÂÊ(^ºªÉÛBÉxnÈ«^¸¸¸ºBâ#¢.¸ÈÙ¨ÎÉyË«ÙYº›BØŠÎÉéÙˆNÙšÉÛBÙÎÈ¹Î¹
+¸¸¸ºBâ'ÓÂ÷çÓÂöF—cãÂ÷6V7F–öãã°¢&WGW&âÆF—b6Æ74æÖSÒ&Ö&¶WFÖFR×c"#ãÆ†VFW"6Æ74æÖSÒ&çÖFW6·F÷Ö†VFW"#ãÆF—b6Æ74æÖSÒ&çÖ†VB#ãÆ'WGFöâ6Æ74æÖSÒ&çÖ'&æB"öä6Æ–6³×²‚“Óç6WEf–Wr‚&†öÖR"—ÓãÇ7ãäÔÓÂ÷7ããÆ#îºxËÉ>º™NÉÛNØ«ƒÂö#ãÂö'WGFöããÅ6V&6„&÷‚öå6VÆV7C×¶6†ö÷6T–ç7G'VÖVçGÒóãÆF—b6Æ74æÖSÒ&çÖ†VBÖ7F–öç2#ç¶WF‚ç&öÆSÓÓÒ&FÖ–â"bcÄFÖ–äF–Æöróç×²7W'&VçD6ö×WF—F–öâbcÄ¦ö–äF–Æöröä6†ævVC×¶ÆöD6ö×WF—F–öç7ÒóçÓÄ66÷VçE6WGF–æw4F–ÆörW6W#×¶WF‡ÒöåWFFVC×·6WDWF‡ÒöäFVÆWFVC×²‚“Óç6WDWF‚†çVÆÂ—ÒóãÆ'WGFöâ&–ÖÆ&VÃÒ.ºÎ«{ÉXNÉ¸2"öä6Æ–6³×¶Æöv÷WGÓãÄÆöt÷WBóãÂö'WGFöããÂöF—cãÂöF—cãÆæcç¶æbæÖ‚…¶¶W’ÆÆ&VÅÒ“ÓãÆ'WGFöâ¶W“×¶¶W—Ò6Æ74æÖS×·f–WsÓÓÖ¶W“ò&7F—fR#¢"'Òöä6Æ–6³×²‚“Óæ¶W“ÓÓÒ&Ö&¶WB#ö÷VäÖ&¶WEf–Wr‚“§6WEf–Wr†¶W’—Óç¶Æ&VÇÓÂö'WGFöãâ—ÓÂöæcãÄÆ—fTÖ&¶WE7G&—V÷FW3×¶–æF–6W7Òöå–6³×·–6´Ö&¶WD÷fW'f–Wt'”–GÒóãÂö†VFW#ãÆ†VFW"6Æ74æÖSÒ&çÖÖö&–ÆRÖ†VFW"#ãÆF—cãÆ'WGFöâ6Æ74æÖSÒ&çÖ'&æB"öä6Æ–6³×²‚“Óç6WEf–Wr‚&†öÖR"—ÓãÇ7ãäÔÓÂ÷7ããÆ#îºxËÉ>º™NÉÛNØ«ƒÂö#ãÂö'WGFöããÆF—b6Æ74æÖSÒ&çÖÖö&–ÆRÖ66÷VçBÖ7F–öç2#ãÄ66÷VçE6WGF–æw4F–ÆörW6W#×¶WF‡ÒöåWFFVC×·6WDWF‡ÒöäFVÆWFVC×²‚“Óç6WDWF‚†çVÆÂ—Ò6ö×7BóãÆ'WGFöâ&–ÖÆ&VÃÒ.ºÎ«{ÉXNÉ¸2"öä6Æ–6³×¶Æöv÷WGÓãÄÆöt÷WBóãÂö'WGFöããÂöF—cãÂöF—cãÂö†VFW#à¢·f–WsÓÓÒ&†öÖR"bcÆÖ–â6Æ74æÖSÒ&ç×vRçÖ†öÖR#ãÇ6V7F–öâ6Æ74æÖSÒ&çÖ†öÖRÖÖ–â#ãÆF—b6Æ74æÖSÒ&çÖÖ&¶WB×7FGW2#ãÇ7ããÆ’óî«ZŞ¸+B+r¸JNÉÛN»(NÊiŞ«hÂÖ&¶WB×7FGW3Â÷7ããÇ7ããÆ’óîºû«ZÒ+r¸JNÉÛN»(NÊiŞ«hÂÈKÈYŒ+~ÈIÎº‹Ø8ÉèCÂ÷7ããÇ7ããÆ’óî«È8ÉéÈ++r¸JNÉÛN»(NÊiŞ«hÂ#NÈ¹Î«BÈ¹ÎÈKƒÂ÷7ããÂöF—cãÅ÷VÆ%7Fö6·5æVÂFöÖW7F–3×·÷VÆ%7Fö6·2æFöÖW7F–7ÒW3×·÷VÆ%7Fö6·2çW7Òöå6VÆV7C×¶6†ö÷6T–ç7G'VÖVçGÒóãÄÆ—fTÖ&¶WE7G&—V÷FW3×¶–æF–6W7Òöå–6³×·–6´Ö&¶WD÷fW'f–Wt'”–GÒóãÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂçÖÖ&¶WBÖfö7W2#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#îÊ;ÎÉ©BÊxÈ‰Œ+~«È8ÉéÈ+Âöƒ#ãÆ'WGFöâöä6Æ–6³×²‚“Óæ÷Vä–æFW…f–Wr‚$´õ5’"—ÓîÈ¹ÎÈK‚»;N«‹Ä6†Wg&öå&–v‡BóãÂö'WGFöããÂöF—cãÆF—b6Æ74æÖSÒ&–æFW‚Ö&ö&B#ç¶–æF–6W2æÖ†—FVÓÓãÆ'WGFöâ¶W“×¶—FVÒæ–GÒöä6Æ–6³×²‚“Óç–6´Ö&¶WD÷fW'f–Wr†—FVÒ—ÓãÇ7ãç¶—FVÒææÖWÓÇ6ÖÆÃî¸JNÉÛN»(NÊiŞ«hÂ+rÈºNÈ¹Î«CÂ÷6ÖÆÃãÂ÷7ããÇ7G&öæsç¶—FVÒç&–6RçFôÆö6ÆU7G&–ær‚&¶òÔµ""Ç¶Ö†–×VÔg&7F–öäF–v—G3¦—FVÒæ–CÓÓÒ$%D2#ó£'Ò—×¶—FVÒçVæ—GÓÂ÷7G&öæsãÆVÒ6Æ74æÖS×¶—FVÒç&FSãÓò'W#¢&F÷vâ'Óç¶—FVÒæ6†ævSãÓò"²#¢"'×¶—FVÒæ6†ævRçFôÆö6ÆU7G&–ær‚&¶òÔµ""Ç¶Ö†–×VÔg&7F–öäF–v—G3£'Ò—Ò‡¶—FVÒç&FSãÓò"²#¢"'×¶—FVÒç&FRçFôf—†VBƒ"—ÒR“ÂöVÓãÂö'WGFöãâ—ÓÂöF—cãÂ÷6V7F–öããÄæWw5æVÂ—FV×3×¶æWw4—FV×7ÒF—FÆSÒ.Ê;ÎÉ©BÈ¹ÎÉêR¸›NÈªB"ÆöF–æs×¶æWw4ÆöF–æwÒóãÂ÷6V7F–öããÆ6–FSãÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂçÖ×’×7VÖÖ'’#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#î¸+B¸ÈÙ¨ÃÂöƒ#ãÆ'WGFöâöä6Æ–6³×²‚“Óç6WEf–Wr‚&6ö×WF—F–öâ"—ÓîÊNË+BÄ6†Wg&öå&–v‡BóãÂö'WGFöããÂöF—cãÆF—b6Æ74æÖSÒ&6öçFW7B×7VÖÖ'’#ãÇ7ãç¶7F—fT6ö×WF—F–öãòææÖSóò.Ë«ÊIÉÛ‚¸ÈÙ¨ÂÉxnÉØÂ'×¶7F—fT6ö×WF—F–öâbcÆ#ç¶DF’†7F—fT6ö×WF—F–öâæVæG4B—ÓÂö#çÓÂ÷7ããÇ7G&öæsç¶×•&æ³ò†×•&æ²ç&æ²ÓÖçVÆÃöG¶×•&æ²ç&æ·ŞÉÈBòG¶ÆVFW&&ö&BæÆVæwF‡Şº¨V¦È‰ÎÉÈB¸È«‹òG¶ÆVFW&&ö&BæÆVæwF‡Şº¨V“¢.¸ÈÙ¨ÎÉyË«Ù[N»;NÈKÉ©B'ÓÂ÷7G&öæsãÆVÒ6Æ74æÖS×·&FSãÓò'W#¢&F÷vâ'Óç·&FSãÓò"²#¢"'×·&FRçFôf—†VBƒ"—ÒSÂöVÓãÂöF—cãÂ÷6V7F–öããÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂç×vF6‚×&Wf–Wr#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#î«HÈºÂÊ(^ºª“Âöƒ#ãÆ'WGFöâöä6Æ–6³×²‚“Óç6WEf–Wr‚'vF6†Æ—7B"—ÓîÊNË+BÄ6†Wg&öå&–v‡BóãÂö'WGFöããÂöF—cç·vF6†Æ—7Bç6Æ–6RƒÃb’æÖ†—FVÓÓãÆ'WGFöâ¶W“×¶—FVÒæ–GÒöä6Æ–6³×²‚“Óæ6†ö÷6T–ç7G'VÖVçB†—FVÒ—ÓãÄ–ç7G'VÖVçDÆövò–ç7G'VÖVçC×¶—FV×Ò6—¦SÒ'6Ò"óãÇ7ããÆ#ç¶—FVÒææÖWÓÂö#ãÇ6ÖÆÃç¶F—7Æ•7–Ö&öÂ†—FVÒæÖ&¶WBÆ—FVÒç7–Ö&öÂ—ÓÂ÷6ÖÆÃãÂ÷7ããÇ7G&öæsç¶f÷&ÖEvF6…&–6R†—FVÒ—ÓÆVÒ6Æ74æÖS×²†—FVÒæ6†ævU&FUÓóó“ãÓò'W#¢&F÷vâ'Óç²‚†—FVÒæ6†ævU&FUÓóó’óó’çFôf—†VBƒ"—ÒSÂöVÓãÂ÷7G&öæsãÂö'WGFöãâ—×²vF6†Æ—7BæÆVæwF‚bcÇ6Æ74æÖSÒ&çÖV×G’#î«HÈºÂÊ(^ºªÉØBËiN«Ù[N»;NÈKÉ©BãÂ÷çÓÂ÷6V7F–öããÂö6–FSãÂöÖ–ãçĞ¢·f–WsÓÓÒ&Ö&¶WB"bcÆÖ–â6Æ74æÖS×¶ç×vRç×G&F–ærÖ&¶WBÒG¶Ö&¶WEF"çFôÆ÷vW$66R‚—ÒG¶Ö&¶WEF#ÓÓÒ$”äDU‚#ò"–æFW‚ÖÖöFR#¢"'ÖÓãÇ6V7F–öâ6Æ74æÖSÒ&ç×G&F–ærÖÖ–â#ãÆF—b6Æ74æÖSÒ&çÖÖ&¶WB×F'2#ç²…µ²$”äDU‚"Â.ÊxÈ‰‚%ÒÅ²$µ""Â.«ZŞ¸+B%ÒÅ²%U2"Â.ºû«ZÒ%ÒÅ²$5%•Dò"Â.«È8ÉéÈ+%ÕÒ26öç7B’æÖ‚…¶¶W’ÆÆ&VÅÒ“ÓãÆ'WGFöâ6Æ74æÖS×¶Ö&¶WEF#ÓÓÖ¶W“ò&7F—fR#¢"'Òöä6Æ–6³×²‚“Óæ¶W“ÓÓÒ$”äDU‚#ö÷Vä–æFW…f–Wr‡6VÆV7FVD–æFW„–B“¦6†ævTÖ&¶WB†¶W’—Ò¶W“×¶¶W—Óç¶Æ&VÇÓÂö'WGFöãâ—ÓÂöF—cà¢¶Ö&¶WEF#ÓÓÒ$”äDU‚#óÃãÆF—b6Æ74æÖSÒ&çÖ–æFW‚×6VÆV7F÷"#ç´Ô$´UEô”äDU…ô”E2æÖ†–CÓãÆ'WGFöâ¶W“×¶–GÒ6Æ74æÖS×·6VÆV7FVD–æFW„–CÓÓÖ–Cò&7F—fR#¢"'Òöä6Æ–6³×²‚“Óæ÷Vä–æFW…f–Wr†–B—Óç´Ô$´UEô”äDU…ôÔUD¶–EÒææÖWÓÂö'WGFöãâ—ÓÂöF—cç²‚‚“Óç¶6öç7B÷fW'f–WsÖ–æF–6W2æf–æB†—FVÓÓæ—FVÒæ–CÓÓ×6VÆV7FVD–æFW„–B“¶6öç7B7W'&VçCÖ–æFW„FWF–Ãòæ–CÓÓ×6VÆV7FVD–æFW„–Cö–æFW„FWF–Ã¦÷fW'f–Ws¶6öç7BÖWFÔÔ$´UEô”äDU…ôÔUD·6VÆV7FVD–æFW„–EÓ¶6öç7BFWF–ÃÖ–æFW„FWF–Ãòæ–CÓÓ×6VÆV7FVD–æFW„–Cö–æFW„FWF–Ã¦çVÆÃ¶6öç7B6†'EV÷FS×¶Ö&¶WC¦ÖWFæÖ&¶WBÇ7–Ö&öÃ¦ÖWFç7–Ö&öÂÆæÖS¦ÖWFææÖRÆW†6†ævS¦ÖWFæW†6†ævWÓ·&WGW&âÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂç×V÷FRçÖ–æFW‚×V÷FR#ãÆF—b6Æ74æÖSÒ&ç×V÷FRÖ†VB#ãÇ7â6Æ74æÖSÒ'7Fö6²×F—FÆR#ãÇ7ããÇ6ÖÆÃç·6VÆV7FVD–æFW„–CÓÓÒ%U4Dµ%r#ò.Ù™ÉÊ‚#¦ÖWFæW†6†ævWÒ+r¸JNÉÛN»(NÊiŞ«hÃÂ÷6ÖÆÃãÆƒç¶ÖWFææÖWÓÂöƒãÂ÷7ããÂ÷7ããÇ7â6Æ74æÖS×¶Æ—fR×–ÆÂG¶–æFW…7FGW3ÓÓÒ'Væf–Æ&ÆR#ò"VæF–ær#¢"'ÖÓãÆ’óç¶–æFW…7FGW3ÓÓÒ&Æ—fR#ò.¸JNÉÛN»(BÈºNÈ¹Î«B#¦–æFW…7FGW3ÓÓÒ&ÆöF–ær#ò.Ù™^ÉÛ‚ÊI#¢.È¹ÎÈK‚ÊxÉ{'ÓÂ÷7ããÂöF—cãÆF—b6Æ74æÖSÒ&ç×&–6R#ãÆF—b6Æ74æÖSÒ&ç×&–6RÖÖ–â#ãÇ7G&öæsç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆ7W'&VçBç&–6R“¢.È¹ÎÈK‚Ù™^ÉÛ‚ÊI'ÓÂ÷7G&öæsç¶7W'&VçBbf7W'&VçBç&–6SãbcÇ7â6Æ74æÖS×¶7W'&VçBç&FSãÓò'W#¢&F÷vâ'Óç¶7W'&VçBæ6†ævSãÓò.)k"#¢.)kÂ'Ò´ÖF‚æ'2†7W'&VçBæ6†ævR’çFôÆö6ÆU7G&–ær‚&¶òÔµ""Ç¶Ö†–×VÔg&7F–öäF–v—G3£'Ò—Ò‡¶7W'&VçBç&FSãÓò"²#¢"'×¶7W'&VçBç&FRçFôf—†VBƒ"—ÒR“Â÷7ãçÓÂöF—cãÂöF—cç·6VÆV7FVD–æFW„–BÓÒ%U4Dµ%r"bcÆF—b6Æ74æÖSÒ&ç×7FG2#ãÇ7ãî«‹ÊH«Æ#ç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆFWF–Ãòç&VfW&Væ6U&–6R“¢"Ò'ÓÂö#ãÂ÷7ããÇ7ãîÈ¹Î«Æ"6Æ74æÖS×·V÷FTÖWG&–4F—&V7F–öä6Æ72†FWF–Ãòæ÷VâÆFWF–Ãòç&VfW&Væ6U&–6R—Óç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆFWF–Ãòæ÷Vâ“¢"Ò'ÓÂö#ãÂ÷7ããÇ7ãî«:«Æ"6Æ74æÖSÒ'W#ç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆFWF–Ãòæ†–v‚“¢"Ò'ÓÂö#ãÂ÷7ããÇ7ãîÊ«Æ"6Æ74æÖSÒ&F÷vâ#ç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆFWF–ÃòæÆ÷r“¢"Ò'ÓÂö#ãÂ÷7ããÇ7â6Æ74æÖSÒ&ç×7FBÖFFVB#ãÇ7â6Æ74æÖSÒ&ç×7FBÖÆ&VÂ#ãS.Ê;ÂËYÎ«:Ç6ÖÆÃç¶FWF–Ãòæ†–vƒS%vVV´FFSÓÓ×VæFVf–æVCò.Ù™^ÉÛ‚ÊI#¦f÷&ÖEV÷FTÖWG&–4FFR†FWF–Âæ†–vƒS%vVV´FFR—ÇÂ"Ò'ÓÂ÷6ÖÆÃãÂ÷7ããÆ"6Æ74æÖSÒ'W#ç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆFWF–Ãòæ†–vƒS%vVV²“¢"Ò'ÓÂö#ãÂ÷7ããÇ7â6Æ74æÖSÒ&ç×7FBÖFFVB#ãÇ7â6Æ74æÖSÒ&ç×7FBÖÆ&VÂ#ãS.Ê;ÂËYÎÊÇ6ÖÆÃç¶FWF–ÃòæÆ÷sS%vVV´FFSÓÓ×VæFVf–æVCò.Ù™^ÉÛ‚ÊI#¦f÷&ÖEV÷FTÖWG&–4FFR†FWF–ÂæÆ÷sS%vVV´FFR—ÇÂ"Ò'ÓÂ÷6ÖÆÃãÂ÷7ããÆ"6Æ74æÖSÒ&F÷vâ#ç¶7W'&VçCöf÷&ÖDÖ&¶WD–æFW…fÇVR†7W'&VçBÆFWF–ÃòæÆ÷sS%vVV²“¢"Ò'ÓÂö#ãÂ÷7ããÇ7ãî«¹é¹ø“Æ#ç¶f÷&ÖEV÷FUföÇVÖR†FWF–ÃòçföÇVÖR—ÓÂö#ãÂ÷7ããÇ7ãî«¹é¸È«ˆƒÆ#ç¶f÷&ÖDÖ&¶WD–æFW…G&F–æufÇVR†FWF–ÃòçG&F–æufÇVR—ÓÂö#ãÂ÷7ããÂöF—cçÓÆF—b6Æ74æÖSÒ&çÖ6†'B#ãÄÖ&¶WD6†'BV÷FS×¶6†'EV÷FWÒ–æFW„–C×·6VÆV7FVD–æFW„–GÒóãÂöF—cãÂ÷6V7F–öãã·Ò’‚—ÓÂóã£ÃãÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂç×V÷FR#ãÆF—b6Æ74æÖSÒ&ç×V÷FRÖ†VB#ãÇ7â6Æ74æÖSÒ'7Fö6²×F—FÆR#ãÄ–ç7G'VÖVçDÆövò¶W“×¶G·6VÆV7FVBæÖ&¶WGÓ¢G·6VÆV7FVBç7–Ö&öÇÖÒ–ç7G'VÖVçC×·6VÆV7FVGÒ6—¦SÒ&Ær"óãÇ7ããÇ6ÖÆÃç¶F—7Æ•7–Ö&öÂ‡6VÆV7FVBæÖ&¶WBÇ6VÆV7FVBç7–Ö&öÂ—Ò+r·6VÆV7FVBæW†6†ævWÓÂ÷6ÖÆÃãÆƒç·6VÆV7FVBææÖWÓÆ'WGFöâ6Æ74æÖS×·6VÆV7FVD–åvF6†Æ—7Cò'7F'&VB#¢"'Òöä6Æ–6³×·FövvÆUvF6†Æ—7GÒ&–ÖÆ&VÃÒ.«HÈºÎÊ(^ºª’#ãÅ7F"f–ÆÃ×·6VÆV7FVD–åvF6†Æ—7Cò&7W'&VçD6öÆ÷"#¢&æöæR'ÒóãÂö'WGFöããÂöƒãÂ÷7ããÂ÷7ããÇ7â6Æ74æÖSÒ&Æ—fR×–ÆÂ#ãÆ’óç·V÷FU7FGW3ÓÓÒ&Æ—fR#ò.¸JNÉÛN»(BÈºNÈ¹Î«B#§V÷FU7FGW3ÓÓÒ&ÆöF–ær#ò.Ù™^ÉÛ‚ÊI#¢.È¹ÎÈK‚ÊxÉ{'ÓÂ÷7ããÂöF—cãÆF—b6Æ74æÖS×¶ç×&–6RG·6VÆV7FVBæÖ&¶WCÓÓÒ$µ"#ò"ç×&–6RÖFöÖW7F–2#¢"'ÖÓãÆF—b6Æ74æÖSÒ&ç×&–6RÖÖ–â#ãÇ7G&öæsç¶f÷&ÖE&–6R‡6VÆV7FVB—ÓÂ÷7G&öæsç·6VÆV7FVBç&–6SãbcÇ7â6Æ74æÖS×·6VÆV7FVBç&FSãÓò'W#¢&F÷vâ'Óç·6VÆV7FVBæ6†ævSãÓò.)k"#¢.)kÂ'Ò´ÖF‚æ'2‡6VÆV7FVBæ6†ævR’çFôÆö6ÆU7G&–ær‚—Ò‡·6VÆV7FVBç&FSãÓò"²#¢"'×·6VÆV7FVBç&FRçFôf—†VBƒ"—ÒR“Â÷7ãçÓÂöF—cç·6VÆV7FVBæÖ&¶WCÓÓÒ$µ""bcÆF—b6Æ74æÖSÒ&çÖFöÖW7F–2×fVçVR×7v—F6‚#ãÆF—cãÆ'WGFöâG—SÒ&'WGFöâ"6Æ74æÖS×¶FöÖW7F–5fVçVSÓÓÒ$µ%‚#ò&7F—fR#¢"'Òöä6Æ–6³×²‚“Óæ6†ævTFöÖW7F–5fVçVR‚$µ%‚"—Óäµ%ƒÂö'WGFöããÆ'WGFöâG—SÒ&'WGFöâ"6Æ74æÖS×¶FöÖW7F–5fVçVSÓÓÒ$å…B#ò&7F—fR#¢"'ÒF—6&ÆVC×´&ööÆVâ‡6VÆV7FVBæf–Æ&ÆUfVçVW2’bb6VÆV7FVBæf–Æ&ÆUfVçVW3òæ–æ6ÇVFW2‚$å…B"—Òöä6Æ–6³×²‚“Óæ6†ævTFöÖW7F–5fVçVR‚$å…B"—Óäå…CÂö'WGFöããÂöF—cãÂöF—cçÓÂöF—cãÆF—b6Æ74æÖSÒ&ç×7FG2#ãÇ7ãî«‹ÊH«Æ#ç¶f÷&ÖEV÷FTÖWG&–5&–6R‡6VÆV7FVBÇ6VÆV7FVBç&VfW&Væ6U&–6R—ÓÂö#ãÂ÷7ããÇ7ãîÈ¹Î«Æ"6Æ74æÖS×·V÷FTÖWG&–4F—&V7F–öä6Æ72‡6VÆV7FVBæ÷VâÇ6VÆV7FVBç&VfW&Væ6U&–6R—Óç¶f÷&ÖEV÷FTÖWG&–5&–6R‡6VÆV7FVBÇ6VÆV7FVBæ÷Vâ—ÓÂö#ãÂ÷7ããÇ7ãî«:«Æ"6Æ74æÖSÒ'W#ç¶f÷&ÖEV÷FTÖWG&–5&–6R‡6VÆV7FVBÇ6VÆV7FVBæ†–v‚—ÓÂö#ãÂ÷7ããÇ7ãîÊ«Æ"6Æ74æÖSÒ&F÷vâ#ç¶f÷&ÖEV÷FTÖWG&–5&–6R‡6VÆV7FVBÇ6VÆV7FVBæÆ÷r—ÓÂö#ãÂ÷7ããÇ7â6Æ74æÖSÒ&ç×7FBÖFFVB#ãÇ7â6Æ74æÖSÒ&ç×7FBÖÆ&VÂ#ãS.Ê;ÂËYÎ«:Ç6ÖÆÃç·6VÆV7FVBæ†–vƒS%vVV´FFSÓÓ×VæFVf–æVCò.Ù™^ÉÛ‚ÊI#¦f÷&ÖEV÷FTÖWG&–4FFR‡6VÆV7FVBæ†–vƒS%vVV´FFR—ÇÂ"Ò'ÓÂ÷6ÖÆÃãÂ÷7ããÆ"6Æ74æÖSÒ'W#ç¶f÷&ÖEV÷FTÖWG&–5&–6R‡6VÆV7FVBÇ6VÆV7FVBæ†–vƒS%vVV²—ÓÂö#ãÂ÷7ããÇ7â6Æ74æÖSÒ&ç×7FBÖFFVB#ãÇ7â6Æ74æÖSÒ&ç×7FBÖÆ&VÂ#ãS.Ê;ÂËYÎÊÇ6ÖÆÃç·6VÆV7FVBæÆ÷sS%vVV´FFSÓÓ×VæFVf–æVCò.Ù™^ÉÛ‚ÊI#¦f÷&ÖEV÷FTÖWG&–4FFR‡6VÆV7FVBæÆ÷sS%vVV´FFR—ÇÂ"Ò'ÓÂ÷6ÖÆÃãÂ÷7ããÆ"6Æ74æÖSÒ&F÷vâ#ç¶f÷&ÖEV÷FTÖWG&–5&–6R‡6VÆV7FVBÇ6VÆV7FVBæÆ÷sS%vVV²—ÓÂö#ãÂ÷7ããÇ7ãî«¹é¹ø“Æ#ç¶f÷&ÖEV÷FUföÇVÖR‡6VÆV7FVBçföÇVÖR—ÓÂö#ãÂ÷7ããÇ7ãî«¹é¸È«ˆƒÆ#ç¶f÷&ÖEV÷FUG&F–æufÇVR‡6VÆV7FVB—ÓÂö#ãÂ÷7ããÂöF—cãÆF—b6Æ74æÖSÒ&çÖ6†'B#ãÄÖ&¶WD6†'BV÷FS×·6VÆV7FVGÒóãÂöF—cãÂ÷6V7F–öããÆF—b6Æ74æÖSÒ&çÖÖö&–ÆRÖ÷&FW"#ãÄ÷&FW%æVÂV÷FS×·6VÆV7FVGÒ'F–6—çD–C×·'F–6—çD–GÒf–Æ&ÆT66„·'s×·÷'FföÆ–óòæ66÷VçBæf–Æ&ÆT66„·'sóóÒ†VÆEVçF—G”Ö–7&÷3×·6VÆV7FVD†öÆF–æwÒ6W76–öã×¶Ö&¶WE6W76–öçÒFöÖW7F–5fVçVS×¶FöÖW7F–5fVçVWÒöäFöÖW7F–5fVçVT6†ævS×¶6†ævTFöÖW7F–5fVçVWÒöäf–ÆÆVC×¶†æFÆTf–ÆÆVGÒóãÂöF—cãÄæWw5æVÂ—FV×3×¶æWw4—FV×7ÒF—FÆS×¶G·6VÆV7FVBææÖWÒ«Hº
+‚¸›NÈªFÒÆöF–æs×¶æWw4ÆöF–æwÒW57Æ—C×·6VÆV7FVBæÖ&¶WCÓÓÒ%U2'ÒóãÂóçÓÂ÷6V7F–öãç¶Ö&¶WEF"ÓÒ$”äDU‚"bcÆ6–FSãÄ÷&FW%æVÂV÷FS×·6VÆV7FVGÒ'F–6—çD–C×·'F–6—çD–GÒf–Æ&ÆT66„·'s×·÷'FföÆ–óòæ66÷VçBæf–Æ&ÆT66„·'sóóÒ†VÆEVçF—G”Ö–7&÷3×·6VÆV7FVD†öÆF–æwÒ6W76–öã×¶Ö&¶WE6W76–öçÒFöÖW7F–5fVçVS×¶FöÖW7F–5fVçVWÒöäFöÖW7F–5fVçVT6†ævS×¶6†ævTFöÖW7F–5fVçVWÒöäf–ÆÆVC×¶†æFÆTf–ÆÆVGÒóãÂö6–FSçÓÂöÖ–ãçĞ¢·f–WsÓÓÒ'vF6†Æ—7B"bcÆÖ–â6Æ74æÖSÒ&ç×vRç×6–ævÆR#ãÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂç×vF6‚×vR#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒî«HÈºÂÊ(^ºª“ÂöƒãÇ7ãç·vF6†Æ—7BæÆVæwF‡Ş«	ÃÂ÷7ããÂöF—cãÆF—b6Æ74æÖSÒ'vF6‚×F&ÆRÖ†VB#ãÇ7ãîÊ(^ºª“Â÷7ããÇ7ãîÙˆNÉêÎ«Â÷7ããÇ7ãî¹;¹ÛŞºZÂ÷7ããÇ7ãîÈ¹ÎÉêSÂ÷7ããÇ7ãîÈ‰ÎÈIÃÂ÷7ããÂöF—cç·vF6†Æ—7BæÆVæwFƒ÷vF6†Æ—7BæÖ‚†—FVÒÆ–æFW‚“ÓãÆF—b¶W“×¶—FVÒæ–GÒ6Æ74æÖSÒ&ç×vF6‚×&÷r"&öÆSÒ&'WGFöâ"F$–æFWƒ×³Òöä6Æ–6³×²‚“Óæ6†ö÷6T–ç7G'VÖVçB†—FVÒ—Òöä¶W”F÷vã×¶WfVçCÓç¶–b†WfVçBçF&vWBÓÖWfVçBæ7W'&VçEF&vWB—&WGW&ã¶–b†WfVçBæ¶W“ÓÓÒ$VçFW"'ÇÆWfVçBæ¶W“ÓÓÒ""—¶WfVçBç&WfVçDFVfVÇB‚“¶6†ö÷6T–ç7G'VÖVçB†—FVÒ“·××ÓãÇ7â6Æ74æÖSÒ'7Fö6²Ö6VÆÂ#ãÄ–ç7G'VÖVçDÆövò–ç7G'VÖVçC×¶—FV×ÒóãÇ7ããÆ#ç¶—FVÒææÖWÓÂö#ãÇ6ÖÆÃç¶F—7Æ•7–Ö&öÂ†—FVÒæÖ&¶WBÆ—FVÒç7–Ö&öÂ—Ò+r¶—FVÒæW†6†ævWÓÂ÷6ÖÆÃãÂ÷7ããÂ÷7ããÇ7G&öæsç¶f÷&ÖEvF6…&–6R†—FVÒ—ÓÂ÷7G&öæsãÆVÒ6Æ74æÖS×²†—FVÒæ6†ævU&FUÓóó“ãÓò'W#¢&F÷vâ'Óç²‚†—FVÒæ6†ævU&FUÓóó’óó’çFôf—†VBƒ"—ÒSÂöVÓãÇ7ãç¶—FVÒæÖ&¶WCÓÓÒ$µ"#ò.«ZŞ¸+B#¦—FVÒæÖ&¶WCÓÓÒ%U2#ò.ºû«ZÒ#¢.ËÙNÉÛ‚'ÓÂ÷7ããÇ7â6Æ74æÖSÒ'vF6‚×&V÷&FW"Ö6öçG&öÇ2"&öÆSÒ&w&÷W"&–ÖÆ&VÃ×¶G¶—FVÒææÖWÒÈ‰ÎÈIÂ»8«+ÖÒöä6Æ–6³×¶WfVçCÓæWfVçBç7F÷&÷vF–öâ‚—ÓãÆ'WGFöâG—SÒ&'WGFöâ"&–ÖÆ&VÃ×¶G¶—FVÒææÖWÒÉÈNºÂÉÛN¸ù–ÒF—FÆSÒ.ÉÈNºÂÉÛN¸ù’"F—6&ÆVC×¶–æFWƒÓÓÓÇÇvF6†Æ—7D÷&FW$'W7—Òöä6Æ–6³×²‚“Óçfö–BÖ÷fUvF6†Æ—7D—FVÒ†—FVÒæ–BÂÓ—ÓãÄ6†Wg&öåWóãÂö'WGFöããÆ'WGFöâG—SÒ&'WGFöâ"&–ÖÆ&VÃ×¶G¶—FVÒææÖWÒÉXN¹éºÂÉÛN¸ù–ÒF—FÆSÒ.ÉXN¹éºÂÉÛN¸ù’"F—6&ÆVC×¶–æFWƒÓÓ×vF6†Æ—7BæÆVæwF‚ÓÇÇvF6†Æ—7D÷&FW$'W7—Òöä6Æ–6³×²‚“Óçfö–BÖ÷fUvF6†Æ—7D—FVÒ†—FVÒæ–BÃ—ÓãÄ6†Wg&öäF÷vâóãÂö'WGFöããÂ÷7ããÄ6†Wg&öå&–v‡B&–Ö†–FFVãÒ'G'VR"óãÂöF—câ“£Ç6Æ74æÖSÒ&çÖV×G’Æ&vR#îÈ¹ÎÈK‚Ù™Nº›NÉyÈIÂ»8NÉØB¸ˆÎ¹úÂ«HÈºÂÊ(^ºªÉØBËiN«ÙYÈKÉ©BãÂ÷çÓÂ÷6V7F–öããÂöÖ–ãçĞ¢·f–WsÓÓÒ&6ö×WF—F–öâ"bcÆÖ–â6Æ74æÖSÒ&ç×vRçÖ6ö×WF—F–öâ#ãÇ6V7F–öâ6Æ74æÖSÒ&6ö×WF—F–öâÖÖ–â#ãÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂ6öçFW7BÖ÷fW'f–Wr#ãÆF—cãÇ7ãîË«ÊIÉÛ‚¸ÈÙ¨ÃÂ÷7ããÆƒç¶7F—fT6ö×WF—F–öãòææÖSóò.ÉXNÊxË«ÙYÂ¸ÈÙ¨Î«ÉxnÈ«^¸¸¸ºB'ÓÂöƒç¶7F—fT6ö×WF—F–öâbcÇîÊ(^º8ÎÉÛÂ¶f÷&ÖDVæDFFR†7F—fT6ö×WF—F–öâæVæG4B—Ò+rÆ#ç¶DF’†7F—fT6ö×WF—F–öâæVæG4B—ÓÂö#ãÂ÷çÓÂöF—cãÆF—b6Æ74æÖSÒ&6öçFW7BÖ7F–öç2#ç¶7W'&VçD6ö×WF—F–öãóÆ'WGFöâ6Æ74æÖSÒ&ÆVfRÖ'WGFöâ"öä6Æ–6³×¶ÆVfT6ö×WF—F–öçÓãÄFö÷$÷Vâóî¸ÈÙ¨Â¸)««‹Âö'WGFöãã£Ãç¶7F—fT6ö×WF—F–öâbcÆ'WGFöâ6Æ74æÖSÒ&ÆVfRÖ'WGFöâ"öä6Æ–6³×¶ÆVfT6ö×WF—F–öçÓãÄFö÷$÷Vâóî«‹ºÒÈ*ŞÊ	ÃÂö'WGFöãçÓÄ¦ö–äF–Æöröä6†ævVC×¶ÆöD6ö×WF—F–öç7ÒóãÂóçÓÂöF—cç²7W'&VçD6ö×WF—F–öâbf6ö×WF—F–öç2æÆVæwFƒãbcÇ6VÆV7BfÇVS×¶7F—fT6ö×WF—F–öãòæ–GÒöä6†ævS×¶WfVçCÓç6WD6ö×WF—F–öä–B†WfVçBçF&vWBçfÇVR—Óç¶6ö×WF—F–öç2æÖ†—FVÓÓãÆ÷F–öâfÇVS×¶—FVÒæ–GÒ¶W“×¶—FVÒæ–GÓç¶—FVÒææÖWÒ+r¶DF’†—FVÒæVæG4B—ÓÂö÷F–öãâ—ÓÂ÷6VÆV7CçÓÂ÷6V7F–öããÅ&æ¶–æuæVÂ&÷w3×¶ÆVFW&&ö&GÒ'F–6—çD–C×·'F–6—çD–GÒöå6VÆV7C×·6WE6VÆV7FVE'F–6—çGÒóãÅF÷–6·5æVÂ&÷w3×·F÷–6·7Òöå6VÆV7C×¶6†ö÷6T–ç7G'VÖVçGÒóãÂ÷6V7F–öããÆ6–FSãÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂ6ö×WF—F–öâÖwV–FR#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#îË«»
+»)SÂöƒ#ãÂöF—cãÆöÃãÆÆ“ãÆ#î«8NÊ	RºxÎ¹:N«‹Âö#ãÇ7ãîË)ÉØÂÉÛNÉªÉyÈIÂ¸¸¸JNÉèN«;ÂÈŠ¾Éé”âNÉéºjÎº[Â¹;ºŞÙZ¸¸¸ºBãÂ÷7ããÂöÆ“ãÆÆ“ãÆ#î¸ÈÙ¨ÂË«¹‰¸©B«	ÎÈJCÂö#ãÇ7ãîËH¸ÈËÙN¹9ÎºÂË«ÙY«¸)‚È8‚¸ÈÙ¨Îº[Â«	ÎÈJNÙZ¸¸¸ºBâÊxNÙh’ÊIÉÛ‚¸ÈÙ¨Î¸©BÙYÂ«8NÊ	^¸»’«	ÎºxÂ«¸ª^ÙZ¸¸¸ºBãÂ÷7ããÂöÆ“ãÆÆ“ãÆ#îÊ(^ºª’«(È8’Ù¸BºªÉÙÊ;ÎºËƒÂö#ãÇ7ãîÈ¹ÎÈK‚Ø:ŞÉyÈIÂ«ZŞ¸+L+~ºû«ZŞÊ;ÎÈ¹Ş«;Â«È8ÉéÈ+ÉØBÈJØ9ŞÙ[BÈ¹ÎÉê^«¹‰¸©BÊxÊ	^«ºÂÊ;ÎºËÙZ¸¸¸ºBãÂ÷7ããÂöÆ“ãÆÆ“ãÆ#îÈ‰ÎÉÈL+~ØŠÎÉéÙˆNÙš’Ù™^ÉÛƒÂö#ãÇ7ãîË«ÊhÈ¹ÂÈ‰ÎÉÈNÙÎÉyÙÎÈ¹Î¹	º›ÂË*²Ë+N«+ÊNÉy¸©BÈ‰ÎÉÈBÈŠ¾ÉéÉxnÉÛBºz‚ÉXN¹éÉyÙÎÈ¹Î¹
+¸¸¸ºBâ¸¸¸JNÉèNÉØB¸ˆNº[Nº›B»;NÉÊÊ(^ºª«;ÂË+N«+¸+NÉzŞÉØBÙ™^ÉÛÙZÈ‰‚ÉèÈ«^¸¸¸ºBãÂ÷7ããÂöÆ“ãÆÆ“ãÆ#î¸ÈÙ¨Â¸)««‹Âö#ãÇ7ãîÙˆNÉêÂ¸ÈÙ¨ÎÉyÈIÂ¸)«B¹*B¸ºNº[‚¸ÈÙ¨ÎÉyË«ÙY«¸)‚È8‚¸ÈÙ¨Îº[Â«	ÎÈJNÙZÈ‰‚ÉèÈ«^¸¸¸ºBãÂ÷7ããÂöÆ“ãÂööÃãÂ÷6V7F–öããÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂG&F–ærÖwV–FR#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#î«¹éÈ¹Î«L+~ÉÊÉÙÈ*ÎÙZÓÂöƒ#ãÂöF—cãÄFöÖW7F–5G&F–æu66†VGVÆRóãÅW5G&F–æu66†VGVÆRóãÄ7'—FõG&F–æu66†VGVÆRóãÇVÃãÆÆ“îËHºŞÈ8’»hÉÛBËÉÎÊxBÙhÉÛBÙˆNÉêÂÙYÎ«ZŞÈ¹Î«NÉyÙ[N¸»ÙY¸©B«¹é‚«ZÎ«NÉÛNº›ÂÊ;Îºy+~ÙËNÉê^ÉÛÎÉy¸©BÉêRºx«	È8Ø9ÎºÂÙÎÈ¹Î¹
+¸¸¸ºBãÂöÆ“ãÆÆ“îºû«ZŞÊ;ÎÈ¹ÒÈ¹Î«NÙÎ¸©Bºû«ZÒÈIÎº‹Ø8ÉèBşÙÎÊHÈ¹Îº[ÂÉé¸ù’ØÉ»8NÙ[BÙYÎ«ZŞÈ¹Î«NÉËÎºÂÙÎÈ¹ÎÙZ¸¸¸ºBãÂöÆ“ãÆÆ“î«È8ÉéÈ+ÉØ#NÈ¹Î«B«¹é‚«¸ª^ÙYº›Âºª¹:Ê;ÎºËÉØºªÉÙË+N«+ºÂÈºNÊ	Â«8NÊ(ÎÉyÊNÈj¹	ÊxÉX®È«^¸¸¸ºBãÂöÆ“ãÆÆ“îÈºNÊ	ÂË+N«+¸+NÉzŞÉÛB«BÉÛNÈ8È9Ş«‹º›BËIŞÉéÈ+«‹ÊHÉËÎºÂÈ‰ÎÉÈBÈŠ¾Éé«»hÉzÎ¹
+¸¸¸ºBâ«¹é¸+NÉzŞÉÛBÉxn¸©BË«Éé¸©BËIŞÉéÈ+«;Â«H«8NÉxnÉÛBÈ‰ÎÉÈNÙÂºz‚ÉXN¹éÉyÙÎÈ¹Î¹
+¸¸¸ºBãÂöÆ“ãÆÆ“î«	ÉØ¸ÈÙ¨ÂË«Éé¸©BÈ‰ÎÉÈNÙÎÉÙ‚¸¸¸JNÉèNÉØB¸ˆÎ¹úÂÈIÎºÎÉÙ‚»;NÉÊÊ(^ºª«;ÂºªÉÙË+N«+¸+NÉzŞÉØBÙ™^ÉÛÙZÈ‰‚ÉèÈ«^¸¸¸ºBãÂöÆ“ãÆÆ“îÊxNÙh’ÊIÉÛ‚¸ÈÙ¨ÎÉyË«ÙY¸©B¸ùÉXÉy¸©B¸¸¸JNÉèNÉØB»8«+ŞÙZÈ‰‚ÉxnÉËÎº›”îÉØ»8«+ŞÙZÈ‰‚ÉèÈ«^¸¸¸ºBãÂöÆ“ãÆÆ“îÊxÊ	^«¸©BÊ«BËjÊÈ¹ÎÉyºxÂË+N«+¹	º›ºûË+N«+Ê;ÎºËÉËÎºÂ¸*ÉØBÈ‰‚Éè«:ÂÙ™ÉÊŒ+~È¹ÎÈK‚ÊxÉ{Éy¹K¹ÛÂË+N«+«ˆÉZÉÛB¸ºÎ¹ÛÎÊx‚È‰‚ÉèÈ«^¸¸¸ºBãÂöÆ“ãÆÆ“î¸ÈÙ¨ÂÊ(^º8ÂÙ¸NÉy¸©BÈº«yÂÊ;ÎºËÉÛBÊ	ÎÙYÎ¹
+¸¸¸ºBãÂöÆ“ãÆÆ“î¸ÈÙ¨ÎÉyÈIÂ¸)«º›BÙ[N¸»’¸ÈÙ¨ÎÉÙ‚ØŠÎÉé«‹ºŞÉÛBÈ*ŞÊ	Î¹
+¸¸¸ºBâ¸ÈÙ¨ÎÉê^ÉØ¸ºNº[‚Ë«Éé«¸*ÉXBÉèÉËÎº›B¸)««‹«Ê	ÎÙYÎ¹
+È‰‚ÉèÈ«^¸¸¸ºBãÂöÆ“ãÆÆ“î«8NÊ	RØ8Ø{N¸©BÙˆNÉêÂ”âÉè^º
+^ÉÛBÙXNÉ©NÙYº›«8NÊ	^«;ÂºªÉÙØŠÎÉé¸ÛÉÛNØK«Éˆ«ZÂÈ*ŞÊ	Î¹
+¸¸¸ºBâÊxÊ	«	ÎÈJNÙYÂ¸ÈÙ¨Î«Éè¸ºNº›BÙ[N¸»’¸ÈÙ¨Â«‹ºŞ¸øBÙZ«¹‚È*ŞÊ	Î¹
+¸¸¸ºBãÂöÆ“ãÂ÷VÃãÂ÷6V7F–öããÂö6–FSãÂöÖ–ãçĞ¢·f–WsÓÓÒ'÷'FföÆ–ò"bcÆÖ–â6Æ74æÖSÒ&ç×vRç×6–ævÆRç×÷'FföÆ–ò×vR#ç¶†öÆF–æw7ÓÇ6V7F–öâ6Æ74æÖSÒ&ç×æVÂG&FRÖ†—7F÷'’#ãÆF—b6Æ74æÖSÒ&ç×6V7F–öâ×F—FÆR#ãÆƒ#î¸+BË+N«+¸+NÉzÓÂöƒ#ãÇ7ãç·÷'FföÆ–óòæf–ÆÇ2æÆVæwFƒóóŞ«CÂ÷7ããÂöF—cç·÷'FföÆ–óòæf–ÆÇ2æÆVæwFƒ÷÷'FföÆ–òæf–ÆÇ2ç6Æ–6RƒÃS’æÖ†f–ÆÃÓãÆF—b6Æ74æÖSÒ'G&FR×&÷r"¶W“×¶f–ÆÂæ–GÓãÇ7ããÆ#ç¶f–ÆÂææÖWÓÂö#ãÇ6ÖÆÃç¶f–ÆÂæÖ&¶WGÒ+r¶F—7Æ•7–Ö&öÂ†f–ÆÂæÖ&¶WBÆf–ÆÂç7–Ö&öÂ—×¶f–ÆÂæÖ&¶WCÓÓÒ$µ""bff–ÆÂçfVçVSö+rG¶f–ÆÂçfVçVWÖ¢"'Ò+r¶f÷&ÖDFFUF–ÖR†f–ÆÂæW†V7WFVDB—ÓÂ÷6ÖÆÃãÂ÷7ããÇ7ããÆ"6Æ74æÖS×¶f–ÆÂç6–FSÓÓÒ&'W’#ò'W#¢&F÷vâ'Óç¶f–ÆÂç6–FSÓÓÒ&'W’#ò.ºzNÈ‰‚#¢.ºzN¸øB'Ò¶f÷&ÖEVçF—G’†f–ÆÂçVçF—G”Ö–7&÷2—×¶f–ÆÂæÖ&¶WCÓÓÒ$5%•Dò#ò.«	Â#¢.Ê;Â'ÓÂö#ãÇ6ÖÆÂ6Æ74æÖS×¶f–ÆÂç&WGW&å&FRÓÒçVÆÂò""¢f–ÆÂç&WGW&å&FRãÒò'W"¢&F÷vâ'Óç¶f÷&ÖD·'r†f–ÆÅfÇVT·'r†f–ÆÂ’—Ò+r¶f–ÆÂç&WGW&å&FT¶–æBÓÓÒ'&VÆ—¦VB"ò.ÈºNÙˆB"¢.ÙˆNÉêÂ'Ò¶f÷&ÖE&WGW&å&FR†f–ÆÂç&WGW&å&FR—ÓÂ÷6ÖÆÃãÂ÷7ããÂöF—câ“£Ç6Æ74æÖSÒ&çÖV×G’Æ&vR#îÉXNÊxË+N«+¹	ÂºªÉÙÊ;ÎºËÉÛBÉxnÈ«^¸¸¸ºBãÂ÷çÓÂ÷6V7F–öããÂöÖ–ãçĞ¢·f–WsÓÓÒ&æWw2"bcÆÖ–â6Æ74æÖSÒ&ç×vRç×6–ævÆR#ãÄæWw5æVÂ—FV×3×¶æWw4—FV×7ÒF—FÆS×¶G·6VÆV7FVBææÖWÒ»òÊ;ÎÉ©BÈ¹ÎÉêR¸›NÈªFÒÆöF–æs×¶æWw4ÆöF–æwÒW57Æ—C×·6VÆV7FVBæÖ&¶WCÓÓÒ%U2'ÒóãÂöÖ–ãçĞ¢Å'F–6—çD7F—f—G”F–Æör&÷s×·6VÆV7FVE'F–6—çGÒöä6Æ÷6S×²‚“Óç6WE6VÆV7FVE'F–6—çB†çVÆÂ—Òóç¶WF‚ç&öÆSÓÓÒ&FÖ–â"bcÆF—b6Æ74æÖSÒ&çÖÖö&–ÆRÖFÖ–â#ãÄFÖ–äF–ÆöróãÂöF—cçÓÆæb6Æ74æÖSÒ&çÖÖö&–ÆRÖ&÷GFöÒ#ç¶Öö&–ÆTæd—FV×2æÖ‚…¶¶W’Ä–6öâÆÆ&VÅÒ“Óç¶6öç7B“Ô–6öâ2G—Vöb†öÖS·&WGW&âÆ'WGFöâ¶W“×¶¶W—Ò6Æ74æÖS×·f–WsÓÓÖ¶W“ò&7F—fR#¢"'Òöä6Æ–6³×²‚“Óæ¶W“ÓÓÒ&Ö&¶WB#ö÷VäÖ&¶WEf–Wr‚“§6WEf–Wr†¶W’2f–Wr—ÓãÄ’óãÇ7ãç¶Æ&VÇÓÂ÷7ããÂö'WGFöãçÒ—ÓÂöæcãÂöF—cã°§Ğ

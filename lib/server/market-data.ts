@@ -1,4 +1,6 @@
 import { env } from "cloudflare:workers";
+import { chartPeriodHistoryDays, finalizeChartPoints, naverCandlePeriod, type ChartPeriod } from "@/lib/server/chart-period";
+import { runChartFallback } from "@/lib/server/chart-fallback";
 import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
 import { getNaverUsdKrwMarketIndexDetail, getNaverUsdKrwMarketIndexHistory } from "@/lib/server/naver-market-index";
 import { buildNaverPath, naverJson, naverPolling } from "@/lib/server/naver-stock";
@@ -141,9 +143,13 @@ function recordTimestamp(record: Record<string, unknown>, fallback: number) {
     "timestamp",
     "candleDateTimeKst",
     "candleDateTimeUtc",
+    "localDateTime",
+    "tradeAt",
+    "lastTradeAt",
     "date",
     "localDate",
     "tradeDate",
+    "tradingDateKst",
     "bizDate",
     "businessDate",
     "baseDate",
@@ -562,70 +568,174 @@ function marketIndexChartRows(payload: unknown) {
   return direct.length ? direct : marketIndexPriceRows(payload);
 }
 
-function normalizeIndexPoints(payload: unknown, fetchedAt: number) {
+function normalizeIndexPoints(payload: unknown, fetchedAt: number, fallbackOffsetDays = 0) {
   return marketIndexChartRows(payload)
-    .map((row, index) => chartPoint(row, fetchedAt - index * 86_400_000))
+    .map((row, index) => chartPoint(row, fetchedAt - (fallbackOffsetDays + index) * 86_400_000))
     .filter((point): point is ChartPoint => Boolean(point))
     .sort((a, b) => a.time - b.time)
     .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
 }
 
-async function trackedIndexHistory(meta: TrackedMarketIndexMeta, range: string) {
-  const days = RANGE_DAYS[range];
-  if (!days) throw new Error("INVALID_CHART_RANGE");
+async function pagedIndexPriceHistory(path: string, period: ChartPeriod) {
+  // Both domestic and foreign index chart endpoints can return an intraday
+  // snapshot rather than a usable daily history. The paged index-price
+  // endpoints provide session rows that can safely be aggregated below.
+  const pageSize = 60;
+  const pageCount = Math.min(8, Math.max(3, Math.ceil(chartPeriodHistoryDays(period) / 90)));
+  const settled = await Promise.allSettled(
+    Array.from({ length: pageCount }, (_, page) =>
+      naverJson<unknown>(
+        buildNaverPath(path, { page: page + 1, pageSize }),
+        { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 8_000 },
+      ),
+    ),
+  );
+  const points: ChartPoint[] = [];
+  let stale = false;
+  for (let page = 0; page < settled.length; page += 1) {
+    const result = settled[page];
+    if (result.status !== "fulfilled") continue;
+    stale = stale || result.value.stale;
+    points.push(...normalizeIndexPoints(result.value.data, result.value.fetchedAt, page * pageSize));
+  }
+  const sorted = points
+    .sort((a, b) => a.time - b.time)
+    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
+  if (!sorted.length) throw new Error("NAVER_INDEX_HISTORY_UNAVAILABLE");
+  return { points: sorted, stale };
+}
+
+async function trackedIndexHistory(meta: TrackedMarketIndexMeta, period: ChartPeriod) {
+  const days = chartPeriodHistoryDays(period);
 
   if (meta.kind === "domestic") {
-    const result = await naverJson<unknown>(
-      buildNaverPath(`/api/securityService/chart/domestic/index/${encodeURIComponent(meta.code)}`, { periodType: "day" }),
-      { ttlMs: 60_000, staleMs: 30 * 60_000 },
-    );
-    return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
+    return runChartFallback([
+      async () => {
+        const chart = await naverJson<unknown>(
+          buildNaverPath(`/api/securityService/chart/domestic/index/${encodeURIComponent(meta.code)}`, {
+            periodType: naverCandlePeriod(period),
+          }),
+          { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+        );
+        const points = normalizeIndexPoints(chart.data, chart.fetchedAt);
+        return points.length > 1 ? { points, stale: chart.stale } : null;
+      },
+      async () => {
+        const paged = await pagedIndexPriceHistory(
+          `/api/securityFe/api/index/${encodeURIComponent(meta.code)}/price`,
+          period,
+        );
+        return paged.points.length > 1 ? paged : null;
+      },
+      async () => {
+        const result = await naverJson<unknown>(
+          buildNaverPath(`/api/securityService/chart/domestic/index/${encodeURIComponent(meta.code)}`, {
+            periodType: naverCandlePeriod(period),
+          }),
+          { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+        );
+        return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
+      },
+    ]);
   }
 
   if (meta.kind === "foreign") {
-    const result = await naverJson<unknown>(
-      buildNaverPath(`/api/securityService/chart/foreign/index/${encodeURIComponent(meta.code)}`, { periodType: "day" }),
-      { ttlMs: 60_000, staleMs: 30 * 60_000 },
-    );
-    return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
+    const attempts = [
+      async () => {
+        // Foreign index supports day/week/month candle periods. Its API does
+        // not accept yearCandle, so keep the tested ten-year monthly source
+        // for YEAR and aggregate it locally.
+        const params = period === "YEAR"
+          ? { periodType: "month", range: 120 }
+          : { periodType: naverCandlePeriod(period) };
+        const chart = await naverJson<unknown>(
+          buildNaverPath(`/api/securityService/chart/foreign/index/${encodeURIComponent(meta.code)}`, params),
+          { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+        );
+        const points = normalizeIndexPoints(chart.data, chart.fetchedAt);
+        return points.length > 1 ? { points, stale: chart.stale } : null;
+      },
+    ];
+
+    if (period === "DAY" || period === "WEEK") {
+      attempts.push(async () => {
+        const paged = await pagedIndexPriceHistory(
+          `/api/securityService/index/${encodeURIComponent(meta.code)}/price`,
+          period,
+        );
+        return paged.points.length > 1 ? paged : null;
+      });
+      attempts.push(async () => {
+        const legacy = await naverJson<unknown>(
+          buildNaverPath(`/api/securityService/chart/foreign/index/${encodeURIComponent(meta.code)}`, {
+            periodType: period === "DAY" ? "day" : "week",
+          }),
+          { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+        );
+        const points = normalizeIndexPoints(legacy.data, legacy.fetchedAt);
+        const uniqueDates = new Set(points.map(point => new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/New_York",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(point.time))));
+        return uniqueDates.size > 1 ? { points, stale: legacy.stale } : null;
+      });
+    } else {
+      // Naver's foreign-index chart endpoint returns daily rows for the
+      // requested month range. Use five years for monthly candles and ten
+      // years for yearly candles so both views have useful history.
+      const monthRange = period === "YEAR" ? 120 : 60;
+      attempts.push(async () => {
+        const result = await naverJson<unknown>(
+          buildNaverPath(`/api/securityService/chart/foreign/index/${encodeURIComponent(meta.code)}`, { periodType: "month", range: monthRange }),
+          { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+        );
+        return { points: normalizeIndexPoints(result.data, result.fetchedAt), stale: result.stale };
+      });
+    }
+
+    return runChartFallback(attempts);
   }
 
-  try {
-    const fx = await getNaverUsdKrwMarketIndexHistory(days);
-    const points: ChartPoint[] = fx.points.map(point => ({
-      time: point.time,
-      open: point.close,
-      high: point.close,
-      low: point.close,
-      close: point.close,
-    }));
-    return { points, stale: fx.stale };
-  } catch {
-    // Current Naver market-index JSON is preferred for USD/KRW. Keep the
-    // stock.naver.com exchange list as a compatibility fallback.
-    const starts = days > 120 ? [0, 100, 200, 300] : [0];
-    const pages = await Promise.all(starts.map(startIdx => naverJson<unknown>(
-      buildNaverPath("/api/domestic/exchange/USD/list", { startIdx, pageSize: 100 }),
-      { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 },
-    )));
-    const points = pages
-      .flatMap(page => normalizeIndexPoints(page.data, page.fetchedAt))
-      .sort((a, b) => a.time - b.time)
-      .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
-    return { points, stale: pages.some(page => page.stale) };
-  }
+  return runChartFallback([
+    async () => {
+      const fx = await getNaverUsdKrwMarketIndexHistory(days);
+      const points: ChartPoint[] = fx.points.map(point => ({
+        time: point.time,
+        open: point.close,
+        high: point.close,
+        low: point.close,
+        close: point.close,
+      }));
+      return points.length > 1 ? { points, stale: fx.stale } : null;
+    },
+    async () => {
+      // Keep the stock.naver.com exchange list as the FX-specific compatibility
+      // fallback while using the same point validation and error handling as
+      // every other chart.
+      const starts = days > 120 ? [0, 100, 200, 300] : [0];
+      const pages = await Promise.all(starts.map(startIdx => naverJson<unknown>(
+        buildNaverPath("/api/domestic/exchange/USD/list", { startIdx, pageSize: 100 }),
+        { ttlMs: 5 * 60_000, staleMs: 60 * 60_000 },
+      )));
+      const points = pages
+        .flatMap(page => normalizeIndexPoints(page.data, page.fetchedAt))
+        .sort((a, b) => a.time - b.time)
+        .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
+      return { points, stale: pages.some(page => page.stale) };
+    },
+  ]);
 }
 
-export async function getTrackedMarketIndexChartSeries(id: TrackedMarketIndexId, range: string) {
+export async function getTrackedMarketIndexChartSeries(id: TrackedMarketIndexId, period: ChartPeriod) {
   const meta = TRACKED_MARKET_INDEXES[id];
-  const days = RANGE_DAYS[range];
-  if (!meta || !days) throw new Error("INVALID_CHART_RANGE");
-  const result = await trackedIndexHistory(meta, range);
-  const since = Date.now() - days * 86_400_000;
-  const points = result.points
-    .filter(point => range === "1Y" || point.time >= since)
-    .slice(-400);
-  return { points, range, stale: result.stale, source: "NAVER" as const };
+  if (!meta) throw new Error("INVALID_CHART_INDEX");
+  const days = chartPeriodHistoryDays(period);
+  const result = await trackedIndexHistory(meta, period);
+  const timezone = meta.kind === "foreign" ? "America/New_York" : "Asia/Seoul";
+  const points = finalizeChartPoints(result.points, period, timezone, days);
+  return { points, period, stale: result.stale, source: "NAVER" as const };
 }
 
 export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Promise<MarketIndexDetail> {
@@ -687,7 +797,7 @@ export async function getTrackedMarketIndexDetail(id: TrackedMarketIndexId): Pro
 
   const history = meta.kind === "fx"
     ? { points: [] as ChartPoint[], stale: false }
-    : await trackedIndexHistory(meta, "1Y").catch(() => ({ points: [] as ChartPoint[], stale: false }));
+    : await trackedIndexHistory(meta, "YEAR").catch(() => ({ points: [] as ChartPoint[], stale: false }));
   const latest = history.points.at(-1);
   const high52WeekPoint = history.points.reduce<ChartPoint | null>((best, point) => !best || point.high >= best.high ? point : best, null);
   const low52WeekPoint = history.points.reduce<ChartPoint | null>((best, point) => !best || point.low <= best.low ? point : best, null);
@@ -744,42 +854,44 @@ function chartRows(payload: unknown): Array<Record<string, unknown>> {
 }
 
 function chartPoint(row: Record<string, unknown>, fallback: number): ChartPoint | null {
-  const close = asNumber(row.closePrice, row.close, row.currentPrice, row.tradePrice, row.price, row.basePrice);
+  const close = asNumber(row.closingPrice, row.closePrice, row.close, row.currentPrice, row.tradePrice, row.price, row.basePrice);
   if (close <= 0) return null;
   const open = asNumber(row.openPrice, row.open, row.openingPrice, close) || close;
   const high = asNumber(row.highPrice, row.high, row.highestPrice, close) || close;
   const low = asNumber(row.lowPrice, row.low, row.lowestPrice, close) || close;
   const time = recordTimestamp(row, fallback);
-  return { time, open, high, low, close, volume: asNumber(row.accumulatedTradingVolume, row.volume, row.tradeVolume) || undefined };
+  return { time, open, high, low, close, volume: asNumber(row.tradingVolume, row.accumulatedTradingVolume, row.volume, row.tradeVolume) || undefined };
 }
 
-const RANGE_DAYS: Record<string, number> = { "1D": 2, "1W": 8, "1M": 32, "3M": 94, "1Y": 367 };
-
-export async function getChartSeries(market: Market, symbol: string, exchange: string | undefined, range: string) {
-  const days = RANGE_DAYS[range];
-  if (!days) throw new Error("INVALID_CHART_RANGE");
-  let result: { data: unknown; fetchedAt: number; stale: boolean };
-  if (market === "KR") {
-    result = await naverJson<unknown>(buildNaverPath(`/api/securityService/chart/domestic/item/${encodeURIComponent(symbol)}`, { periodType: "day" }), { ttlMs: 60_000, staleMs: 30 * 60_000 });
-  } else if (market === "US") {
-    const code = await resolveReutersCode(symbol, exchange);
-    result = await naverJson<unknown>(buildNaverPath(`/api/securityService/stock/${encodeURIComponent(code)}/price`, { page: 1, pageSize: Math.min(400, Math.max(30, days + 10)) }), { ttlMs: 60_000, staleMs: 30 * 60_000 });
-  } else {
-    const ticker = cryptoTicker(symbol);
-    const to = Date.now();
-    const from = to - days * 86_400_000;
-    const kstLocalIso = (value: number) => new Date(value + 9 * 60 * 60_000).toISOString().slice(0, 19);
-    result = await naverJson<unknown>(buildNaverPath(`/api/coin/candle/UPBIT/KRW/${encodeURIComponent(ticker)}/days`, { from: kstLocalIso(from), to: kstLocalIso(to) }), { ttlMs: 30_000, staleMs: 15 * 60_000 });
-  }
-  const since = Date.now() - days * 86_400_000;
-  const points = chartRows(result.data)
-    .map((row, index) => chartPoint(row, result.fetchedAt - index * 86_400_000))
-    .filter((point): point is ChartPoint => Boolean(point))
-    .filter(point => range === "1Y" || point.time >= since)
-    .sort((a, b) => a.time - b.time)
-    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time)
-    .slice(-400);
-  return { points, range, stale: result.stale, source: "NAVER" as const };
+export async function getChartSeries(market: Market, symbol: string, exchange: string | undefined, period: ChartPeriod) {
+  const days = chartPeriodHistoryDays(period);
+  const result = await runChartFallback([
+    async () => {
+      let response: { data: unknown; fetchedAt: number; stale: boolean };
+      if (market === "KR") {
+        const params = { periodType: naverCandlePeriod(period) };
+        response = await naverJson<unknown>(buildNaverPath(`/api/securityService/chart/domestic/item/${encodeURIComponent(symbol)}`, params), { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 });
+      } else if (market === "US") {
+        const code = await resolveReutersCode(symbol, exchange);
+        const params = { periodType: naverCandlePeriod(period) };
+        const path = `/api/securityService/chart/foreign/item/${encodeURIComponent(code)}`;
+        response = await naverJson<unknown>(buildNaverPath(path, params), { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 });
+      } else {
+        const ticker = cryptoTicker(symbol);
+        const to = Date.now();
+        const from = to - days * 86_400_000;
+        const kstLocalIso = (value: number) => new Date(value + 9 * 60 * 60_000).toISOString().slice(0, 19);
+        const unit = period === "DAY" ? "days" : period === "WEEK" ? "weeks" : "months";
+        response = await naverJson<unknown>(buildNaverPath(`/api/coin/candle/UPBIT/KRW/${encodeURIComponent(ticker)}/${unit}`, { from: kstLocalIso(from), to: kstLocalIso(to) }), { ttlMs: 30_000, staleMs: 15 * 60_000 });
+      }
+      const rawPoints = chartRows(response.data)
+        .map((row, index) => chartPoint(row, response.fetchedAt - index * 86_400_000))
+        .filter((point): point is ChartPoint => Boolean(point));
+      const timezone = market === "US" ? "America/New_York" : "Asia/Seoul";
+      return { points: finalizeChartPoints(rawPoints, period, timezone, days), stale: response.stale };
+    },
+  ]);
+  return { ...result, period, source: "NAVER" as const };
 }
 
 export async function persistQuoteSnapshot(quote: LiveQuote) {

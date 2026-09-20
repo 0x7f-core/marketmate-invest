@@ -5,26 +5,25 @@ import { useEffect, useRef, useState } from "react";
 type Market = "KR" | "US" | "CRYPTO";
 type QuoteLike = { market: Market; symbol: string; name: string; exchange: string };
 type ChartPoint = { time: number; open: number; high: number; low: number; close: number; volume?: number };
-type ChartResponse = { points?: ChartPoint[]; range?: string; source?: string; stale?: boolean; error?: string };
+type ChartPeriod = "DAY" | "WEEK" | "MONTH" | "YEAR";
+type ChartResponse = { points?: ChartPoint[]; period?: ChartPeriod; source?: string; stale?: boolean; error?: string };
 type CandleRow = { time: number; open: number; high: number; low: number; close: number };
-type LineRow = { time: number; value: number };
 type HistogramRow = { time: number; value: number; color: string };
-type ChartSeries = { setData: (rows: CandleRow[] | LineRow[] | HistogramRow[]) => void };
-type ChartApi = { addSeries: (seriesType: unknown, options: Record<string, unknown>) => ChartSeries; remove: () => void; timeScale: () => { fitContent: () => void } };
-type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown; LineSeries: unknown; HistogramSeries: unknown };
+type ChartSeries = { setData: (rows: CandleRow[] | HistogramRow[]) => void };
+type PriceScaleApi = { applyOptions: (options: Record<string, unknown>) => void };
+type ChartApi = { addSeries: (seriesType: unknown, options: Record<string, unknown>) => ChartSeries; priceScale: (id: string) => PriceScaleApi; resize: (width: number, height: number) => void; remove: () => void; timeScale: () => { fitContent: () => void } };
+type LightweightChartsApi = { createChart: (container: HTMLElement, options: Record<string, unknown>) => ChartApi; CandlestickSeries: unknown; HistogramSeries: unknown };
 
 declare global {
   interface Window { LightweightCharts?: LightweightChartsApi }
 }
 
-const RANGES = ["1W", "1M", "3M", "1Y"] as const;
-const FX_RANGES = ["1M", "3M", "1Y"] as const;
-type FxChartImages = Partial<Record<(typeof FX_RANGES)[number], string>>;
-const DEFAULT_FX_CHART_IMAGES: Record<(typeof FX_RANGES)[number], string> = {
-  "1M": "https://financial-vn.pstatic.net/chart/mobile/marketindex/month/FX_USDKRW_end.png",
-  "3M": "https://financial-vn.pstatic.net/chart/mobile/marketindex/month3/FX_USDKRW_end.png",
-  "1Y": "https://financial-vn.pstatic.net/chart/mobile/marketindex/year/FX_USDKRW_end.png",
-};
+const PERIODS = [
+  { value: "DAY", label: "일봉" },
+  { value: "WEEK", label: "주봉" },
+  { value: "MONTH", label: "월봉" },
+  { value: "YEAR", label: "년봉" },
+] as const;
 const LIGHTWEIGHT_CHARTS_URL = "https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js";
 let chartLibraryPromise: Promise<LightweightChartsApi> | null = null;
 
@@ -55,13 +54,13 @@ function loadLightweightCharts() {
   return chartLibraryPromise;
 }
 
-export default function MarketChart({ quote, indexId, fxChartImages }: { quote: QuoteLike; indexId?: string; fxChartImages?: FxChartImages }) {
+export default function MarketChart({ quote, indexId }: { quote: QuoteLike; indexId?: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<ChartApi | null>(null);
   const seriesRef = useRef<ChartSeries | null>(null);
   const volumeSeriesRef = useRef<ChartSeries | null>(null);
   const [chartReady, setChartReady] = useState(false);
-  const [range, setRange] = useState<(typeof RANGES)[number]>("3M");
+  const [period, setPeriod] = useState<ChartPeriod>("DAY");
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [libraryStatus, setLibraryStatus] = useState<"loading" | "ready" | "error">("loading");
   const [dataStatus, setDataStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -69,41 +68,22 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
   const [libraryMessage, setLibraryMessage] = useState("");
   const [dataMessage, setDataMessage] = useState("");
   const [retryToken, setRetryToken] = useState(0);
-  const [fxPageLoadToken, setFxPageLoadToken] = useState("");
-  const isFxImageChart = indexId === "USDKRW";
-  const fxRange = range === "1M" || range === "1Y" ? range : "3M";
-  const fxImageBaseUrl = fxChartImages?.[fxRange] || DEFAULT_FX_CHART_IMAGES[fxRange];
-  const fxImageUrl = fxPageLoadToken
-    ? `${fxImageBaseUrl}${fxImageBaseUrl.includes("?") ? "&" : "?"}v=${fxPageLoadToken}`
-    : "";
 
   useEffect(() => {
-    if (!isFxImageChart || fxPageLoadToken) return;
-    const pageLoadToken = typeof performance !== "undefined" && Number.isFinite(performance.timeOrigin)
-      ? Math.round(performance.timeOrigin)
-      : Date.now();
-    setFxPageLoadToken(String(pageLoadToken));
-  }, [isFxImageChart, fxPageLoadToken]);
-
-  useEffect(() => {
-    if (isFxImageChart) {
-      chartRef.current?.remove();
-      chartRef.current = null;
-      seriesRef.current = null;
-      volumeSeriesRef.current = null;
-      setChartReady(false);
-      return;
-    }
     const container = containerRef.current;
     if (!container) return;
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let resizeFrame = 0;
     setChartReady(false);
     setLibraryStatus("loading");
     setLibraryMessage("");
     void loadLightweightCharts().then(library => {
       if (cancelled || !containerRef.current) return;
       const chart = library.createChart(containerRef.current, {
-        autoSize: true,
+        autoSize: false,
+        width: Math.max(1, container.clientWidth),
+        height: Math.max(1, container.clientHeight),
         layout: {
           attributionLogo: true,
           background: { type: "solid", color: "#ffffff" },
@@ -123,32 +103,40 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
         },
         localization: { locale: "ko-KR" },
       });
-      const series = indexId === "USDKRW"
-        ? chart.addSeries(library.LineSeries, {
-          lineWidth: 2,
-          priceLineVisible: true,
-          lastValueVisible: true,
-        })
-        : chart.addSeries(library.CandlestickSeries, {
-          upColor: "#f04452",
-          downColor: "#3182f6",
-          borderUpColor: "#f04452",
-          borderDownColor: "#3182f6",
-          wickUpColor: "#f04452",
-          wickDownColor: "#3182f6",
-          priceLineVisible: true,
-          lastValueVisible: true,
-        });
+      const series = chart.addSeries(library.CandlestickSeries, {
+        upColor: "#f04452",
+        downColor: "#3182f6",
+        borderUpColor: "#f04452",
+        borderDownColor: "#3182f6",
+        wickUpColor: "#f04452",
+        wickDownColor: "#3182f6",
+        priceLineVisible: true,
+        lastValueVisible: true,
+      });
       const volumeSeries = chart.addSeries(library.HistogramSeries, {
         priceFormat: { type: "volume" },
-        priceScaleId: "",
+        priceScaleId: "volume",
         lastValueVisible: false,
         priceLineVisible: false,
-        scaleMargins: { top: 0.8, bottom: 0 },
+      });
+      chart.priceScale("volume").applyOptions({
+        visible: false,
+        borderVisible: false,
+        scaleMargins: { top: 0.78, bottom: 0.02 },
       });
       chartRef.current = chart;
       seriesRef.current = series;
       volumeSeriesRef.current = volumeSeries;
+      const syncChartSize = () => {
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        if (width > 0 && height > 0) chart.resize(width, height);
+      };
+      if (typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(syncChartSize);
+        resizeObserver.observe(container);
+      }
+      resizeFrame = requestAnimationFrame(syncChartSize);
       setChartReady(true);
       setLibraryStatus("ready");
     }).catch(error => {
@@ -159,39 +147,58 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
     });
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
       chartRef.current?.remove();
       chartRef.current = null;
       seriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [retryToken, indexId, isFxImageChart]);
+  }, [retryToken, indexId]);
 
   useEffect(() => {
-    if (isFxImageChart) return;
     const series = seriesRef.current;
     const chart = chartRef.current;
     if (!chartReady || !series || !chart) return;
     const valid = points.filter(point => Number.isFinite(point.time) && point.time > 0 && point.close > 0);
-    const rows = indexId === "USDKRW"
-      ? valid.map(point => ({ time: Math.floor(point.time / 1_000), value: point.close }))
-      : valid
-        .filter(point => point.open > 0 && point.high > 0 && point.low > 0)
-        .map(point => ({ time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close }));
+    const rows = valid
+      .filter(point => point.open > 0 && point.high > 0 && point.low > 0)
+      .map((point, index) => {
+        if (indexId !== "USDKRW") {
+          return { time: Math.floor(point.time / 1_000), open: point.open, high: point.high, low: point.low, close: point.close };
+        }
+        // Naver's FX time-series response contains only closing rates. Use the
+        // previous close as the session open so the FX chart keeps the same
+        // candle presentation without inventing an intraday high/low range.
+        const open = valid[index - 1]?.close ?? point.close;
+        return {
+          time: Math.floor(point.time / 1_000),
+          open,
+          high: Math.max(open, point.close),
+          low: Math.min(open, point.close),
+          close: point.close,
+        };
+      });
     series.setData(rows);
-    volumeSeriesRef.current?.setData(valid.map(point => ({
-      time: Math.floor(point.time / 1_000),
-      value: Math.max(0, Number(point.volume ?? 0)),
-      color: point.close >= point.open ? "rgba(239,75,85,.72)" : "rgba(60,127,219,.72)",
-    })));
+    volumeSeriesRef.current?.setData(valid
+      .map((point, index) => ({ point, index }))
+      .filter(({ point }) => Number.isFinite(point.volume) && Number(point.volume) > 0)
+      .map(({ point, index }) => {
+        const open = indexId === "USDKRW" ? valid[index - 1]?.close ?? point.close : point.open;
+        return {
+          time: Math.floor(point.time / 1_000),
+          value: Number(point.volume),
+          color: point.close >= open ? "rgba(239,75,85,.72)" : "rgba(60,127,219,.72)",
+        };
+      }));
     if (rows.length) chart.timeScale().fitContent();
-  }, [points, chartReady, indexId, isFxImageChart]);
+  }, [points, chartReady, indexId]);
 
   useEffect(() => {
-    if (isFxImageChart) return;
     const controller = new AbortController();
     setDataStatus("loading");
     setDataMessage("");
-    const params = new URLSearchParams({ market: quote.market, symbol: quote.symbol, exchange: quote.exchange, range });
+    const params = new URLSearchParams({ market: quote.market, symbol: quote.symbol, exchange: quote.exchange, period });
     if (indexId) {
       params.set("kind", "index");
       params.set("id", indexId);
@@ -212,54 +219,20 @@ export default function MarketChart({ quote, indexId, fxChartImages }: { quote: 
         setDataStatus("error");
       });
     return () => controller.abort();
-  }, [quote.market, quote.symbol, quote.exchange, indexId, range, retryToken, isFxImageChart]);
-
-  if (isFxImageChart) {
-    return (
-      <section className="naver-light-chart naver-fx-image-chart" aria-label={`${quote.name} 차트`}>
-        <div className="naver-light-chart-toolbar">
-          <div>
-            <b>차트</b>
-            <small>네이버증권</small>
-          </div>
-          <div className="naver-light-chart-ranges" role="tablist" aria-label="차트 기간">
-            {FX_RANGES.map(item => <button key={item} className={fxRange === item ? "active" : ""} onClick={() => setRange(item)}>{item}</button>)}
-          </div>
-        </div>
-        <div className="naver-light-chart-stage naver-fx-image-stage">
-          <div
-            className="naver-fx-chart-image"
-            role="img"
-            aria-label={`${quote.name} ${fxRange} 차트`}
-            style={{ backgroundImage: fxImageUrl ? `url("${fxImageUrl}")` : "none" }}
-          />
-        </div>
-      </section>
-    );
-  }
+  }, [quote.market, quote.symbol, quote.exchange, indexId, period, retryToken]);
 
   const loading = libraryStatus === "loading" || dataStatus === "loading";
   const errorMessage = libraryStatus === "error" ? libraryMessage : dataStatus === "error" ? dataMessage : "";
-  const latestPoint = points.at(-1);
-  const formatMetric = (value?: number) => Number.isFinite(value) ? Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 4 }) : "-";
-
   return (
     <section className="naver-light-chart" aria-label={`${quote.name} 차트`}>
       <div className="naver-light-chart-toolbar">
         <div>
           <b>차트</b>
-          <small>{stale ? "네이버증권 캐시 시세" : "네이버증권"}</small>
+          <small>{stale ? "네이버증권 캐시 시세" : indexId === "USDKRW" ? "네이버 종가 기준" : "네이버증권"}</small>
         </div>
         <div className="naver-light-chart-ranges" role="tablist" aria-label="차트 기간">
-          {RANGES.map(item => <button key={item} className={range === item ? "active" : ""} onClick={() => setRange(item)}>{item}</button>)}
+          {PERIODS.map(item => <button key={item.value} role="tab" className={period === item.value ? "active" : ""} aria-selected={period === item.value} onClick={() => setPeriod(item.value)}>{item.label}</button>)}
         </div>
-      </div>
-      <div className="chart-ohlcv" aria-live="polite">
-        <span>시 <b>{formatMetric(latestPoint?.open)}</b></span>
-        <span>고 <b className="up">{formatMetric(latestPoint?.high)}</b></span>
-        <span>저 <b className="down">{formatMetric(latestPoint?.low)}</b></span>
-        <span>종 <b>{formatMetric(latestPoint?.close)}</b></span>
-        <span>거래량 <b>{formatMetric(latestPoint?.volume)}</b></span>
       </div>
       <div className="naver-light-chart-stage">
         <div ref={containerRef} className="naver-light-chart-canvas" />

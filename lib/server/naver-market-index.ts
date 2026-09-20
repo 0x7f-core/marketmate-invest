@@ -177,8 +177,16 @@ function priceRow(record: Record<string, unknown>, fallback: number): UsdKrwHist
 }
 
 export async function getNaverUsdKrwMarketIndexHistory(days = 367) {
-  const pageSize = 100;
-  const pageCount = Math.min(4, Math.max(1, Math.ceil((days + 10) / pageSize)));
+  // The market-index API accepts at most 60 rows per page. Fetch enough
+  // pages to cover the selected chart range instead of falling back to the
+  // legacy exchange list or an image chart.
+  const pageSize = 60;
+  // The endpoint returns trading sessions rather than calendar days. Estimate
+  // the required page count from weekdays and keep one extra page as a buffer;
+  // this gives the ten-year YEAR view enough source rows without requesting
+  // the full historical archive on shorter views.
+  const estimatedTradingRows = Math.ceil(days * 5 / 7) + pageSize;
+  const pageCount = Math.min(48, Math.max(1, Math.ceil(estimatedTradingRows / pageSize)));
   const settled = await Promise.allSettled(
     Array.from({ length: pageCount }, (_, index) =>
       naverMarketIndexJson(

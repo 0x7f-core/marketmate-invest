@@ -169,6 +169,38 @@ export async function POST(request: Request) {
   } catch (error) { return apiError(error); }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    const user = await requireUser(request);
+    assertSameOrigin(request);
+    await enforceRateLimit(request, "watchlist_reorder", 60, 60_000, user.id);
+    const body = await request.json() as { items?: unknown };
+    const itemIds = Array.isArray(body.items) && body.items.every(
+      (value): value is string => typeof value === "string" && value.length > 0 && value.length <= 80,
+    ) ? body.items : null;
+    if (!itemIds || itemIds.length > 50 || new Set(itemIds).size !== itemIds.length) {
+      return Response.json({ error: "관심 종목 순서를 확인해주세요." }, { status: 400 });
+    }
+
+    const current = await env.DB!.prepare(
+      "SELECT id FROM watchlist_items WHERE user_id=? ORDER BY sort_order,created_at LIMIT 50",
+    ).bind(user.id).all<{ id: string }>();
+    const currentIds = current.results.map(item => item.id);
+    if (currentIds.length !== itemIds.length || currentIds.some(id => !itemIds.includes(id))) {
+      return Response.json({ error: "관심 종목 목록이 변경되었습니다. 다시 시도해주세요." }, { status: 409 });
+    }
+
+    if (itemIds.length) {
+      await env.DB!.batch(itemIds.map((id, index) =>
+        env.DB!.prepare("UPDATE watchlist_items SET sort_order=? WHERE user_id=? AND id=?")
+          .bind(index, user.id, id),
+      ));
+    }
+    await auditLog(request, "watchlist.reordered", "user", user.id, user.id, { count: itemIds.length }).catch(() => undefined);
+    return Response.json({ ok: true });
+  } catch (error) { return apiError(error); }
+}
+
 export async function DELETE(request: Request) {
   try {
     const user = await requireUser(request);

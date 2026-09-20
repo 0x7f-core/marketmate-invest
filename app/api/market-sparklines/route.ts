@@ -1,4 +1,3 @@
-import { getMarketOverview, type MarketIndexQuote } from "@/lib/server/market-data";
 import { getNaverUsdKrwRate } from "@/lib/server/naver-fx";
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 
@@ -30,6 +29,34 @@ function isoTimestamp(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return 0;
   const parsed = Date.parse(value.trim());
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compactForeignTimestamp(value: unknown) {
+  const clean = String(value ?? "").trim();
+  if (!/^(?:19|20)\d{12}$/.test(clean)) return 0;
+  const parts = [
+    Number(clean.slice(0, 4)),
+    Number(clean.slice(4, 6)) - 1,
+    Number(clean.slice(6, 8)),
+    Number(clean.slice(8, 10)),
+    Number(clean.slice(10, 12)),
+    Number(clean.slice(12, 14)),
+  ];
+  const utcGuess = Date.UTC(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]);
+  if (!Number.isFinite(utcGuess)) return 0;
+  const localParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(utcGuess));
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(localParts.find(item => item.type === type)?.value ?? 0);
+  const localAsUtc = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
+  return Number.isFinite(localAsUtc) ? utcGuess - (localAsUtc - utcGuess) : 0;
 }
 
 function dateKey(timestamp: number, timeZone: string) {
@@ -66,6 +93,15 @@ function kstWeekday(timestamp: number) {
   return ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(weekday);
 }
 
+function latestKstMarketTimestamp(timestamp: number) {
+  let cursor = timestamp;
+  if (kstWeekday(cursor) && localClockMinutes(cursor, "Asia/Seoul") < 9 * 60) {
+    cursor -= 24 * 60 * 60_000;
+  }
+  while (!kstWeekday(cursor)) cursor -= 24 * 60 * 60_000;
+  return cursor;
+}
+
 function normalize(points: SparkPoint[]) {
   const byTime = new Map<number, SparkPoint>();
   for (const point of points) {
@@ -99,12 +135,6 @@ function finalPoints(points: SparkPoint[], timeZone: string) {
   return downsample(latestTradingDay(points, timeZone));
 }
 
-function compactUtc(timestamp: number) {
-  const date = new Date(timestamp);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
-}
-
 function localIso(timestamp: number, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -120,10 +150,6 @@ function localIso(timestamp: number, timeZone: string) {
   return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}:${part("second")}`;
 }
 
-function quoteById(quotes: MarketIndexQuote[], id: string) {
-  return quotes.find(quote => quote.id === id);
-}
-
 function domesticPoints(data: unknown) {
   if (!Array.isArray(data)) return [];
   return data.flatMap(item => {
@@ -137,12 +163,16 @@ function domesticPoints(data: unknown) {
 
 function foreignPoints(data: unknown) {
   const payload = rowValue(data);
-  const candles = payload && Array.isArray(payload.candleList) ? payload.candleList : [];
+  const candles = payload && Array.isArray(payload.candleList)
+    ? payload.candleList
+    : payload && Array.isArray(payload.priceInfos)
+      ? payload.priceInfos
+      : [];
   return candles.flatMap(item => {
     const row = rowValue(item);
     if (!row) return [];
-    const time = isoTimestamp(row.tradeAt);
-    const value = numberValue(row.closePrice);
+    const time = isoTimestamp(row.tradeAt) || compactForeignTimestamp(row.localDateTime);
+    const value = numberValue(row.closePrice ?? row.currentPrice);
     if (time <= 0 || value <= 0) return [];
     const minute = localClockMinutes(time, "America/New_York");
     return minute >= 9 * 60 + 30 && minute <= 16 * 60 ? [{ time, value }] : [];
@@ -180,9 +210,9 @@ function fallbackSeries(): SparkSeries {
 }
 
 async function domesticIndexSeries(code: "KOSPI" | "KOSDAQ", anchor: number) {
-  const thistime = compactDate(anchor || Date.now(), "Asia/Seoul");
+  const thistime = compactDate(latestKstMarketTimestamp(anchor || Date.now()), "Asia/Seoul");
   const attempts = await Promise.allSettled(
-    [0, 100, 200, 300].map(startIdx => naverJson<unknown>(
+    [0].map(startIdx => naverJson<unknown>(
       buildNaverPath("/api/domestic/indexSise/time", { koreaIndexType: code, thistime, startIdx, pageSize: 100 }),
       { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_000 },
     )),
@@ -194,14 +224,9 @@ async function domesticIndexSeries(code: "KOSPI" | "KOSDAQ", anchor: number) {
   } satisfies SparkSeries;
 }
 
-async function foreignIndexSeries(code: ".INX" | ".IXIC", exchange: "NYSE" | "NASDAQ", anchor: number) {
-  const center = anchor || Date.now();
+async function foreignIndexSeries(code: ".INX" | ".IXIC") {
   const result = await naverJson<unknown>(
-    buildNaverPath(`/api/securityService/chart/foreign/INDEX/${exchange}/${code}/interval/5`, {
-      startDateTime: compactUtc(center - 18 * 60 * 60_000),
-      endDateTime: compactUtc(center + 6 * 60 * 60_000),
-      utc: true,
-    }),
+    buildNaverPath(`/api/securityService/chart/foreign/index/${code}`, { periodType: "day" }),
     { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_500 },
   );
   return {
@@ -237,26 +262,23 @@ async function usdKrwSeries() {
 }
 
 export async function GET() {
-  const [overviewResult, fxResult] = await Promise.allSettled([
-    getMarketOverview(),
-    getNaverUsdKrwRate(),
-  ]);
-  const quotes = overviewResult.status === "fulfilled" ? overviewResult.value : [];
-  const kospi = quoteById(quotes, "KOSPI");
-  const kosdaq = quoteById(quotes, "KOSDAQ");
-  const spx = quoteById(quotes, "SPX");
-  const comp = quoteById(quotes, "COMP");
-  const btc = quoteById(quotes, "BTC");
-  const fx = fxResult.status === "fulfilled" ? fxResult.value : null;
-
-  const jobs = await Promise.allSettled([
-    domesticIndexSeries("KOSPI", kospi?.timestamp ?? Date.now()),
-    domesticIndexSeries("KOSDAQ", kosdaq?.timestamp ?? Date.now()),
-    foreignIndexSeries(".INX", "NYSE", spx?.timestamp ?? Date.now()),
-    foreignIndexSeries(".IXIC", "NASDAQ", comp?.timestamp ?? Date.now()),
-    bitcoinSeries(btc?.timestamp ?? Date.now()),
+  const anchor = Date.now();
+  const fxPromise = getNaverUsdKrwRate({ timeoutMs: 2_500 });
+  const jobsPromise = Promise.allSettled([
+    domesticIndexSeries("KOSPI", anchor),
+    domesticIndexSeries("KOSDAQ", anchor),
+    foreignIndexSeries(".INX"),
+    foreignIndexSeries(".IXIC"),
+    bitcoinSeries(anchor),
     usdKrwSeries(),
   ]);
+  const [fxResult, jobs] = await Promise.all([
+    fxPromise
+      .then(value => ({ status: "fulfilled" as const, value }))
+      .catch(reason => ({ status: "rejected" as const, reason })),
+    jobsPromise,
+  ]);
+  const fx = fxResult.status === "fulfilled" ? fxResult.value : null;
 
   const ids = ["KOSPI", "KOSDAQ", "SPX", "COMP", "BTC", "USDKRW"] as const;
   const series = Object.fromEntries(ids.map((id, index) => {

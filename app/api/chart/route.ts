@@ -1,4 +1,5 @@
 import { apiError, requireUser } from "@/lib/server/auth";
+import { isChartPeriod, legacyRangeToChartPeriod, type ChartPeriod } from "@/lib/server/chart-period";
 import { getDomesticChartSeries } from "@/lib/server/domestic-chart";
 import { getMarketChartSeries } from "@/lib/server/market-chart";
 import { getChartSeries, getTrackedMarketIndexChartSeries, isTrackedMarketIndexId, type Market } from "@/lib/server/market-data";
@@ -6,7 +7,6 @@ import { isNaverStockUnavailable } from "@/lib/server/naver-stock";
 import { normalizeNaverMarketSymbol } from "@/lib/server/naver-symbol";
 import { enforceRateLimit } from "@/lib/server/safety";
 
-const RANGES = new Set(["1D", "1W", "1M", "3M", "1Y"]);
 const EXCHANGE = /^[A-Za-z0-9 ._-]{1,40}$/;
 
 export async function GET(request: Request) {
@@ -18,13 +18,18 @@ export async function GET(request: Request) {
     const market = url.searchParams.get("market") as Market | null;
     const rawSymbol = url.searchParams.get("symbol") ?? "";
     const exchange = url.searchParams.get("exchange") ?? undefined;
-    const range = url.searchParams.get("range") ?? "3M";
+    const requestedPeriod = url.searchParams.get("period");
+    const periodValue = requestedPeriod ?? legacyRangeToChartPeriod(url.searchParams.get("range")) ?? "DAY";
+    if (!isChartPeriod(periodValue)) {
+      return Response.json({ error: "차트 기간을 확인해주세요." }, { status: 400 });
+    }
+    const period = periodValue as ChartPeriod;
     if (kind === "index") {
       const id = (url.searchParams.get("id") ?? "").toUpperCase();
-      if (!isTrackedMarketIndexId(id) || !RANGES.has(range)) {
+      if (!isTrackedMarketIndexId(id)) {
         return Response.json({ error: "지수 차트 요청값을 확인해주세요." }, { status: 400 });
       }
-      const result = await getTrackedMarketIndexChartSeries(id, range);
+      const result = await getTrackedMarketIndexChartSeries(id, period);
       if (!result.points.length) {
         return Response.json({ ...result, error: "네이버증권에서 지수 차트 데이터를 받지 못했습니다." }, { status: 503, headers: { "retry-after": "15" } });
       }
@@ -34,14 +39,14 @@ export async function GET(request: Request) {
       return Response.json({ error: "차트 요청값을 확인해주세요." }, { status: 400 });
     }
     const symbol = normalizeNaverMarketSymbol(market, rawSymbol);
-    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || !RANGES.has(range) || (exchange !== undefined && !EXCHANGE.test(exchange))) {
+    if (!/^[A-Za-z0-9._-]{1,32}$/.test(symbol) || (exchange !== undefined && !EXCHANGE.test(exchange))) {
       return Response.json({ error: "차트 요청값을 확인해주세요." }, { status: 400 });
     }
     const result = market === "US"
-      ? await getMarketChartSeries(market, symbol, exchange, range)
+      ? await getMarketChartSeries(market, symbol, exchange, period)
       : market === "KR"
-        ? await getDomesticChartSeries(symbol, range)
-        : await getChartSeries(market, symbol, exchange, range);
+        ? await getDomesticChartSeries(symbol, period)
+        : await getChartSeries(market, symbol, exchange, period);
     if (!result.points.length) {
       return Response.json({ ...result, error: "네이버증권에서 차트 데이터를 받지 못했습니다." }, { status: 503, headers: { "retry-after": "15" } });
     }

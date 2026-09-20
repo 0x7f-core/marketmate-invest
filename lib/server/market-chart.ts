@@ -1,8 +1,9 @@
 import { buildNaverPath, naverJson, type NaverResult } from "@/lib/server/naver-stock";
+import { chartPeriodHistoryDays, finalizeChartPoints, naverCandlePeriod, type ChartPeriod } from "@/lib/server/chart-period";
+import { runChartFallback } from "@/lib/server/chart-fallback";
 import { looksLikeCaseSensitiveReutersCode, naverAutocompleteQueryForForeignCode, normalizeNaverReutersCode } from "@/lib/server/naver-symbol";
 import type { ChartPoint, Market } from "@/lib/server/market-data";
 
-const RANGE_DAYS: Record<string, number> = { "1D": 2, "1W": 8, "1M": 32, "3M": 94, "1Y": 367 };
 const reutersCache = new Map<string, { code: string; expiresAt: number }>();
 
 type JsonResult = NaverResult<unknown>;
@@ -27,7 +28,10 @@ function text(record: Record<string, unknown>, keys: string[]) {
 }
 
 function collectRecords(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
-  if (depth > 7 || output.length >= 800 || value === null || value === undefined) return output;
+  // Long-range chart responses contain several thousand daily rows. The
+  // regular paged quote response is still much smaller, so this only raises
+  // the parser ceiling for the native chart path.
+  if (depth > 7 || output.length >= 5000 || value === null || value === undefined) return output;
   if (Array.isArray(value)) {
     for (const item of value) collectRecords(item, depth + 1, output);
     return output;
@@ -139,7 +143,7 @@ function chartPoint(row: Record<string, unknown>, fallback: number): ChartPoint 
     high,
     low,
     close,
-    volume: asNumber(row.accumulatedTradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume) || undefined,
+    volume: asNumber(row.accumulatedTradingVolume, row.accumulatedTradingVolumeRaw, row.tradingVolume, row.accumulatedVolume, row.volume, row.tradeVolume) || undefined,
   };
 }
 
@@ -147,15 +151,6 @@ function pointsFrom(payload: unknown, fetchedAt: number) {
   return collectRecords(payload)
     .map((row, index) => chartPoint(row, fetchedAt - index * 86_400_000))
     .filter((point): point is ChartPoint => Boolean(point));
-}
-
-function finalize(points: ChartPoint[], range: string, days: number) {
-  const since = Date.now() - days * 86_400_000;
-  const sorted = points
-    .sort((a, b) => a.time - b.time)
-    .filter((point, index, all) => index === 0 || point.time !== all[index - 1].time);
-  const ranged = range === "1Y" ? sorted : sorted.filter(point => point.time >= since);
-  return (ranged.length ? ranged : sorted).slice(-400);
 }
 
 async function fetchUsPage(family: SecurityFamily, identifier: string, page: number, pageSize: number) {
@@ -167,61 +162,79 @@ async function fetchUsPage(family: SecurityFamily, identifier: string, page: num
   });
 }
 
-async function usSeries(symbol: string, exchange: string | undefined, range: string, days: number) {
+async function usSeries(symbol: string, exchange: string | undefined, period: ChartPeriod, days: number) {
   const reutersCode = await resolveReutersCode(symbol, exchange);
-  // Naver's foreign closing-price API rejects pageSize > 60.
-  const pageSize = 60;
-  const attempts: Array<{ family: SecurityFamily; identifier: string; promise: Promise<JsonResult> }> = [
-    { family: "stock", identifier: reutersCode, promise: fetchUsPage("stock", reutersCode, 1, pageSize) },
-    { family: "etf", identifier: reutersCode, promise: fetchUsPage("etf", reutersCode, 1, pageSize) },
-  ];
-  const settled = await Promise.allSettled(attempts.map(item => item.promise));
-  const candidates: Array<{ family: SecurityFamily; identifier: string; result: JsonResult; points: ChartPoint[] }> = [];
+  const result = await runChartFallback([
+    async () => {
+      const chart = await naverJson<unknown>(
+        buildNaverPath(`/api/securityService/chart/foreign/item/${encodeURIComponent(reutersCode)}`, {
+          periodType: naverCandlePeriod(period),
+        }),
+        { ttlMs: 60_000, staleMs: 30 * 60_000, timeoutMs: 10_000 },
+      );
+      const rawPoints = pointsFrom(chart.data, chart.fetchedAt);
+      if (rawPoints.length <= 1) return null;
+      return {
+        points: finalizeChartPoints(rawPoints, period, "America/New_York", days),
+        stale: chart.stale,
+      };
+    },
+    async () => {
+      // Naver's foreign closing-price API rejects pageSize > 60.
+      const pageSize = 60;
+      const attempts: Array<{ family: SecurityFamily; identifier: string; promise: Promise<JsonResult> }> = [
+        { family: "stock", identifier: reutersCode, promise: fetchUsPage("stock", reutersCode, 1, pageSize) },
+        { family: "etf", identifier: reutersCode, promise: fetchUsPage("etf", reutersCode, 1, pageSize) },
+      ];
+      const settled = await Promise.allSettled(attempts.map(item => item.promise));
+      const candidates: Array<{ family: SecurityFamily; identifier: string; result: JsonResult; points: ChartPoint[] }> = [];
 
-  for (let index = 0; index < settled.length; index += 1) {
-    const attempt = settled[index];
-    if (attempt.status !== "fulfilled") continue;
-    const points = pointsFrom(attempt.value.data, attempt.value.fetchedAt);
-    if (points.length) {
-      candidates.push({
-        family: attempts[index].family,
-        identifier: attempts[index].identifier,
-        result: attempt.value,
-        points,
-      });
-    }
-  }
+      for (let index = 0; index < settled.length; index += 1) {
+        const attempt = settled[index];
+        if (attempt.status !== "fulfilled") continue;
+        const points = pointsFrom(attempt.value.data, attempt.value.fetchedAt);
+        if (points.length) {
+          candidates.push({
+            family: attempts[index].family,
+            identifier: attempts[index].identifier,
+            result: attempt.value,
+            points,
+          });
+        }
+      }
 
-  const selected = candidates.sort((a, b) => b.points.length - a.points.length)[0];
-  if (!selected) {
-    const rejected = settled.find(item => item.status === "rejected");
-    if (rejected?.status === "rejected") throw rejected.reason;
-    return { points: [], range, stale: false, source: "NAVER" as const };
-  }
+      const selected = candidates.sort((a, b) => b.points.length - a.points.length)[0];
+      if (!selected) {
+        const rejected = settled.find(item => item.status === "rejected");
+        if (rejected?.status === "rejected") throw rejected.reason;
+        return null;
+      }
 
-  // One year requires roughly 6–7 pages at Naver's 60-row maximum.
-  const neededPages = Math.min(8, Math.max(1, Math.ceil((days + 10) / pageSize)));
-  const more = neededPages > 1
-    ? await Promise.allSettled(
-      Array.from({ length: neededPages - 1 }, (_, offset) =>
-        fetchUsPage(selected.family, selected.identifier, offset + 2, pageSize)),
-    )
-    : [];
+      // One year requires roughly 6–7 pages at Naver's 60-row maximum.
+      const neededPages = Math.min(8, Math.max(1, Math.ceil((days + 10) / pageSize)));
+      const more = neededPages > 1
+        ? await Promise.allSettled(
+          Array.from({ length: neededPages - 1 }, (_, offset) =>
+            fetchUsPage(selected.family, selected.identifier, offset + 2, pageSize)),
+        )
+        : [];
 
-  const allPoints = [...selected.points];
-  let stale = selected.result.stale;
-  for (const attempt of more) {
-    if (attempt.status !== "fulfilled") continue;
-    stale = stale || attempt.value.stale;
-    allPoints.push(...pointsFrom(attempt.value.data, attempt.value.fetchedAt));
-  }
+      const allPoints = [...selected.points];
+      let stale = selected.result.stale;
+      for (const attempt of more) {
+        if (attempt.status !== "fulfilled") continue;
+        stale = stale || attempt.value.stale;
+        allPoints.push(...pointsFrom(attempt.value.data, attempt.value.fetchedAt));
+      }
 
-  return { points: finalize(allPoints, range, days), range, stale, source: "NAVER" as const };
+      return { points: finalizeChartPoints(allPoints, period, "America/New_York", days), stale };
+    },
+  ]);
+  return { ...result, period, source: "NAVER" as const };
 }
 
-export async function getMarketChartSeries(market: Market, symbol: string, exchange: string | undefined, range: string) {
-  const days = RANGE_DAYS[range];
-  if (!days) throw new Error("INVALID_CHART_RANGE");
+export async function getMarketChartSeries(market: Market, symbol: string, exchange: string | undefined, period: ChartPeriod) {
+  const days = chartPeriodHistoryDays(period);
   if (market !== "US") throw new Error("MARKET_CHART_HELPER_ONLY_SUPPORTS_US");
-  return usSeries(symbol, exchange, range, days);
+  return usSeries(symbol, exchange, period, days);
 }
