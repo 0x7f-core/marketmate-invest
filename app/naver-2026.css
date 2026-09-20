@@ -219,3 +219,21 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 }
 
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* Keep the desktop account action visibly consistent with the mobile control. */
+@media(min-width:768px){
+  .marketmate-v2 .np-desktop-header .np-head-actions .account-settings-trigger{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:30px;
+    max-width:none;
+    padding:5px 9px;
+    border:1px solid #d5dbe0!important;
+    border-radius:6px;
+    background:#f5f6f7!important;
+    color:#59616a!important;
+    overflow:visible;
+    white-space:nowrap;
+  }
+}
