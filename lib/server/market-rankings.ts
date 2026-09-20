@@ -385,11 +385,11 @@ function aggregatePopularRows(payload: unknown, market: PopularStockMarket, nxtP
   });
 }
 
-async function popularAggregate(market: PopularStockMarket) {
+async function popularAggregate(market: PopularStockMarket, nxtPremarket = false) {
   if (market === "KR") {
     return naverJson<unknown>(buildNaverPath("/api/stockSecurity/aggregate/domesticStock", {
       type: "popular",
-      exchangeType: "KRX",
+      exchangeType: nxtPremarket ? "NXT" : "KRX",
       size: 10,
     }), { ttlMs: 30_000, staleMs: 5 * 60_000 });
   }
@@ -408,7 +408,7 @@ async function legacyPopular(market: PopularStockMarket) {
 
 export async function getPopularStocks(market: PopularStockMarket): Promise<PopularStocksResult> {
   const nxtPremarket = market === "KR" ? await isNxtPremarket() : false;
-  let result = await popularAggregate(market);
+  let result = await popularAggregate(market, nxtPremarket);
   let rows = aggregatePopularRows(result.data, market, nxtPremarket);
   let normalized = uniqueItems(market, rows.length ? rows : result.data);
 
