@@ -19,7 +19,7 @@ const MAX_RECENTS = 20;
 
 function displaySymbol(item: Instrument) {
   return item.market === "US"
-    ? item.symbol.replace(/\.(?:O|K|N|P|A)$/i, "")
+    ? item.symbol.replaceAll("_", ".").replace(/[._](?:O|K|N|P|A)$/i, "")
     : item.symbol;
 }
 
@@ -53,7 +53,12 @@ function saveRecents(userId: string, items: Instrument[]) {
 }
 
 function sameInstrument(left: Pick<Instrument, "market" | "symbol">, right: Pick<Instrument, "market" | "symbol">) {
-  return left.market === right.market && left.symbol === right.symbol;
+  if (left.market !== right.market) return false;
+  if (left.market === "US") {
+    const ticker = (value: string) => value.normalize("NFKC").trim().toUpperCase().replaceAll("_", ".").replace(/[._](?:O|K|N|P|A)$/i, "");
+    return ticker(left.symbol) === ticker(right.symbol);
+  }
+  return left.symbol === right.symbol;
 }
 
 export default function MobileInstrumentSearch() {
