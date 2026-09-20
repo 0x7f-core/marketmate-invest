@@ -5,7 +5,10 @@ type Row = Record<string, unknown>;
 type SparkPoint = { time: number; value: number };
 type SparkSeries = { points: SparkPoint[]; stale: boolean };
 
-const MAX_POINTS = 500;
+// Six compact cards do not benefit from hundreds of SVG segments. Keeping a
+// bounded representative series makes the response and DOM much smaller while
+// preserving the visible intraday shape.
+const MAX_POINTS = 180;
 
 function numberValue(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;

@@ -19,6 +19,7 @@ type CardQuote = {
   trend: "up" | "down" | "flat";
 };
 
+const MAX_SPARKLINE_POINTS = 180;
 const IDS = ["KOSPI", "KOSDAQ", "SPX", "COMP", "BTC", "USDKRW"] as const;
 const NAMES = ["코스피", "코스닥", "S&P 500", "나스닥 종합", "비트코인", "원/달러 환율"] as const;
 const DEFAULTS: CardQuote[] = IDS.map((id, index) => ({
@@ -139,7 +140,7 @@ function Sparkline({ card, series }: { card: CardQuote; series?: Series }) {
     if (!quoteUpdating(card.id, series) || !card.price) return source;
     const last = source.at(-1);
     if (last && Math.abs(last.value - card.price) < Number.EPSILON) return source;
-    return [...source, { time: (last?.time ?? 0) + 1, value: card.price }].slice(-500);
+    return [...source, { time: (last?.time ?? 0) + 1, value: card.price }].slice(-MAX_SPARKLINE_POINTS);
   }, [card.id, card.price, series]);
 
   const uniqueValues = new Set(points.map(point => point.value.toFixed(8))).size;

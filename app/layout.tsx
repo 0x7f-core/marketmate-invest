@@ -144,32 +144,6 @@ const US_ETF_ORDER_BUTTON_LABEL = String.raw`(() => {
   else start();
 })();`;
 
-// The competition page is rendered inside a large client dashboard. Keep the
-// displayed rate notice synchronized from one small global enhancer instead of
-// duplicating the rates across multiple responsive layouts.
-const TRADING_FEE_GUIDE = String.raw`(() => {
-  const text = "거래비용: 국내 KRX 0.015% · NXT 0.0145%, 미국주식 0.07%(이벤트 혜택 기준), 가상자산 업비트 KRW 0.05%의 수수료가 매수·매도 모두 적용됩니다. 국내 일반주식은 매도 시 거래세 0.20%가 추가되며 ETF·ETN·ELW는 거래세가 없습니다.";
-
-  const apply = () => {
-    document.querySelectorAll(".trading-guide ul").forEach((list) => {
-      if (!(list instanceof HTMLUListElement) || list.querySelector("[data-trading-fee-guide]")) return;
-      const item = document.createElement("li");
-      item.dataset.tradingFeeGuide = "1";
-      item.textContent = text;
-      list.prepend(item);
-    });
-  };
-
-  const start = () => {
-    apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(document.body, { childList: true, subtree: true });
-  };
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-  else start();
-})();`;
-
 // The home page originally showed static implementation notes in the market-status
 // row. Replace them with the same compact, live session summary pattern used by
 // Npay Securities: domestic, U.S., and crypto state in one line, backed by this
@@ -339,125 +313,6 @@ const LIVE_MARKET_STATUS_BOARD = String.raw`(() => {
   else start();
 })();`;
 
-// LiveMarketStrip currently renders a fixed five-item list even though the market
-// overview API already includes USDKRW. Keep the desktop strip in sync with that
-// existing Naver-backed quote until the strip itself is refactored away from its
-// fixed list. No additional market-data source is introduced here.
-const DESKTOP_USDKRW_MARKET_STRIP = String.raw`(() => {
-  let latest = null;
-  let timer = 0;
-  let loading = false;
-
-  const setText = (node, value) => {
-    if (node.textContent !== value) node.textContent = value;
-  };
-
-  const goToUsdKrwIndex = () => {
-    const marketNav = Array.from(document.querySelectorAll(".np-desktop-header > nav button"))
-      .find((button) => (button.textContent || "").trim() === "시세");
-    if (marketNav instanceof HTMLButtonElement) marketNav.click();
-    requestAnimationFrame(() => {
-      const indexTab = Array.from(document.querySelectorAll(".np-market-tabs button"))
-        .find((button) => (button.textContent || "").trim() === "지수");
-      if (indexTab instanceof HTMLButtonElement) indexTab.click();
-      requestAnimationFrame(() => {
-        const usdKrw = Array.from(document.querySelectorAll(".np-index-selector button"))
-          .find((button) => /원[·\/]달러/.test((button.textContent || "").trim()));
-        if (usdKrw instanceof HTMLButtonElement) usdKrw.click();
-      });
-    });
-  };
-
-  const ensureButton = (strip) => {
-    let button = strip.querySelector("[data-market-strip-usdkrw]");
-    if (button instanceof HTMLButtonElement) return button;
-
-    button = document.createElement("button");
-    button.type = "button";
-    button.dataset.marketStripUsdkrw = "1";
-
-    const label = document.createElement("span");
-    label.append(document.createTextNode("원/달러 환율"));
-    const source = document.createElement("small");
-    source.dataset.marketStripUsdkrwSource = "1";
-    source.textContent = "시세 확인 중";
-    label.appendChild(source);
-
-    const price = document.createElement("strong");
-    price.dataset.marketStripUsdkrwPrice = "1";
-    price.textContent = "-";
-
-    const rate = document.createElement("em");
-    rate.dataset.marketStripUsdkrwRate = "1";
-
-    button.append(label, price, rate);
-    button.addEventListener("click", goToUsdKrwIndex);
-    strip.appendChild(button);
-    return button;
-  };
-
-  const render = () => {
-    const strip = document.querySelector(".np-desktop-header > .live-market-strip");
-    if (!(strip instanceof HTMLElement)) return;
-    const button = ensureButton(strip);
-    const source = button.querySelector("[data-market-strip-usdkrw-source]");
-    const price = button.querySelector("[data-market-strip-usdkrw-price]");
-    const rate = button.querySelector("[data-market-strip-usdkrw-rate]");
-    if (!(source instanceof HTMLElement) || !(price instanceof HTMLElement) || !(rate instanceof HTMLElement)) return;
-
-    if (!latest) {
-      setText(source, "시세 확인 중");
-      setText(price, "-");
-      setText(rate, "");
-      rate.className = "";
-      return;
-    }
-
-    const value = Number(latest.price || 0);
-    const changeRate = Number(latest.rate || 0);
-    setText(source, "네이버증권");
-    setText(price, value.toLocaleString("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + String(latest.unit || "원"));
-    setText(rate, (changeRate >= 0 ? "+" : "") + changeRate.toFixed(2) + "%");
-    const className = changeRate >= 0 ? "up" : "down";
-    if (rate.className !== className) rate.className = className;
-  };
-
-  const schedule = (delay) => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(load, Math.max(2000, Math.min(120000, Number(delay) || 10000)));
-  };
-
-  const load = async () => {
-    if (loading) return;
-    loading = true;
-    try {
-      const response = await fetch("/api/market-overview", { cache: "no-store" });
-      if (!response.ok) throw new Error("MARKET_OVERVIEW_FAILED");
-      const payload = await response.json();
-      const quotes = Array.isArray(payload?.quotes) ? payload.quotes : [];
-      const quote = quotes.find((item) => item?.id === "USDKRW");
-      if (quote) latest = quote;
-      render();
-      schedule(payload?.pollingInterval);
-    } catch {
-      render();
-      schedule(10000);
-    } finally {
-      loading = false;
-    }
-  };
-
-  const start = () => {
-    render();
-    void load();
-    const observer = new MutationObserver(() => render());
-    observer.observe(document.body, { childList: true, subtree: true });
-  };
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-  else start();
-})();`;
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -467,9 +322,7 @@ export default function RootLayout({
     <html lang="ko">
       <head>
         <script dangerouslySetInnerHTML={{ __html: US_ETF_ORDER_BUTTON_LABEL }} />
-        <script dangerouslySetInnerHTML={{ __html: TRADING_FEE_GUIDE }} />
         <script dangerouslySetInnerHTML={{ __html: LIVE_MARKET_STATUS_BOARD }} />
-        <script dangerouslySetInnerHTML={{ __html: DESKTOP_USDKRW_MARKET_STRIP }} />
       </head>
       <body className="antialiased">{children}</body>
     </html>
