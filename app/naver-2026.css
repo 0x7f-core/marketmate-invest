@@ -14,7 +14,7 @@
 }
 
 html{scroll-behavior:smooth}
-body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",sans-serif;font-variant-numeric:tabular-nums}
+body{background:#eef1f4;color:var(--mm-ink);font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,system-ui,Roboto,"Helvetica Neue","Segoe UI","Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;font-size:16px;line-height:16px;font-variant-numeric:tabular-nums}
 .marketmate-v2{background:#eef1f4}
 .marketmate-v2 button,.marketmate-v2 a{-webkit-tap-highlight-color:transparent}
 .marketmate-v2 .up{color:var(--mm-up)!important}
@@ -22,7 +22,7 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 
 /* Desktop — two-level navigation and compact market tape. */
 .marketmate-v2 .np-desktop-header{position:relative;z-index:40;background:#fff;border-bottom:1px solid #dfe2e5}
-.marketmate-v2 .np-head{width:min(100% - 48px,1360px);max-width:none;height:64px;padding:0;grid-template-columns:240px minmax(280px,430px) 1fr;gap:24px}
+.marketmate-v2 .np-head{width:min(100% - 48px,1244px);max-width:none;height:65px;padding:0;grid-template-columns:240px minmax(280px,430px) 1fr;gap:24px}
 .marketmate-v2 .np-brand{gap:8px}
 .marketmate-v2 .np-brand>span{width:31px;height:31px;border-radius:50%;background:#111;color:#fff;font-size:10px;letter-spacing:-.04em}
 .marketmate-v2 .np-brand>b{font-size:21px;letter-spacing:-.055em}
@@ -33,28 +33,38 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .search-results button{min-height:62px;padding:10px 14px}
 .marketmate-v2 .np-head-actions{gap:9px;font-size:12px}
 .marketmate-v2 .account-settings-trigger{border:1px solid #dfe3e6;border-radius:6px;background:#f5f6f7;color:#59616a;padding:5px 8px}
-.marketmate-v2 .np-desktop-header>nav{width:min(100% - 48px,1360px);max-width:none;height:53px;padding:0;gap:36px;border-top:1px solid #f1f2f3}
-.marketmate-v2 .np-desktop-header>nav button{font-size:16px;font-weight:700;color:#555c64}
-.marketmate-v2 .np-desktop-header>nav button.active{color:#111;font-weight:900}
+.marketmate-v2 .np-desktop-header>nav{width:min(100% - 48px,1244px);max-width:none;height:51px;padding:0;gap:36px;border-top:1px solid #f1f2f3}
+.marketmate-v2 .np-desktop-header>nav button{font-size:18px;font-weight:500;line-height:24px;color:#555c64}
+.marketmate-v2 .np-desktop-header>nav button.active{color:#111;font-weight:600}
 .marketmate-v2 .np-desktop-header>nav button.active:after{height:3px;background:#111}
+.marketmate-v2 .np-desktop-header>.live-market-strip{height:87px;border-top:1px solid #f0f2f4;border-bottom:1px solid var(--mm-line);background:#fff}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button{min-width:180px;height:87px;min-height:87px;padding:11px;border-right:1px solid #edf0f2;gap:4px 8px}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button>span{font-size:14px;font-weight:500;line-height:19px}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button>span small{font-size:10px;font-weight:400;line-height:16px;margin-top:1px}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button>strong{font-size:18px;font-weight:600;line-height:24px}
+.marketmate-v2 .np-desktop-header>.live-market-strip>button>em{font-size:11px;font-weight:500;line-height:16px}
 
 /* Page frames. */
-.marketmate-v2 .np-page{width:min(100% - 48px,1360px);max-width:none;margin:16px auto 72px;padding:0}
+.marketmate-v2 .np-page{width:min(100% - 48px,1244px);max-width:none;margin:16px auto 72px;padding:0}
 .marketmate-v2 .np-panel{border:1px solid var(--mm-line);border-radius:9px;background:#fff;box-shadow:none}
 .marketmate-v2 .np-section-title{min-height:58px;padding:0 20px}
-.marketmate-v2 .np-section-title h1{font-size:22px}
-.marketmate-v2 .np-section-title h2{font-size:18px}
+.marketmate-v2 .np-section-title h1{font-size:22px;line-height:28px;font-weight:700}
+.marketmate-v2 .np-section-title h2{font-size:18px;line-height:24px;font-weight:700}
 
 /* Home market dashboard. */
-.marketmate-v2 .np-home{grid-template-columns:minmax(0,1fr) 330px;gap:18px}
+.marketmate-v2 .np-home{grid-template-columns:minmax(0,1fr) 312px;gap:40px}
 .marketmate-v2 .np-home-main,.marketmate-v2 .np-home>aside{gap:16px}
 .marketmate-v2 .np-market-status{min-height:42px;padding:0 16px;border:1px solid var(--mm-line);border-radius:8px;background:#fff;display:flex;align-items:center;gap:22px;font-size:12px;color:#68707a}
 .marketmate-v2 .np-home-main>.live-market-strip{display:none}
-.marketmate-v2 .index-board{grid-template-columns:repeat(3,minmax(0,1fr));gap:0;background:#fff}
-.marketmate-v2 .index-board button{min-height:126px;padding:19px 20px;border:0;border-right:1px solid #eceef0;border-bottom:1px solid #eceef0;border-radius:0;background:#fff}
-.marketmate-v2 .index-board button:nth-child(3n){border-right:0}
+.marketmate-v2 .index-board{grid-template-columns:repeat(6,minmax(0,1fr));gap:0;background:#fff}
+.marketmate-v2 .index-board button{min-height:87px;padding:11px;border:0;border-right:1px solid #eceef0;border-radius:0;background:#fff}
+.marketmate-v2 .index-board button:nth-child(3n){border-right:1px solid #eceef0}
+.marketmate-v2 .index-board button:last-child{border-right:0}
 .marketmate-v2 .index-board button:hover{background:#fafbfc}
-.marketmate-v2 .index-board strong{font-size:24px}
+.marketmate-v2 .index-board span{font-size:14px;font-weight:500;line-height:19px}
+.marketmate-v2 .index-board small{font-size:10px;font-weight:400}
+.marketmate-v2 .index-board strong{font-size:18px;font-weight:600;line-height:24px}
+.marketmate-v2 .index-board em{font-size:11px;font-weight:500;line-height:16px}
 .marketmate-v2 .np-watch-preview>button{min-height:64px}
 
 /* Detail market selector and the page-level tab strip. */
@@ -68,18 +78,18 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .np-quote-head>.live-pill{width:max-content;margin-top:12px}
   .marketmate-v2 .stock-title{align-items:flex-start}
   .marketmate-v2 .instrument-logo.lg{width:43px;height:43px;flex-basis:43px}
-  .marketmate-v2 .stock-title h1{font-size:21px}
+  .marketmate-v2 .stock-title h1{font-size:18px;line-height:24px;font-weight:600;letter-spacing:-.02em}
   .marketmate-v2 .np-price{grid-column:1;grid-row:2;margin:0;padding:20px 20px 18px;display:block}
   .marketmate-v2 .np-price-domestic{display:block}
   .marketmate-v2 .np-price-main{display:block}
-  .marketmate-v2 .np-price-main>strong{display:block;font-size:28px;line-height:1.08;white-space:nowrap}
-  .marketmate-v2 .np-price-main>span{display:block;margin-top:8px;font-size:13px}
+  .marketmate-v2 .np-price-main>strong{display:block;font-size:22px;line-height:28px;font-weight:700;white-space:nowrap}
+  .marketmate-v2 .np-price-main>span{display:block;margin-top:6px;font-size:15px;line-height:20px;font-weight:500}
   .marketmate-v2 .np-domestic-venue-switch{justify-content:flex-start;margin-top:14px}
   .marketmate-v2 .np-stats{grid-column:1;grid-row:3;margin:0 20px 22px;display:grid;grid-template-columns:1fr 1fr;align-content:start;border-top:1px solid #e6e8ea;border-bottom:0}
-  .marketmate-v2 .np-stats>span{min-height:43px;padding:0 4px;border-right:0!important;border-bottom:1px solid #eef0f2!important;font-size:11px}
+  .marketmate-v2 .np-stats>span{min-height:43px;padding:0 4px;border-right:0!important;border-bottom:1px solid #eef0f2!important;font-size:12px;line-height:18px}
   .marketmate-v2 .np-stats>span:nth-child(odd){padding-right:10px}
   .marketmate-v2 .np-stats>span:nth-child(even){padding-left:10px}
-  .marketmate-v2 .np-stats b{font-size:11px}
+  .marketmate-v2 .np-stats b{font-size:13px;font-weight:600;line-height:18px}
   .marketmate-v2 .np-stat-label small{font-size:9px}
   .marketmate-v2 .np-chart{grid-column:2;grid-row:1/4;height:650px;margin:0;padding:20px 22px 18px;border:0;border-left:1px solid var(--mm-line);border-radius:0}
   .marketmate-v2 .naver-light-chart-stage{height:535px;min-height:430px}
@@ -111,6 +121,11 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .np-news article{min-height:69px;padding:15px 20px}
 .marketmate-v2 .np-news article a{font-size:14px;line-height:1.45}
 
+/* Naver-style market category tabs: quiet text, clear active underline. */
+.marketmate-v2 .np-market-tabs{height:52px;border-width:0 0 1px;border-radius:0;background:#fff}
+.marketmate-v2 .np-market-tabs button{font-size:16px;font-weight:500;line-height:22px;color:#636970;border-right:0;background:#fff;position:relative}
+.marketmate-v2 .np-market-tabs button.active{color:#1e2024;font-weight:700;background:#fff;border-bottom:2px solid #17191c}
+
 /* Tablet keeps the finance density but moves the instrument data above the chart. */
 @media(min-width:768px) and (max-width:1180px){
   .marketmate-v2 .np-head{grid-template-columns:175px minmax(260px,1fr) auto}
@@ -128,8 +143,8 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 /* Mobile is a purpose-built composition, not a scaled desktop canvas. */
 @media(max-width:767px){
   html,body{max-width:100%;overflow-x:hidden;background:#fff}
-  body{padding-bottom:66px}
-  .marketmate-v2{width:100%;max-width:100vw;background:#fff;padding-bottom:66px;overflow-x:hidden}
+  body{padding-bottom:68px;font-size:14px;line-height:17.5px}
+  .marketmate-v2{width:100%;max-width:100vw;background:#fff;padding-bottom:68px;overflow-x:hidden}
   .marketmate-v2 .np-desktop-header{display:none}
   .marketmate-v2 .np-mobile-header{display:block;position:sticky;top:0;z-index:50;border-bottom:1px solid #e9ebed;background:rgba(255,255,255,.98);backdrop-filter:saturate(160%) blur(12px)}
   .marketmate-v2 .np-mobile-header>div:first-child{height:56px;padding:0 18px}
@@ -142,8 +157,8 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .np-page{width:100%;max-width:100vw;margin:0;padding:0;overflow-x:hidden}
   .marketmate-v2 .np-panel{border-width:0 0 9px;border-color:#f1f2f4;border-radius:0}
   .marketmate-v2 .np-section-title{min-height:56px;padding:0 18px}
-  .marketmate-v2 .np-section-title h1{font-size:21px}
-  .marketmate-v2 .np-section-title h2{font-size:18px}
+  .marketmate-v2 .np-section-title h1{font-size:20px;line-height:26px;font-weight:700}
+  .marketmate-v2 .np-section-title h2{font-size:20px;line-height:26px;font-weight:700}
 
   .marketmate-v2 .np-trading{display:block;width:100%;max-width:100%;min-width:0}
   .marketmate-v2 .np-trading-main{display:flex;width:100%;max-width:100%;min-width:0;flex-direction:column}
@@ -155,14 +170,14 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .stock-title{gap:10px;align-items:center}
   .marketmate-v2 .instrument-logo.lg{width:38px;height:38px;flex-basis:38px}
   .marketmate-v2 .stock-title small{margin-bottom:3px;font-size:11px;color:#747b83}
-  .marketmate-v2 .stock-title h1{font-size:21px;line-height:1.2}
+  .marketmate-v2 .stock-title h1{font-size:20px;line-height:26px;font-weight:700;letter-spacing:-.025em}
   .marketmate-v2 .stock-title h1 button{min-width:38px;min-height:38px;display:grid;place-items:center}
   .marketmate-v2 .live-pill{padding:5px 7px;font-size:10px}
   .marketmate-v2 .np-price{order:2;margin:0;padding:17px 19px 14px;display:block}
   .marketmate-v2 .np-price-domestic{display:flex;align-items:flex-start;justify-content:space-between}
   .marketmate-v2 .np-price-main{display:block}
-  .marketmate-v2 .np-price-main>strong{display:block;font-size:30px;line-height:1.08;white-space:nowrap}
-  .marketmate-v2 .np-price-main>span{display:block;margin-top:8px;font-size:14px}
+  .marketmate-v2 .np-price-main>strong{display:block;font-size:26px;line-height:30px;font-weight:700;white-space:nowrap}
+  .marketmate-v2 .np-price-main>span{display:block;margin-top:6px;font-size:16px;line-height:22px;font-weight:500}
   .marketmate-v2 .np-domestic-venue-switch button{min-width:48px;height:31px}
   .marketmate-v2 .np-chart{order:3;height:auto;margin:0;padding:0;border:0;border-radius:0}
   .marketmate-v2 .naver-light-chart{padding:0;background:#fff}
@@ -175,10 +190,10 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .naver-light-chart-stage{height:278px;min-height:278px}
   .marketmate-v2 .naver-light-chart-attribution{margin:3px 18px 9px;font-size:8px}
   .marketmate-v2 .np-stats{order:5;margin:0;padding:10px 18px 16px;display:grid;grid-template-columns:1fr 1fr;border:0;background:#fff}
-  .marketmate-v2 .np-stats>span{min-height:48px;padding:0!important;border-right:0!important;border-bottom:1px solid #eff1f2!important;font-size:12px}
+  .marketmate-v2 .np-stats>span{min-height:48px;padding:0!important;border-right:0!important;border-bottom:1px solid #eff1f2!important;font-size:12px;line-height:18px;font-weight:500}
   .marketmate-v2 .np-stats>span:nth-child(odd){padding-right:13px!important}
   .marketmate-v2 .np-stats>span:nth-child(even){padding-left:13px!important}
-  .marketmate-v2 .np-stats b{font-size:14px}
+  .marketmate-v2 .np-stats b{font-size:16px;line-height:22px;font-weight:700}
   .marketmate-v2 .np-stat-label small{font-size:9px}
 
   .marketmate-v2 .np-mobile-order{order:6;display:block;margin:0!important;padding:0!important;border-top:9px solid #f1f2f4;background:#fff;min-height:0}
@@ -199,16 +214,25 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .np-home{display:block}
   .marketmate-v2 .np-home-main,.marketmate-v2 .np-home>aside{gap:0}
   .marketmate-v2 .np-market-status{min-height:40px;padding:0 15px;border-width:0 0 1px;border-radius:0;overflow-x:auto;white-space:nowrap}
-  .marketmate-v2 .index-board{display:flex;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none}
-  .marketmate-v2 .index-board button{flex:0 0 72%;min-height:126px;border-right:1px solid #eceef0;scroll-snap-align:start}
+  .marketmate-v2 .index-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible;scroll-snap-type:none;scrollbar-width:none}
+  .marketmate-v2 .index-board button{min-height:126px;padding:12px 10px;border-right:1px solid #eceef0;scroll-snap-align:none}
+  .marketmate-v2 .index-board button:nth-child(3n){border-right:0}
+  .marketmate-v2 .index-board span{font-size:13px;font-weight:500;line-height:19px}
+  .marketmate-v2 .index-board strong{font-size:17px;font-weight:700;line-height:23px}
+  .marketmate-v2 .index-board em{font-size:13px;font-weight:500;line-height:19px}
+  .marketmate-v2 .index-board small{font-size:10px;font-weight:400}
   .marketmate-v2 .np-home .np-market-focus>.np-section-title{display:flex}
   .marketmate-v2 .np-popular-stocks{border-bottom:9px solid #f1f2f4}
   .marketmate-v2 .np-home>aside{display:flex;flex-direction:column}
 
-  .marketmate-v2 .np-mobile-bottom{height:66px;background:rgba(255,255,255,.98);border-top:1px solid #dfe2e5;box-shadow:0 -3px 16px rgba(0,0,0,.05)}
-  .marketmate-v2 .np-mobile-bottom button{min-width:56px;color:#8b9198;font-size:10px}
-  .marketmate-v2 .np-mobile-bottom button.active{color:#111;font-weight:900}
+  .marketmate-v2 .np-mobile-bottom{height:68px;background:rgba(255,255,255,.98);border-top:1px solid #dfe2e5;box-shadow:0 -3px 16px rgba(0,0,0,.05)}
+  .marketmate-v2 .np-mobile-bottom button{min-width:56px;color:#8b9198;font-size:11px;font-weight:700}
+  .marketmate-v2 .np-mobile-bottom button.active{color:#111;font-weight:700}
   .marketmate-v2 .np-mobile-bottom svg{width:21px;height:21px}
+
+  .marketmate-v2 .np-market-tabs{height:40px;border-width:0 0 1px;border-radius:0;background:#fff}
+  .marketmate-v2 .np-market-tabs button{font-size:16px;font-weight:500;line-height:22px;color:#92979d;background:#fff;border-right:0}
+  .marketmate-v2 .np-market-tabs button.active{color:#1e2024;font-weight:700;background:#fff;border-bottom:2px solid #17191c}
 }
 
 @media(max-width:380px){
