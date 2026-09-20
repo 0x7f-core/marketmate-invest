@@ -116,7 +116,6 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .order-buy,.marketmate-v2 .order-sell{height:48px;border-radius:5px;font-size:15px}
 .marketmate-v2 .np-news article{min-height:69px;padding:15px 20px}
 .marketmate-v2 .np-news article a{font-size:14px;line-height:1.45}
-.marketmate-v2 .order-market-status-mobile{display:none}
 
 /* Tablet keeps the finance density but moves the instrument data above the chart. */
 @media(min-width:768px) and (max-width:1180px){
@@ -192,14 +191,8 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
   .marketmate-v2 .np-mobile-order{order:6;display:block;margin:0!important;padding:0!important;border-top:9px solid #f1f2f4;background:#fff;min-height:0}
   .marketmate-v2 .np-mobile-order .order-panel{border:0;border-radius:0;margin:0!important;padding:0!important;min-height:0}
   .marketmate-v2 .np-mobile-order .order-panel>[data-slot="tabs"]{gap:0}
-  .marketmate-v2 .np-mobile-order .order-tabs{position:sticky;top:101px;z-index:20;margin:0;background:#fff}
-  .marketmate-v2 .np-mobile-order .order-market-status-mobile{display:block;margin:14px 18px 0;padding:12px 14px;min-height:64px;border-radius:10px;text-align:left}
-  .marketmate-v2 .np-mobile-order .order-market-status-mobile b,.marketmate-v2 .np-mobile-order .order-market-status-mobile small{display:block}
-  .marketmate-v2 .np-mobile-order .order-market-status-mobile b{font-size:14px;line-height:1.35}
-  .marketmate-v2 .np-mobile-order .order-market-status-mobile small{margin-top:6px;font-size:12px;line-height:1.45;font-weight:400}
-  .marketmate-v2 .np-mobile-order .order-market-status-mobile.open{background:#edf8f4;color:#14855f}
-  .marketmate-v2 .np-mobile-order .order-market-status-mobile.closed{background:#f5f5f5;color:#7a828a}
-  .marketmate-v2 .np-mobile-order .order-session{display:none}
+  .marketmate-v2 .np-mobile-order .order-tabs{position:static;margin:0;background:#fff}
+  .marketmate-v2 .np-mobile-order .order-session{display:block}
   .marketmate-v2 .np-mobile-order .order-form{flex:none;margin:0;padding:18px}
   .marketmate-v2 .np-mobile-order .order-buy,.marketmate-v2 .np-mobile-order .order-sell{min-height:52px;font-size:16px}
   .marketmate-v2 .np-news{order:7;border-top:9px solid #f1f2f4;border-bottom:0}
