@@ -1,4 +1,5 @@
 const LOWERCASE_SUFFIX = /_[a-z]+(?:\.|$)/;
+const US_REUTERS_SUFFIX = /[._](?:O|K|N|P|A)$/i;
 
 export function normalizeNaverReutersCode(code: string) {
   const clean = code.trim();
