@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type Point = { time: number; value: number };
-type Series = { points: Point[]; stale?: boolean };
+type Series = { points: Point[]; stale?: boolean; status?: "preopen" | "open" | "closed"; sessionTime?: number };
 type SparklineResponse = {
   series?: Record<string, Series>;
   pollingInterval?: number;
@@ -105,12 +105,15 @@ function quoteUpdating(id: string, series?: Series) {
 
 function statusText(id: string, series?: Series) {
   if (id === "BTC") return "24시간";
+  if (series?.status === "preopen") return "개장전";
+  if (series?.status === "open") return "장중";
+  if (series?.status === "closed") return "장마감";
   if (id === "USDKRW") return fxUpdating(series) ? "고시중" : "고시마감";
   return marketOpen(id) ? "장중" : "장마감";
 }
 
-function formatDate(id: string, points: Point[]) {
-  const timestamp = points.at(-1)?.time ?? 0;
+function formatDate(id: string, points: Point[], sessionTime = 0) {
+  const timestamp = points.at(-1)?.time ?? sessionTime;
   if (!timestamp) return "-";
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: timezoneFor(id),
@@ -266,7 +269,7 @@ export default function HomeIndexBoard() {
               <strong>{formatPrice(card)}</strong>
               <em>{formatChange(card)}</em>
               <Sparkline card={card} series={cardSeries} />
-              <small>{formatDate(card.id, cardSeries?.points ?? [])}<i />{statusText(card.id, cardSeries)}</small>
+              <small>{formatDate(card.id, cardSeries?.points ?? [], cardSeries?.sessionTime)}<i />{statusText(card.id, cardSeries)}</small>
             </button>
           );
         })}

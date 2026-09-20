@@ -3,7 +3,8 @@ import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 
 type Row = Record<string, unknown>;
 type SparkPoint = { time: number; value: number };
-type SparkSeries = { points: SparkPoint[]; stale: boolean };
+type SparkStatus = "preopen" | "open" | "closed";
+type SparkSeries = { points: SparkPoint[]; stale: boolean; status?: SparkStatus; sessionTime?: number };
 
 // Six compact cards do not benefit from hundreds of SVG segments. Keeping a
 // bounded representative series makes the response and DOM much smaller while
@@ -25,6 +26,13 @@ function compactKstTimestamp(value: unknown) {
   const clean = String(value ?? "").trim();
   if (!/^(?:19|20)\d{12}$/.test(clean)) return 0;
   const parsed = Date.parse(`${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}T${clean.slice(8, 10)}:${clean.slice(10, 12)}:${clean.slice(12, 14)}+09:00`);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compactKstDate(value: unknown) {
+  const clean = String(value ?? "").trim();
+  if (!/^(?:19|20)\d{6}$/.test(clean)) return 0;
+  const parsed = Date.parse(`${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}T00:00:00+09:00`);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -212,18 +220,44 @@ function fallbackSeries(): SparkSeries {
   return { points: [], stale: true };
 }
 
+function domesticMarketStatus(value: unknown): SparkStatus {
+  const status = String(value ?? "").trim().toUpperCase();
+  if (status === "PREOPEN" || status === "BEFORE_OPEN") return "preopen";
+  if (status === "OPEN" || status === "TRADING") return "open";
+  return "closed";
+}
+
 async function domesticIndexSeries(code: "KOSPI" | "KOSDAQ", anchor: number) {
   const thistime = compactDate(latestKstMarketTimestamp(anchor || Date.now()), "Asia/Seoul");
   const attempts = await Promise.allSettled(
-    [0].map(startIdx => naverJson<unknown>(
-      buildNaverPath("/api/domestic/indexSise/time", { koreaIndexType: code, thistime, startIdx, pageSize: 100 }),
-      { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_000 },
-    )),
+    [
+      naverJson<unknown>(
+        buildNaverPath(`/api/securityService/chart/domestic/index/${encodeURIComponent(code)}`, { periodType: "day" }),
+        { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_500 },
+      ),
+      naverJson<unknown>(
+        buildNaverPath("/api/domestic/indexSise/time", { koreaIndexType: code, thistime, startIdx: 0, pageSize: 100 }),
+        { ttlMs: 60_000, staleMs: 20 * 60_000, timeoutMs: 3_000 },
+      ),
+    ],
   );
-  const points = attempts.flatMap(attempt => attempt.status === "fulfilled" ? domesticPoints(attempt.value.data) : []);
+
+  const chartAttempt = attempts[0];
+  const timeAttempt = attempts[1];
+  const chart = chartAttempt.status === "fulfilled" ? rowValue(chartAttempt.value.data) : null;
+  const status = domesticMarketStatus(chart?.marketStatus);
+  const sessionTime = compactKstDate(chart?.tradeBaseAt) || compactKstDate(chart?.lastTradeBaseAt) || 0;
+  const points = status === "preopen"
+    ? []
+    : timeAttempt.status === "fulfilled"
+      ? domesticPoints(timeAttempt.value.data)
+      : [];
+
   return {
     points: finalPoints(points, "Asia/Seoul"),
     stale: attempts.some(attempt => attempt.status === "rejected" || attempt.value.stale),
+    status,
+    ...(sessionTime ? { sessionTime } : {}),
   } satisfies SparkSeries;
 }
 
