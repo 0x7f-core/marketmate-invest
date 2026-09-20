@@ -99,9 +99,7 @@ function domesticCatalogItem(value: unknown): SearchInstrument | null {
   const normalized = normalize(record);
   if (normalized?.market === "KR") return normalized;
 
-  const name = market === "US"
-    ? text(record, ["koreanCodeName", "koreanName", "stockNameKo", "stockNameKor", "korName", "itemName", "itemname", "stockName", "name", "displayName", "englishCodeName", "symbolCode"])
-    : text(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
+  const name = text(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
   const symbol = text(record, ["itemCode", "itemcode", "stockCode", "symbolCode", "code"]).toUpperCase();
   if (!name || !/^[A-Z0-9]{6}$/.test(symbol)) return null;
   const exchange = domesticListingExchange(record) || "KRX";
@@ -141,7 +139,7 @@ function collectDomesticCatalogPage(
 ) {
   for (const raw of domesticCatalogRows(response.data)) {
     const item = domesticCatalogItem(raw);
-    if (item) addSearchInstrument(output, item);
+    if (item) output.set(`${item.market}:${item.symbol}`, item);
   }
 }
 
@@ -322,7 +320,7 @@ function collectInitialMarketCatalogPage(
 ) {
   for (const raw of initialMarketCatalogRows(response.data, market)) {
     const item = initialMarketCatalogItem(raw, market);
-    if (item) output.set(`${item.market}:${item.symbol}`, item);
+    if (item) addSearchInstrument(output, item);
   }
 }
 
@@ -409,6 +407,7 @@ function text(record: Record<string, unknown>, keys: string[]) {
   }
   return "";
 }
+
 function searchIdentityKey(item: SearchInstrument) {
   if (item.market === "US") return `${item.market}:${usSearchTickerCore(item.symbol)}`;
   return `${item.market}:${item.symbol}`;
@@ -445,7 +444,6 @@ function addSearchInstrument(output: Map<string, SearchInstrument>, item: Search
   const current = output.get(key);
   output.set(key, current ? mergeSearchInstrument(current, item) : item);
 }
-
 
 function collect(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
   if (depth > 5 || output.length >= 400 || value === null || value === undefined) return output;
@@ -509,7 +507,9 @@ function domesticListingExchange(record: Record<string, unknown>) {
 function normalize(record: Record<string, unknown>): SearchInstrument | null {
   const market = marketOf(record);
   if (!market) return null;
-  const name = text(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
+  const name = market === "US"
+    ? text(record, ["koreanCodeName", "koreanName", "stockNameKo", "stockNameKor", "korName", "itemName", "itemname", "stockName", "name", "displayName", "englishCodeName", "symbolCode"])
+    : text(record, ["itemName", "itemname", "stockName", "name", "displayName", "koreanName", "korName"]);
   const reuters = text(record, ["reutersCode", "reuterscode"]);
   const fqnf = text(record, ["fqnfTicker", "fqnf_ticker"]);
   let symbol = text(record, ["ticker", "symbol", "itemCode", "itemcode", "stockCode", "symbolCode", "code"]);
