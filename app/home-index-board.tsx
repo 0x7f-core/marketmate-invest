@@ -272,9 +272,10 @@ export default function HomeIndexBoard() {
       </div>
       <style>{`
         .home-index-board-slot{width:100%;min-width:0;background:#fff}
-        .home-index-live-board{display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;background:#fff}
-        .home-index-live-board .home-index-card{position:relative;min-width:0;height:87px;min-height:87px;padding:11px;display:grid!important;grid-template-columns:minmax(0,1fr) 48px;grid-template-rows:19px 24px 16px;gap:4px 8px;border:0;border-right:1px solid #edf0f2;background:#fff;text-align:left;overflow:hidden}
-        .home-index-live-board .home-index-card:last-child{border-right:0}
+        .home-index-live-board{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;background:#fff}
+        .home-index-live-board .home-index-card{position:relative;min-width:0;height:87px;min-height:87px;padding:11px;display:grid!important;grid-template-columns:minmax(0,1fr) 48px;grid-template-rows:19px 24px 16px;gap:4px 8px;border:0;border-right:1px solid #edf0f2;border-bottom:1px solid #edf0f2;background:#fff;text-align:left;overflow:hidden}
+        .home-index-live-board .home-index-card:nth-child(3n){border-right:0}
+        .home-index-live-board .home-index-card:nth-child(n+4){border-bottom:0}
         .home-index-name{display:block!important;grid-column:1/-1;grid-row:1;color:#202428!important;padding-right:34px;font-size:14px!important;font-weight:500!important;line-height:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .home-index-live-board .home-index-card>strong{display:block;grid-column:1;grid-row:2;margin:0;color:#17191c;font-size:18px;font-weight:600;line-height:24px;letter-spacing:-.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .home-index-live-board .home-index-card>em{display:block;grid-column:1;grid-row:3;margin:0;font-size:11px;font-weight:500;font-style:normal;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
