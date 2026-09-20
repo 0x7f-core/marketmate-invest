@@ -36,16 +36,7 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .np-desktop-header>nav button{font-size:16px;font-weight:700;color:#555c64}
 .marketmate-v2 .np-desktop-header>nav button.active{color:#111;font-weight:900}
 .marketmate-v2 .np-desktop-header>nav button.active:after{height:3px;background:#111}
-.marketmate-v2 .np-desktop-header>.live-market-strip{height:42px;background:#f8fafb;border-top:1px solid #edf0f2;border-bottom:0;display:flex;justify-content:center;overflow:hidden}
-.marketmate-v2 .np-desktop-header>.live-market-strip>button{flex:0 0 190px;min-width:190px;width:auto;height:42px;min-height:0;padding:0 20px;display:flex;align-items:center;justify-content:center;gap:8px;border:0;border-right:1px solid #e8ecee;background:transparent;text-align:center;overflow:visible;font-size:13px;white-space:nowrap}
-.marketmate-v2 .np-desktop-header>.live-market-strip>button>span{grid-row:auto;display:block;min-width:0;overflow:visible;text-overflow:clip;white-space:nowrap;color:#626b74;font-size:13px;font-weight:400}
-.marketmate-v2 .np-desktop-header>.live-market-strip>button>span small{display:none}
-.marketmate-v2 .np-desktop-header>.live-market-strip>button>strong{font-size:14px;color:#171b20;text-align:left}
-.marketmate-v2 .np-desktop-header>.live-market-strip>button>em{font-size:11px;font-style:normal;text-align:left}
 
-@media(min-width:768px) and (max-width:1120px){
-  .marketmate-v2 .np-desktop-header>.live-market-strip>button{flex-basis:160px;min-width:160px;padding-inline:12px}
-}
 
 /* Page frames. */
 .marketmate-v2 .np-page{width:min(100% - 48px,1360px);max-width:none;margin:16px auto 72px;padding:0}
