@@ -569,7 +569,6 @@ function AdminDialog() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<AdminData | null>(null);
   const [status, setStatus] = useState("");
-  const [pins, setPins] = useState({ currentPin: "", newPin: "" });
   const load = useCallback(() => fetch("/api/admin/overview", { cache: "no-store" }).then(async response => {
     const result = await response.json() as AdminData & { error?: string };
     if (!response.ok) throw new Error(result.error ?? "관리 데이터를 불러오지 못했습니다.");
@@ -584,21 +583,14 @@ function AdminDialog() {
     setStatus(response.ok ? "적용했습니다." : result.error ?? "처리하지 못했습니다.");
     if (response.ok) void load();
   };
-  const changePin = async () => {
-    const response = await fetch("/api/admin/pin", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(pins) });
-    const result = await response.json() as { error?:string };
-    setStatus(response.ok ? "관리자 PIN을 변경했습니다." : result.error ?? "변경하지 못했습니다.");
-    if (response.ok) setPins({ currentPin:"", newPin:"" });
-  };
   return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="admin-button"><ShieldCheck /> 관리자</Button></DialogTrigger><DialogContent className="admin-dialog sm:max-w-4xl">
-    <DialogHeader><DialogTitle>전체 관리자 센터</DialogTitle><DialogDescription>대회와 회원, 관리자 보안을 관리합니다.</DialogDescription></DialogHeader>
+    <DialogHeader><DialogTitle>전체 관리자 센터</DialogTitle><DialogDescription>대회와 회원을 관리합니다.</DialogDescription></DialogHeader>
     {status && <p className="admin-status">{status}</p>}
     <div className="admin-health"><span>활성 세션<b>{data?.health.activeSessions ?? 0}</b></span><span>대기 주문<b>{data?.health.pendingOrders ?? 0}</b></span><span>거절 주문<b>{data?.health.rejectedOrders ?? 0}</b></span><span>최근 시세<b>{data?.health.latestQuoteAt ? relativeTime(data.health.latestQuoteAt) : "없음"}</b></span></div>
-    <Tabs defaultValue="competitions"><TabsList className="admin-tabs"><TabsTrigger value="competitions">대회</TabsTrigger><TabsTrigger value="users">회원</TabsTrigger><TabsTrigger value="audit">감사 기록</TabsTrigger><TabsTrigger value="security">보안</TabsTrigger></TabsList>
+    <Tabs defaultValue="competitions"><TabsList className="admin-tabs"><TabsTrigger value="competitions">대회</TabsTrigger><TabsTrigger value="users">회원</TabsTrigger><TabsTrigger value="audit">감사 기록</TabsTrigger></TabsList>
       <TabsContent value="competitions" className="admin-list">{data?.competitions.map(item => <div key={item.id}><span><b>{item.name}</b><small>{item.ownerNickname} · {item.participantCount}명 · 체결 {item.fillCount}건 · {item.inviteCode}</small></span><span><button onClick={() => action({action:"competition_status",competitionId:item.id,status:item.status === "active" ? "ended" : "active"})}>{item.status === "active" ? "종료" : "재개"}</button><button className="danger" onClick={() => action({action:"delete_competition",competitionId:item.id}, `${item.name} 대회와 모든 모의투자 기록을 삭제할까요?`)}>삭제</button></span><div className="admin-members">{data.participants.filter(member => member.competitionId === item.id).map(member => <span key={member.id}>{member.nickname}{member.isOwner ? " (대회장)" : <button onClick={() => action({action:"remove_member",participantId:member.id}, `${member.nickname}님을 대회에서 내보낼까요?`)}>내보내기</button>}</span>)}</div></div>)}</TabsContent>
       <TabsContent value="users" className="admin-list">{data?.users.map(item => <div key={item.id}><span><b>{item.nickname}{item.role === "admin" ? " · 관리자" : ""}</b><small>대회 {item.competitionCount}개 · 체결 {item.fillCount}건</small></span><span><button disabled={item.role === "admin"} onClick={() => action({action:"user_status",userId:item.id,active:!Boolean(item.isActive)})}>{item.isActive ? "이용 정지" : "활성화"}</button><button className="danger" disabled={item.role === "admin"} onClick={() => action({action:"delete_user",userId:item.id}, `${item.nickname} 계정과 모든 대회·투자 기록을 완전히 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)}><Trash2 /> 삭제</button></span></div>)}</TabsContent>
       <TabsContent value="audit" className="admin-audit">{data?.audit.map(item => <div key={item.id}><span><b>{item.action}</b><small>{item.actorNickname} · {item.targetType}{item.targetId ? ` · ${item.targetId.slice(0,8)}` : ""}</small></span><time>{formatDateTime(item.createdAt)}</time></div>)}</TabsContent>
-      <TabsContent value="security" className="admin-security"><p>초기 PIN 0011은 즉시 변경을 권장합니다.</p><Input value={pins.currentPin} onChange={event => setPins(value => ({...value,currentPin:event.target.value.replace(/\D/g, "").slice(0,4)}))} placeholder="현재 PIN" inputMode="numeric" /><Input value={pins.newPin} onChange={event => setPins(value => ({...value,newPin:event.target.value.replace(/\D/g, "").slice(0,4)}))} placeholder="새 PIN" inputMode="numeric" /><Button onClick={changePin} disabled={pins.currentPin.length !== 4 || pins.newPin.length !== 4}>PIN 변경</Button></TabsContent>
     </Tabs>
   </DialogContent></Dialog>;
 }
