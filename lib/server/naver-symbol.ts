@@ -24,6 +24,18 @@ export function normalizeNaverMarketSymbol(market: "KR" | "US" | "CRYPTO", symbo
   return clean.toUpperCase();
 }
 
+// Search endpoints may return the same US listing as NVDA, NVDA.O, or
+// NVDA_O depending on the query and endpoint. Keep one identity for search,
+// while retaining the original Reuters code for quote resolution.
+export function usSearchTickerCore(symbol: string) {
+  return symbol
+    .normalize("NFKC")
+    .trim()
+    .toUpperCase()
+    .replaceAll("_", ".")
+    .replace(US_REUTERS_SUFFIX, "");
+}
+
 export function naverAutocompleteQueryForForeignCode(code: string) {
   const clean = code.trim();
   return LOWERCASE_SUFFIX.test(clean) ? clean : clean.replaceAll("_", ".");
