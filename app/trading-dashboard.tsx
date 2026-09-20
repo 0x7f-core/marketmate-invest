@@ -211,6 +211,20 @@ function displaySymbol(market: Market, symbol: string) {
   return market === "US" ? symbol.replace(/\.(?:O|K|N|P|A)$/i, "") : symbol;
 }
 
+async function localizeUsQuoteInstrument(instrument: Instrument): Promise<Instrument> {
+  if (instrument.market !== "US") return instrument;
+  try {
+    const params = new URLSearchParams({ symbol: instrument.symbol, exchange: instrument.exchange, fallback: instrument.name });
+    const response = await fetch(`/api/instruments/display-name?${params.toString()}`, { cache: "no-store" });
+    if (!response.ok) return instrument;
+    const payload = await response.json() as { name?: string };
+    const name = typeof payload.name === "string" && payload.name.trim() ? payload.name.trim() : instrument.name;
+    return name === instrument.name ? instrument : { ...instrument, name };
+  } catch {
+    return instrument;
+  }
+}
+
 function displayRecentSymbols(value?: string) {
   if (!value) return "거래 없음";
   return value.replace(/([A-Z0-9-]{1,12})\.(?:O|K|N|P|A)\b/gi, "$1");
@@ -839,8 +853,8 @@ export default function TradingDashboard(){
   const rememberInstrument=(instrument:Instrument)=>{const normalized:Instrument={market:instrument.market,symbol:instrument.symbol,name:instrument.name,exchange:instrument.exchange,currency:instrument.currency};setLastViewedMarket(normalized.market);setLastViewed(current=>{const next={...current,[normalized.market]:normalized};persistLastViewed(normalized.market,next);return next;});};
   const restoreRemembered=(next:Market)=>{const remembered=lastViewed[next];if(!remembered?.symbol||!remembered.name)return false;setSelected(quoteFromInstrument(remembered));return true;};
   const openMarketView=()=>{const next=lastViewed[lastViewedMarket]?.symbol?lastViewedMarket:selected.market;if(next!==market)setMarketSession(LOADING_MARKET_SESSION);setMarket(next);setMarketTab(next);restoreRemembered(next);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
-  const chooseInstrument=(instrument:Instrument)=>{if(instrument.market!==market)setMarketSession(LOADING_MARKET_SESSION);rememberInstrument(instrument);setMarket(instrument.market);setMarketTab(instrument.market);setSelected(quoteFromInstrument(instrument));setView("market");window.scrollTo({top:0,behavior:"smooth"});};
-  useEffect(()=>{const onOpenInstrument=(event:Event)=>{const detail=(event as CustomEvent<Instrument>).detail;if(!detail||!["KR","US","CRYPTO"].includes(detail.market)||!detail.symbol||!detail.name||!detail.exchange||!["KRW","USD"].includes(detail.currency))return;const normalized:Instrument={market:detail.market,symbol:detail.symbol,name:detail.name,exchange:detail.exchange,currency:detail.currency};if(normalized.market!==market)setMarketSession(LOADING_MARKET_SESSION);setLastViewedMarket(normalized.market);setLastViewed(current=>{const next={...current,[normalized.market]:normalized};if(auth&&auth!=="loading"){try{window.localStorage.setItem(`marketmate:last-viewed:${auth.id}`,JSON.stringify({lastMarket:normalized.market,instruments:next}));}catch{}}return next;});setMarket(normalized.market);setMarketTab(normalized.market);setSelected({...normalized,price:0,change:0,rate:0,exchangeRate:1});setView("market");window.scrollTo({top:0,behavior:"smooth"});};window.addEventListener("marketmate:open-instrument",onOpenInstrument);return()=>window.removeEventListener("marketmate:open-instrument",onOpenInstrument);},[auth,market]);
+  const chooseInstrument=async(instrument:Instrument)=>{const localized=await localizeUsQuoteInstrument(instrument);if(localized.market!==market)setMarketSession(LOADING_MARKET_SESSION);rememberInstrument(localized);setMarket(localized.market);setMarketTab(localized.market);setSelected(quoteFromInstrument(localized));setView("market");window.scrollTo({top:0,behavior:"smooth"});};
+  useEffect(()=>{const onOpenInstrument=(event:Event)=>{const detail=(event as CustomEvent<Instrument>).detail;if(!detail||!["KR","US","CRYPTO"].includes(detail.market)||!detail.symbol||!detail.name||!detail.exchange||!["KRW","USD"].includes(detail.currency))return;const normalized:Instrument={market:detail.market,symbol:detail.symbol,name:detail.name,exchange:detail.exchange,currency:detail.currency};void localizeUsQuoteInstrument(normalized).then(localized=>{if(localized.market!==market)setMarketSession(LOADING_MARKET_SESSION);setLastViewedMarket(localized.market);setLastViewed(current=>{const next={...current,[localized.market]:localized};if(auth&&auth!=="loading"){try{window.localStorage.setItem(`marketmate:last-viewed:${auth.id}`,JSON.stringify({lastMarket:localized.market,instruments:next}));}catch{}}return next;});setMarket(localized.market);setMarketTab(localized.market);setSelected({...localized,price:0,change:0,rate:0,exchangeRate:1});setView("market");window.scrollTo({top:0,behavior:"smooth"});});};window.addEventListener("marketmate:open-instrument",onOpenInstrument);return()=>window.removeEventListener("marketmate:open-instrument",onOpenInstrument);},[auth,market]);
   const changeMarket=(next:Market)=>{if(next!==market)setMarketSession(LOADING_MARKET_SESSION);setMarket(next);setMarketTab(next);if(!restoreRemembered(next)&&selected.market!==next)setSelected(DEFAULTS[next]);setLastViewedMarket(next);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
   const openIndexView=(id:MarketIndexId)=>{setSelectedIndexId(id);setIndexDetail(current=>current?.id===id?current:null);setIndexStatus("loading");setMarketTab("INDEX");setView("market");window.scrollTo({top:0,behavior:"smooth"});};
   const openBitcoinView=()=>{if(market!=="CRYPTO")setMarketSession(LOADING_MARKET_SESSION);setQuoteStatus("loading");setMarket("CRYPTO");setMarketTab("CRYPTO");setSelected(DEFAULTS.CRYPTO);setView("market");window.scrollTo({top:0,behavior:"smooth"});};
