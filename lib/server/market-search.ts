@@ -4,7 +4,7 @@ import { classifySupportedNation, hasUnsupportedForeignReutersSuffix, normalizeS
 import { buildNaverPath, naverJson } from "@/lib/server/naver-stock";
 import { looksLikeCaseSensitiveReutersCode, normalizeNaverMarketSymbol, normalizeNaverReutersCode, usSearchTickerCore } from "@/lib/server/naver-symbol";
 import { getUsListingExchange, usExchangeFromReutersCode } from "@/lib/server/us-listing-exchange";
-import type { Market, SearchInstrument } from "@/lib/server/market-data";
+import { resolveReutersCode, type Market, type SearchInstrument } from "@/lib/server/market-data";
 
 
 const HANGUL_INITIALS = ["ᄀ","ᄁ","ᄂ","ᄃ","ᄄ","ᄅ","ᄆ","ᄇ","ᄈ","ᄉ","ᄊ","ᄋ","ᄌ","ᄍ","ᄎ","ᄏ","ᄐ","ᄑ","ᄒ"] as const;
@@ -17,6 +17,7 @@ const MARKET_INITIAL_PAGE_SIZE = 200;
 const CRYPTO_INITIAL_PAGE_SIZE = 100;
 const MARKET_INITIAL_MAX_PAGES = 20;
 const MARKET_INITIAL_CATALOG_TTL_MS = 6 * 60 * 60_000;
+const US_DISPLAY_NAME_TTL_MS = 6 * 60 * 60_000;
 
 type DomesticInitialCatalog = { instruments: SearchInstrument[]; stale: boolean };
 let domesticInitialCatalogCache: (DomesticInitialCatalog & { expiresAt: number }) | null = null;
@@ -25,6 +26,7 @@ const domesticInitialQueryCache = new Map<string, { expiresAt: number; instrumen
 type InitialMarketCatalog = { instruments: SearchInstrument[]; stale: boolean };
 const marketInitialCatalogCache = new Map<"US" | "CRYPTO", InitialMarketCatalog & { expiresAt: number }>();
 const marketInitialCatalogInflight = new Map<"US" | "CRYPTO", Promise<InitialMarketCatalog>>();
+const usDisplayNameCache = new Map<string, { name: string; expiresAt: number }>();
 
 function compactSearchText(value: string) {
   return value.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("en-US");
@@ -443,6 +445,39 @@ function addSearchInstrument(output: Map<string, SearchInstrument>, item: Search
   const key = searchIdentityKey(item);
   const current = output.get(key);
   output.set(key, current ? mergeSearchInstrument(current, item) : item);
+}
+
+function koreanUsNameFromPayload(payload: unknown) {
+  for (const record of collect(payload)) {
+    const name = text(record, [
+      "stockNameKo", "stockNameKor", "koreanCodeName", "koreanName", "localName",
+      "itemName", "stockName", "name",
+    ]);
+    if (/[가-힣]/.test(name)) return name;
+  }
+  return "";
+}
+
+export async function resolveUsDisplayName(symbol: string, exchange: string, fallbackName: string) {
+  const ticker = usSearchTickerCore(symbol);
+  if (!ticker) return fallbackName;
+  const cacheKey = `${ticker}:${normalizeSupportedExchange("US", exchange) || exchange}`;
+  const cached = usDisplayNameCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.name;
+
+  let name = "";
+  try {
+    const reutersCode = await resolveReutersCode(symbol, exchange);
+    const basic = await naverJson<unknown>(
+      `/api/securityService/stock/${encodeURIComponent(reutersCode)}/basic`,
+      { ttlMs: US_DISPLAY_NAME_TTL_MS, staleMs: 7 * 24 * 60 * 60_000 },
+    );
+    name = koreanUsNameFromPayload(basic.data);
+  } catch {}
+
+  const resolved = name || fallbackName;
+  usDisplayNameCache.set(cacheKey, { name: resolved, expiresAt: Date.now() + US_DISPLAY_NAME_TTL_MS });
+  return resolved;
 }
 
 function collect(value: unknown, depth = 0, output: Array<Record<string, unknown>> = []) {
