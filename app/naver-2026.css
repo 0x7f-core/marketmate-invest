@@ -32,6 +32,7 @@ body{background:#eef1f4;color:var(--mm-ink);font-family:Arial,"Noto Sans KR",san
 .marketmate-v2 .search-results{inset:calc(100% + 8px) 0 auto;border-color:#dfe3e6;border-radius:12px;box-shadow:0 16px 40px rgba(15,23,42,.14)}
 .marketmate-v2 .search-results button{min-height:62px;padding:10px 14px}
 .marketmate-v2 .np-head-actions{gap:9px;font-size:12px}
+.marketmate-v2 .account-settings-trigger{border:1px solid #dfe3e6;border-radius:6px;background:#f5f6f7;color:#59616a;padding:5px 8px}
 .marketmate-v2 .np-desktop-header>nav{width:min(100% - 48px,1360px);max-width:none;height:53px;padding:0;gap:36px;border-top:1px solid #f1f2f3}
 .marketmate-v2 .np-desktop-header>nav button{font-size:16px;font-weight:700;color:#555c64}
 .marketmate-v2 .np-desktop-header>nav button.active{color:#111;font-weight:900}
