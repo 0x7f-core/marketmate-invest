@@ -22,7 +22,6 @@
 .marketmate-v2 .np-desktop-header{background:#fff;border-bottom:1px solid var(--np-line)}
 .marketmate-v2 .np-head{max-width:1280px;height:76px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:220px minmax(380px,540px) 1fr;align-items:center;gap:28px}
 .marketmate-v2 .np-brand{border:0;background:transparent;padding:0;display:flex;align-items:center;gap:10px;color:var(--np-text)}
-.marketmate-v2 .np-brand>span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--np-green);color:#fff;font-size:11px;font-weight:900}
 .marketmate-v2 .np-brand>b{font-size:21px;letter-spacing:-.055em}
 .marketmate-v2 .search-wrap{height:46px;border:2px solid var(--np-green);border-radius:9px;padding:0 14px;box-shadow:none}
 .marketmate-v2 .search-wrap>svg{color:var(--np-green);width:20px}
@@ -131,7 +130,6 @@
   .marketmate-v2 .np-desktop-header{display:none}
   .marketmate-v2 .np-mobile-header{display:block;background:#fff;border-bottom:1px solid var(--np-line);position:relative;z-index:20}
   .marketmate-v2 .np-mobile-header>div:first-child{height:52px;padding:0 16px;display:flex;align-items:center;justify-content:space-between}
-  .marketmate-v2 .np-mobile-header .np-brand>span{width:28px;height:28px;font-size:9px}
   .marketmate-v2 .np-mobile-header .np-brand>b{font-size:18px}
   .marketmate-v2 .np-mobile-header>div:first-child>button:last-child{border:0;background:none;color:#333d4b;padding:6px}
   .marketmate-v2 .np-mobile-header>div:first-child>button:last-child svg{width:20px}
