@@ -315,6 +315,19 @@ async function isNxtPremarket() {
   }
 }
 
+async function isNxtPopularDisplayWindow() {
+  try {
+    const session = await getCheckedMarketSession("KR", "NXT");
+    // Naver keeps the NXT popularity list during the 08:50~09:00
+    // premarket closing/break window even though orders are not accepted.
+    return !session.stale
+      && session.exchange?.toUpperCase() === "NXT"
+      && (session.currentSession === "preMarket" || session.currentSession === "preMarketClosing");
+  } catch {
+    return false;
+  }
+}
+
 async function domesticRanking(category: RankingCategory) {
   const nxtPremarket = await isNxtPremarket();
   const aggregateTrading = category === "tradingValue" || category === "volume";
@@ -407,7 +420,7 @@ async function legacyPopular(market: PopularStockMarket) {
 }
 
 export async function getPopularStocks(market: PopularStockMarket): Promise<PopularStocksResult> {
-  const nxtPremarket = market === "KR" ? await isNxtPremarket() : false;
+  const nxtPremarket = market === "KR" ? await isNxtPopularDisplayWindow() : false;
   let result = await popularAggregate(market, nxtPremarket);
   let rows = aggregatePopularRows(result.data, market, nxtPremarket);
   let normalized = uniqueItems(market, rows.length ? rows : result.data);
